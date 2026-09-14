@@ -1,0 +1,9 @@
+.env
+.env.production
+.mcp-registry-keys/
+.tools/
+.venv/
+data/
+__pycache__/
+*.pyc
+.pytest_cache/

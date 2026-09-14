@@ -1,0 +1,21 @@
+services:
+  x402:
+    build: .
+    image: x402-app:latest
+    container_name: x402-app
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - x402_net
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    ports:
+      - "127.0.0.1:18402:8000"
+
+networks:
+  x402_net:
+    external: true

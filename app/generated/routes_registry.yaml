@@ -1,0 +1,6 @@
+# Registre des routes générées par l'usine (Prospecteur/Ouvrier/Crieur).
+# Vide au départ, volontairement : aucune route de démonstration n'est
+# fabriquée par le chantier d'infrastructure lui-même - seule une vraie
+# session Prospecteur/Ouvrier/Crieur, partant d'une intention réelle, ajoute
+# une entrée ici. Voir usine/README.md pour le format et le workflow.
+routes: []

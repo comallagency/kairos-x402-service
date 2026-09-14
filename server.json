@@ -1,0 +1,14 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "world.agentindex/x402",
+  "title": "AgentIndex x402",
+  "description": "Pay-per-call web search, translation and research jobs for AI agents. USDC on Base, no account.",
+  "version": "1.0.0",
+  "websiteUrl": "https://x402.agentindex.world/openapi.json",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://x402.agentindex.world/mcp/"
+    }
+  ]
+}

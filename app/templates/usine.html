@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentIndex x402 — usine</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0b0d11;
+    --card: #151920;
+    --border: #262b34;
+    --text: #e7eaee;
+    --muted: #8b93a1;
+    --accent: #5ee6a8;
+    --warn: #e6b95e;
+    --bad: #e65e5e;
+    --prospecteur: #6ea8fe;
+    --ouvrier: #d9a441;
+    --controleur: #e6b95e;
+    --crieur: #5ecde6;
+    --comptable: #5ee6a8;
+    --fossoyeur: #e65e5e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f6f8; --card: #ffffff; --border: #e2e5ea;
+      --text: #1b1f27; --muted: #5b6472;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 24px;
+  }
+  a { color: var(--accent); }
+  h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 4px; }
+  h2 { font-size: 0.85rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 12px; }
+  .sub { color: var(--muted); font-size: 0.85rem; }
+  .crumbs { font-size: 0.9rem; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .crumbs a { color: var(--accent); text-decoration: none; }
+  .crumbs a:hover { text-decoration: underline; }
+  .crumbs .current { color: var(--text); font-weight: 600; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 16px; }
+  .settlements { text-align: right; }
+  .settlements .n { font-size: 2.6rem; font-weight: 700; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .settlements .k { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: .04em; }
+
+  .agents { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; margin-bottom: 28px; }
+  .agent-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; border-top: 3px solid var(--dot); }
+  .agent-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .agent-head svg { width: 20px; height: 20px; color: var(--dot); flex-shrink: 0; }
+  .agent-name { font-weight: 600; font-size: 0.95rem; }
+  .agent-role { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: .03em; margin-left: auto; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+  .dot.green { background: var(--accent); }
+  .dot.amber { background: var(--warn); }
+  .dot.red { background: var(--bad); }
+  .agent-meta { color: var(--muted); font-size: 0.75rem; margin-bottom: 6px; }
+  .agent-summary { font-size: 0.82rem; line-height: 1.4; margin-bottom: 8px; }
+  .agent-counters { display: flex; gap: 10px; flex-wrap: wrap; font-size: 0.72rem; color: var(--muted); }
+  .agent-counters b { color: var(--text); }
+  .agent-btn { margin-top: 10px; width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: transparent; color: var(--text); font-size: 0.78rem; cursor: pointer; font-family: inherit; }
+  .agent-btn:hover:not(:disabled) { border-color: var(--dot); color: var(--dot); }
+  .agent-btn:disabled { color: var(--muted); cursor: default; opacity: 0.7; }
+
+  .funnel { display: flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 28px; }
+  .funnel-step { flex: 1; padding: 14px; text-align: center; border-right: 1px solid var(--border); background: var(--card); }
+  .funnel-step:last-child { border-right: none; }
+  .funnel-step .n { font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .funnel-step .k { color: var(--muted); font-size: 0.7rem; margin-top: 2px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .03em; cursor: pointer; }
+  tr.condamnee { background: color-mix(in srgb, var(--bad) 10%, transparent); }
+  tr.sursis { background: color-mix(in srgb, var(--warn) 8%, transparent); }
+  tr.desactivee { opacity: 0.55; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 0.7rem; }
+  .pill.green { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+  .pill.red { background: color-mix(in srgb, var(--bad) 20%, transparent); color: var(--bad); }
+  .pill.amber { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+  .pill.muted { background: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--muted); }
+  .approve-btn { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--accent); background: transparent;
+    color: var(--accent); font-size: 0.75rem; cursor: pointer; font-family: inherit; }
+  .approve-btn:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+  .journal-row { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.8rem; display: flex; gap: 10px; }
+  .journal-row:last-child { border-bottom: none; }
+  .journal-ts { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .journal-agent { font-weight: 600; white-space: nowrap; }
+  .journal-detail { color: var(--text); }
+  .empty { color: var(--muted); font-size: 0.85rem; padding: 20px 0; text-align: center; }
+  .pc-status { display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 0.8rem;
+    color: var(--muted); padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+    margin-bottom: 20px; flex-wrap: wrap; line-height: 1.6; }
+  .pc-status b { color: var(--text); }
+  .pc-status .pc-btn { width: auto; margin: 0; flex-shrink: 0; }
+
+  .loop-status { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 16px 18px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px;
+    background: var(--card); flex-wrap: wrap; }
+  .loop-status .loop-info { line-height: 1.7; }
+  .loop-status .loop-title { font-size: 1rem; font-weight: 700; }
+  .loop-status .loop-title.running { color: var(--accent); }
+  .loop-status .loop-title.stopped { color: var(--muted); }
+  .loop-status .loop-title.drift { color: var(--bad); }
+  .loop-status .loop-sub { color: var(--muted); font-size: 0.8rem; }
+  .loop-status .loop-reason { color: var(--bad); font-size: 0.82rem; font-weight: 600; margin-top: 2px; }
+  .loop-btn { padding: 10px 20px; border-radius: 8px; border: none; font-size: 0.9rem; font-weight: 600;
+    cursor: pointer; font-family: inherit; flex-shrink: 0; }
+  .loop-btn.start { background: var(--accent); color: #04140c; }
+  .loop-btn.stop { background: var(--bad); color: #1a0505; }
+  .loop-btn:disabled { opacity: 0.6; cursor: default; }
+
+  .billing-alert { background: var(--bad); color: #1a0505; border-radius: 10px; padding: 14px 18px;
+    margin-bottom: 20px; font-size: 0.9rem; line-height: 1.5; }
+  .billing-alert b { font-weight: 700; }
+  .billing-alert .title { font-weight: 700; font-size: 1rem; margin-bottom: 4px; }
+  .billing-alert ul { margin: 6px 0 0; padding-left: 20px; }
+  .pill.billing { background: color-mix(in srgb, var(--bad) 35%, transparent); color: var(--bad); font-weight: 700; margin-left: 6px; }
+</style>
+</head>
+<body>
+
+<nav class="crumbs"><a href="/admin">Admin</a> · <a href="/admin/live">Poste d'écoute</a> · <span class="current">Usine</span></nav>
+
+<div class="billing-alert" id="billing-alert" style="display:none"></div>
+
+<div class="loop-status" id="loop-status"></div>
+
+<div class="pc-status" id="pc-status"></div>
+
+<div class="top">
+  <div>
+    <h1>AgentIndex x402 — usine</h1>
+    <div class="sub">
+      rafraîchi toutes les 60s · mis à jour : <span id="updated-at">—</span>
+    </div>
+  </div>
+  <div class="settlements">
+    <div class="n" id="settlements-n">—</div>
+    <div class="k">règlements tentés</div>
+  </div>
+</div>
+
+<h2>Les six agents</h2>
+<div class="agents" id="agents"></div>
+
+<h2>Chaîne de production</h2>
+<div class="funnel" id="funnel"></div>
+
+<h2>Routes</h2>
+<section>
+  <table id="routes-table">
+    <thead>
+      <tr>
+        <th>Route</th><th>Intention</th><th>Âge</th><th>Prix</th>
+        <th>Contrôleur</th><th>Appels payés</th><th>Acheteurs</th>
+        <th>Retour</th><th>État</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div class="empty" id="routes-empty" style="display:none">Aucune route pour l'instant.</div>
+</section>
+
+<h2>Propositions <span style="text-transform:none;font-weight:400;">— point d'arrêt entre Prospecteur et Ouvrier</span></h2>
+<section>
+  <table id="proposals-table">
+    <thead>
+      <tr>
+        <th>Intention</th><th>Source</th><th>Routes est.</th><th>Statut</th><th>Proposée le</th><th></th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div class="empty" id="proposals-empty" style="display:none">Aucune proposition pour l'instant.</div>
+</section>
+
+<h2>Bloquées (budget) <span style="text-transform:none;font-weight:400;">— amont payant, hors de portée d'Ouvrier sans action de l'opérateur</span></h2>
+<section>
+  <table id="blocked-proposals-table">
+    <thead>
+      <tr>
+        <th>Intention</th><th>Source</th><th>Raison</th><th>Proposée le</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div class="empty" id="blocked-proposals-empty" style="display:none">Aucune proposition bloquée pour l'instant.</div>
+</section>
+
+<h2>Visibilité réelle <span style="text-transform:none;font-weight:400;">— indexé par un catalogue externe, pas juste "inscription réussie"</span></h2>
+<section>
+  <table id="index-visibility-table">
+    <thead>
+      <tr><th>Catalogue</th><th>Requête</th><th>Statut</th><th>Vérifié le</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div class="empty" id="index-visibility-empty" style="display:none">Aucune vérification pour l'instant.</div>
+</section>
+
+<h2>Journal</h2>
+<section id="journal-section">
+  <div id="journal"></div>
+  <div class="empty" id="journal-empty" style="display:none">Rien à journaliser pour l'instant.</div>
+</section>
+
+<script>
+const ICONS = {
+  prospecteur: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><line x1="21" y1="21" x2="15" y2="15"/></svg>',
+  ouvrier: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94L6 21l-3-3 8.5-8.5a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+  controleur: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>',
+  crieur: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11v3a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15 8a4 4 0 0 1 0 8"/><path d="M18 5a8 8 0 0 1 0 14"/></svg>',
+  comptable: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="1"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>',
+  fossoyeur: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21l6-6"/><path d="M13 3l8 8-3 3-8-8z"/><path d="M9 9l6 6"/><path d="M5 15l4 4-3 3-4-4z"/></svg>',
+};
+const DOT = { mechanical: 'green', judgment: 'amber' };
+const MANUAL_COOLDOWN_S = 300;
+let lastData = null;
+
+const esc = s => String(s ?? '').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+const fmtDate = iso => iso ? new Date(iso).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'jamais';
+const pct = n => `${Math.round((n || 0) * 100)}%`;
+const fmtElapsed = s => s < 60 ? `${Math.round(s)}s` : `${Math.round(s / 60)} min`;
+
+function manualButtonState(manual) {
+  if (!manual) return { enabled: true, label: 'Lancer' };
+  const elapsedS = (Date.now() - new Date(manual.started_at).getTime()) / 1000;
+  if (manual.status === 'running' || manual.status === 'requested') {
+    return { enabled: false, label: `en cours (${fmtElapsed(elapsedS)})` };
+  }
+  const remaining = MANUAL_COOLDOWN_S - elapsedS;
+  if (remaining > 0) return { enabled: false, label: `patientez ${Math.ceil(remaining)}s` };
+  return { enabled: true, label: 'Lancer' };
+}
+
+function routesSummary(routes) {
+  const generated = routes.filter(r => r.born_at);
+  if (!generated.length) return "aucune route générée pour l'instant (le registre est vide)";
+  return generated.map(r => `/${r.slug} (${r.state}, ${r.payments} paiement(s))`).join(', ');
+}
+
+function proposalsSummary(proposals, status) {
+  const filtered = status ? proposals.filter(p => p.status === status) : proposals;
+  if (!filtered.length) return status ? `aucune au statut ${status}` : 'aucune';
+  return filtered.map(p => `#${p.id} ${p.intention} (${p.status}, source: ${p.source || '?'}, ~${p.estimated_routes ?? '?'} route(s))`).join(' ; ');
+}
+
+const PROMPT_BUILDERS = {
+  prospecteur: (data, agent) => `Tu es Prospecteur pour l'usine à endpoints x402 (~/dev/clients/agentindex-x402).
+Lis et applique usine/prospecteur.md.
+
+État actuel du registre : ${routesSummary(data.routes)}.
+Propositions déjà enregistrées : ${proposalsSummary(data.proposals)}.
+Dernier run de Prospecteur : ${fmtDate(agent.last_run)}.
+Règlements tentés au total : ${data.settlement_attempts_total}.
+
+Trouve une ou plusieurs sources amont non emballées ou intentions mal servies -
+pas déjà proposées ci-dessus. Pour CHACUNE, authentifie-toi en Basic Auth avec
+les identifiants de .env.production (racine du dépôt) et enregistre-la :
+  curl -s -u <user>:<pass> -X POST ${location.origin}/admin/usine/proposals \\
+    -H 'Content-Type: application/json' \\
+    -d '{"intention":"...","source":"...","estimated_routes":N,"rationale":"...",
+         "demand_evidence":{"offer_keyword":"...","offer_count":N,"demand_signal":N,"demand_source":"...",
+           "upstream_requirements":{"source_name":"...","requires_key":false,"requires_account":false,
+             "requires_payment":false,"free_access":true}}}'
+\`demand_evidence\` (avec \`upstream_requirements\` imbriqué) est obligatoire
+(l'API refuse la proposition sans lui, 422) - voir "Le paiement, pas le
+volume" et "Ne proposer que du constructible" de prospecteur.md. PRIORITÉ
+AUX SOURCES LIBRES (sans clé, sans compte, sans abonnement) : une proposition
+avec \`requires_payment\` vrai est enregistrée \`bloquée_budget\` au lieu
+d'\`approuvée\`, automatiquement - Ouvrier ne peut pas la construire seul.
+Soigne aussi \`rationale\`, c'est la trace lisible en prose de pourquoi elle
+a été retenue.`,
+  ouvrier: (data, agent) => `Tu es Ouvrier pour l'usine à endpoints x402 (~/dev/clients/agentindex-x402).
+Lis et applique usine/ouvrier.md.
+
+Routes vivantes actuelles : ${routesSummary(data.routes)}.
+Propositions APPROUVÉES à construire : ${proposalsSummary(data.proposals, 'approuvée')}.
+Dernier run d'Ouvrier : ${fmtDate(agent.last_run)}.
+
+Ne construis QUE les propositions listées ci-dessus (statut approuvée,
+automatique depuis le 2026-09-06). S'il n'y en a aucune, ne construis rien et
+arrête-toi là. Pour chacune : écris l'entrée dans
+app/generated/routes_registry.yaml, teste en local, déploie, puis ferme la
+proposition (identifiants dans .env.production). Le Contrôleur reste le seul
+verrou de publication, jamais contourné :
+  curl -s -u <user>:<pass> -X POST ${location.origin}/admin/usine/proposals/<id>/close`,
+  crieur: (data, agent) => {
+    const controleur = data.agents.find(a => a.id === 'controleur');
+    return `Tu es Crieur pour l'usine à endpoints x402 (~/dev/clients/agentindex-x402).
+Lis et applique usine/crieur.md.
+
+Routes vivantes actuelles : ${routesSummary(data.routes)}.
+Dernier run de Contrôleur : ${fmtDate(controleur ? controleur.last_run : null)} (${controleur ? controleur.summary : 'inconnu'}).
+Dernier run de Crieur : ${fmtDate(agent.last_run)}.
+
+Verrouille avec le Contrôleur (docker compose run --rm x402 python -m scripts.controleur --route <slug>) avant toute inscription, puis npx agentcash register et vérifie l'indexation.`;
+  },
+};
+
+async function approveProposal(id, btn) {
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = '…';
+  try {
+    const res = await fetch(`/admin/usine/proposals/${id}/approve`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(data.error || `échec (${res.status})`); btn.disabled = false; btn.textContent = original; }
+  } catch (e) {
+    alert('échec: ' + e);
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+  refresh();
+}
+
+async function runAgent(role, btn) {
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = 'lancement…';
+  try {
+    const res = await fetch(`/admin/usine/run/${role}`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) alert(data.error || `échec du lancement (${res.status})`);
+  } catch (e) {
+    alert('échec du lancement: ' + e);
+  }
+  refresh();
+}
+
+async function copyPrompt(role, btn) {
+  if (!lastData) return;
+  const agent = lastData.agents.find(a => a.id === role);
+  const prompt = PROMPT_BUILDERS[role](lastData, agent);
+  const original = btn.textContent;
+  try {
+    await navigator.clipboard.writeText(prompt);
+    btn.textContent = 'copié !';
+  } catch (e) {
+    window.prompt('Copie manuelle (Ctrl+C) :', prompt);
+  }
+  setTimeout(() => { btn.textContent = original; }, 2000);
+}
+
+function renderAgents(agents) {
+  const box = document.getElementById('agents');
+  box.innerHTML = agents.map(a => {
+    const color = `var(--${a.id})`;
+    const dotClass = a.last_run ? DOT[a.role] : 'red';
+    const counters = a.counters
+      ? Object.entries(a.counters).map(([k, v]) => `<span><b>${v}</b> ${esc(k)}</span>`).join('')
+      : '';
+    let button = '';
+    if (a.role === 'mechanical') {
+      const state = manualButtonState(a.manual);
+      button = `<button class="agent-btn" ${state.enabled ? '' : 'disabled'} onclick="runAgent('${a.id}', this)">${esc(state.label)}</button>`;
+    } else {
+      const loopRunning = lastData && lastData.loop && lastData.loop.status === 'running';
+      const pcState = loopRunning
+        ? { enabled: false, label: 'boucle en cours' }
+        : pcButtonState(lastData && lastData.pc_request, lastData && lastData.pc_listener);
+      const label = pcState.label || 'Lancer';
+      button = `<button class="agent-btn" ${pcState.enabled ? '' : 'disabled'} onclick="runAgent('${a.id}', this)">${esc(label)}</button>
+      <button class="agent-btn" onclick="copyPrompt('${a.id}', this)">Copier le prompt</button>`;
+    }
+    return `<div class="agent-card" style="--dot:${color}">
+      <div class="agent-head">
+        ${ICONS[a.id] || ''}
+        <span class="agent-name">${esc(a.label)}</span>
+        <span class="agent-role">${a.role === 'mechanical' ? 'mécanique' : 'jugement'}</span>
+      </div>
+      <div class="agent-meta"><span class="dot ${dotClass}"></span>${fmtDate(a.last_run)}</div>
+      <div class="agent-summary">${esc(a.summary)}</div>
+      <div class="agent-counters">${counters}</div>
+      ${button}
+    </div>`;
+  }).join('');
+}
+
+function renderFunnel(funnel) {
+  document.getElementById('funnel').innerHTML = funnel.map(f =>
+    `<div class="funnel-step"><div class="n">${f.count ?? '—'}</div><div class="k">${esc(f.stage)}</div></div>`
+  ).join('');
+}
+
+function renderRoutes(routes) {
+  const tbody = document.querySelector('#routes-table tbody');
+  document.getElementById('routes-empty').style.display = routes.length ? 'none' : 'block';
+  tbody.innerHTML = routes.map(r => {
+    const disabled = r.state === 'désactivée';
+    const rowClass = disabled ? 'desactivee' : r.state === 'condamnée' ? 'condamnee' : (r.state === 'en sursis' ? 'sursis' : '');
+    const stateLabel = disabled ? 'désactivée'
+      : r.state === 'condamnée' ? 'condamnée'
+      : r.state === 'en sursis' ? `en sursis (J-${r.condemned_in_days})`
+      : 'vivante';
+    const controleurCell = disabled
+      ? '<span class="pill muted">désactivée</span>'
+      : `<span class="pill ${r.green ? 'green' : 'red'}">${r.green ? 'vert' : 'rouge'}</span>${r.billing_without_delivery ? '<span class="pill billing">facture sans livrer</span>' : ''}`;
+    return `<tr class="${rowClass}">
+      <td><code>/${esc(r.slug)}</code></td>
+      <td>${esc(r.intention)}</td>
+      <td>${r.age_days ?? '—'} j</td>
+      <td>${esc(r.price)}</td>
+      <td>${controleurCell}</td>
+      <td>${r.payments}</td>
+      <td>${r.distinct_buyers}</td>
+      <td>${pct(r.return_rate)}</td>
+      <td>${stateLabel}</td>
+    </tr>`;
+  }).join('');
+}
+
+const PC_RESULT_LABEL = { ok: 'terminé sans erreur', partial: 'terminé avec au moins un échec', error: 'échec' };
+const PC_RESULT_DOT = { ok: 'green', partial: 'amber', error: 'red' };
+
+// Un seul verrou global : pipeline et les 3 rôles de jugement partagent la
+// même session PC et ne doivent jamais tourner en même temps (voir
+// db.latest_pc_request() côté serveur) - donc le même état de bouton
+// s'applique aux 4 déclencheurs.
+function pcButtonState(pcRequest, pcListener) {
+  if (pcRequest && (pcRequest.status === 'requested' || pcRequest.status === 'running')) {
+    if (pcRequest.status === 'requested' && pcListener && !pcListener.connected) {
+      return { enabled: false, label: 'en attente (PC injoignable)' };
+    }
+    return { enabled: false, label: pcRequest.status === 'requested' ? 'demandé…' : 'en cours…' };
+  }
+  return { enabled: true, label: null };
+}
+
+function fmtDuration(startIso) {
+  const ms = Date.now() - new Date(startIso).getTime();
+  const totalMin = Math.max(0, Math.floor(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h ${m}min` : `${m}min`;
+}
+
+function renderLoopStatus(loop, pcListener, pcRequest) {
+  const box = document.getElementById('loop-status');
+  const running = loop && loop.status === 'running';
+  const isDrift = !running && loop && loop.stop_reason && !loop.stop_reason.startsWith('arrêt manuel');
+  const titleClass = running ? 'running' : (isDrift ? 'drift' : 'stopped');
+  const title = running
+    ? `Boucle en marche depuis ${fmtDuration(loop.started_at)} — ${loop.cycle_count} cycle(s)`
+    : 'Boucle arrêtée';
+  const subHtml = running && loop.last_cycle_at
+    ? `<div class="loop-sub">dernier cycle : ${fmtDate(loop.last_cycle_at)}</div>`
+    : '';
+  const reasonHtml = (!running && loop && loop.stop_reason)
+    ? `<div class="loop-reason">Dernier arrêt : ${esc(loop.stop_reason)}</div>`
+    : '';
+
+  const pcState = pcButtonState(pcRequest, pcListener);
+  const btnHtml = !pcState.enabled
+    ? `<button class="loop-btn ${running ? 'stop' : 'start'}" disabled>${esc(pcState.label)}</button>`
+    : running
+      ? `<button class="loop-btn stop" onclick="runAgent('loop_stop', this)">Arrêter</button>`
+      : `<button class="loop-btn start" onclick="runAgent('loop_start', this)">Lancer la boucle</button>`;
+
+  box.innerHTML = `<div class="loop-info">
+      <div class="loop-title ${titleClass}">${esc(title)}</div>
+      ${subHtml}
+      ${reasonHtml}
+    </div>
+    ${btnHtml}`;
+}
+
+function renderPcStatus(pc, pcListener, pcRequest, loopRunning) {
+  const box = document.getElementById('pc-status');
+  const state = loopRunning
+    ? { enabled: false, label: 'géré par la boucle' }
+    : pcButtonState(pcRequest, pcListener);
+  const btnHtml = `<button class="agent-btn pc-btn" ${state.enabled ? '' : 'disabled'} onclick="runAgent('pipeline', this)">${esc(state.label || 'Lancer le pipeline')}</button>`;
+
+  const listenerConnected = pcListener && pcListener.connected;
+  const listenerLabel = listenerConnected
+    ? `écouteur PC connecté (dernier contact ${fmtDate(pcListener.last_seen_at)})`
+    : (pcListener && pcListener.last_seen_at)
+      ? `écouteur PC non connecté (dernier contact ${fmtDate(pcListener.last_seen_at)})`
+      : 'écouteur PC jamais contacté (tâche planifiée de 05:00 et raccourci Bureau restent disponibles)';
+
+  let pipelineInfo;
+  if (!pc) {
+    pipelineInfo = `<span class="dot red"></span> aucun run rapporté pour l'instant`;
+  } else {
+    const taskLabel = pc.task_active === true ? 'active' : pc.task_active === false ? 'désactivée' : 'inconnue';
+    pipelineInfo = `<span class="dot ${PC_RESULT_DOT[pc.result] || 'muted'}"></span>
+      dernier run <b>${fmtDate(pc.reported_at)}</b> - ${esc(PC_RESULT_LABEL[pc.result] || pc.result)}
+      · tâche planifiée <b>${taskLabel}</b>`;
+  }
+
+  box.innerHTML = `<div>
+      Pipeline PC : ${pipelineInfo}<br>
+      <span class="dot ${listenerConnected ? 'green' : 'red'}"></span> ${esc(listenerLabel)}
+    </div>
+    ${btnHtml}`;
+}
+
+const PROPOSAL_PILL = { 'proposée': 'amber', 'approuvée': 'green', 'traitée': 'muted', 'rejetée': 'red', 'bloquée_budget': 'red' };
+
+function renderProposals(proposals) {
+  // bloquée_budget a sa propre section (voir renderBlockedProposals) - ne
+  // jamais la mélanger à cette table, sinon elle redevient indiscernable
+  // d'une proposition prête à construire, exactement le bug qui a laissé
+  // #6/#7 en attente indéfiniment.
+  const visible = proposals.filter(p => p.status !== 'bloquée_budget');
+  const tbody = document.querySelector('#proposals-table tbody');
+  document.getElementById('proposals-empty').style.display = visible.length ? 'none' : 'block';
+  tbody.innerHTML = visible.map(p => {
+    const action = p.status === 'proposée'
+      ? `<button class="approve-btn" onclick="approveProposal(${p.id}, this)">Approuver</button>`
+      : '';
+    return `<tr>
+      <td>${esc(p.intention)}</td>
+      <td>${esc(p.source || '—')}</td>
+      <td>${p.estimated_routes ?? '—'}</td>
+      <td><span class="pill ${PROPOSAL_PILL[p.status] || 'muted'}">${esc(p.status)}</span></td>
+      <td>${fmtDate(p.proposed_at)}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
+
+  const blocked = proposals.filter(p => p.status === 'bloquée_budget');
+  const blockedTbody = document.querySelector('#blocked-proposals-table tbody');
+  document.getElementById('blocked-proposals-empty').style.display = blocked.length ? 'none' : 'block';
+  blockedTbody.innerHTML = blocked.map(p => `<tr>
+      <td>${esc(p.intention)}</td>
+      <td>${esc(p.source || '—')}</td>
+      <td>${esc(p.block_reason || '—')}</td>
+      <td>${fmtDate(p.proposed_at)}</td>
+    </tr>`).join('');
+}
+
+function renderIndexVisibility(checks) {
+  const tbody = document.querySelector('#index-visibility-table tbody');
+  document.getElementById('index-visibility-empty').style.display = checks.length ? 'none' : 'block';
+  tbody.innerHTML = checks.map(c => `<tr>
+      <td>${esc(c.catalog)}</td>
+      <td>${esc(c.query)}</td>
+      <td><span class="pill ${c.found ? 'green' : 'red'}">${c.found ? 'indexé' : 'absent'}</span></td>
+      <td>${fmtDate(c.ts)}</td>
+    </tr>`).join('');
+}
+
+function renderBillingAlert(routes) {
+  const box = document.getElementById('billing-alert');
+  if (!routes.length) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  const items = routes.map(r => `<li><code>/${esc(r.route)}</code> — ${esc(r.detail)} (vérifié ${fmtDate(r.ts)})</li>`).join('');
+  box.innerHTML = `<div class="title">⚠ ${routes.length} route(s) facturent sans livrer</div>
+    /sample a répondu avec une erreur serveur (≥500) - le paiement est prélevé avant que la
+    route ne s'exécute, donc un acheteur sur ces routes paie pour rien tant que ce n'est pas résolu.
+    <ul>${items}</ul>`;
+}
+
+function renderJournal(journal) {
+  const box = document.getElementById('journal');
+  document.getElementById('journal-empty').style.display = journal.length ? 'none' : 'block';
+  box.innerHTML = journal.map(j => `<div class="journal-row">
+    <span class="journal-ts">${fmtDate(j.ts)}</span>
+    <span class="journal-agent" style="color:var(--${j.agent}, var(--muted))">${esc(j.agent)}</span>
+    <span class="journal-detail">${esc(j.action)}${j.route ? ' · /' + esc(j.route) : ''} — ${esc(j.detail)}</span>
+  </div>`).join('');
+}
+
+async function refresh() {
+  try {
+    const res = await fetch('/admin/usine.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    lastData = data;
+    document.getElementById('updated-at').textContent = fmtDate(data.updated_at);
+    document.getElementById('settlements-n').textContent = data.settlement_attempts_total;
+    renderBillingAlert(data.billing_without_delivery || []);
+    const loopRunning = !!(data.loop && data.loop.status === 'running');
+    renderLoopStatus(data.loop, data.pc_listener, data.pc_request);
+    renderPcStatus(data.pc_pipeline, data.pc_listener, data.pc_request, loopRunning);
+    renderAgents(data.agents);
+    renderFunnel(data.funnel);
+    renderRoutes(data.routes);
+    renderProposals(data.proposals || []);
+    renderIndexVisibility(data.index_visibility || []);
+    renderJournal(data.journal);
+  } catch (e) {
+    console.error('usine refresh failed', e);
+  }
+}
+refresh();
+setInterval(refresh, 60000);
+</script>
+</body>
+</html>

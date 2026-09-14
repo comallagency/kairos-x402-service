@@ -1,0 +1,34 @@
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+from py3langid.langid import MODEL_FILE, LanguageIdentifier
+
+from app.x402_setup import KIT_TAGS
+
+router = APIRouter()
+
+# py3langid's module-level classify() returns an unnormalized log-likelihood
+# (can be any negative number, e.g. -243.6) - useless as a "confidence" field.
+# from_model_file(..., norm_probs=True) runs the same model but actually
+# normalizes across all candidate languages, giving a real 0.0-1.0 value.
+_identifier = LanguageIdentifier.from_model_file(MODEL_FILE, norm_probs=True)
+
+DESCRIPTION = (
+    "Detect the language of a piece of text - free, no account, no payment. "
+    "The entry point to the AgentIndex content kit: once this works, four "
+    "paid routes (pdf, web-read, extract, summarize) do the same kind of "
+    "work. See GET /capabilities."
+)
+
+
+@router.get(
+    "/detect-language",
+    openapi_extra={"security": []},
+    summary="Detect the language of a piece of text - free.",
+    description=DESCRIPTION,
+    tags=KIT_TAGS + ["language detection", "free"],
+)
+async def detect_language(text: str):
+    if not text or not text.strip():
+        return JSONResponse({"error": {"reason": "missing_text"}}, status_code=400)
+    language, confidence = _identifier.classify(text)
+    return {"text": text, "language": language, "confidence": round(float(confidence), 4)}

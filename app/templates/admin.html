@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentIndex x402 — admin</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0b0d11;
+    --card: #151920;
+    --border: #262b34;
+    --text: #e7eaee;
+    --muted: #8b93a1;
+    --accent: #5ee6a8;
+    --warn: #e6b95e;
+    --bad: #e65e5e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --border: #e2e5ea;
+      --text: #1b1f27;
+      --muted: #5b6472;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 24px;
+  }
+  h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 24px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .tile {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .tile .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: .04em; }
+  .tile .value { font-size: 1.5rem; font-weight: 700; margin-top: 4px; }
+  .tile .value.small { font-size: 1.05rem; }
+  section { margin-bottom: 28px; }
+  section h2 { font-size: 0.9rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 8px 12px; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; }
+  .crumbs { font-size: 0.9rem; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .crumbs a { color: var(--accent); text-decoration: none; }
+  .crumbs a:hover { text-decoration: underline; }
+  .crumbs .current { color: var(--text); font-weight: 600; }
+  .pill.ok { background: rgba(94,230,168,.15); color: var(--accent); }
+  .pill.warn { background: rgba(230,185,94,.15); color: var(--warn); }
+  .pill.bad { background: rgba(230,94,94,.15); color: var(--bad); }
+  .muted { color: var(--muted); }
+  .excerpt { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; font-size: 0.75rem; }
+  #error-banner { display: none; background: rgba(230,94,94,.15); color: var(--bad); border: 1px solid var(--bad); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 0.85rem; }
+  #settlement-alert { display: none; background: var(--bad); color: #fff; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 0.9rem; font-weight: 600; }
+  #settlement-alert ul { margin: 6px 0 0; padding-left: 18px; font-weight: 400; font-size: 0.8rem; }
+  #testnet-section .tile { border-style: dashed; opacity: 0.8; }
+  #testnet-section h2 { color: var(--warn); }
+</style>
+</head>
+<body>
+  <nav class="crumbs"><span class="current">Admin</span> · <a href="/admin/live">Poste d'écoute</a> · <a href="/admin/usine">Usine</a></nav>
+  <h1>AgentIndex x402</h1>
+  <div class="sub">Rafraîchi toutes les 60s · réseau <strong id="network-label">—</strong> · dernière mise à jour : <span id="updated-at">—</span></div>
+  <div id="settlement-alert"></div>
+  <div id="error-banner"></div>
+
+  <div class="grid" id="revenue-tiles"></div>
+
+  <section>
+    <h2>Appels par route (24h)</h2>
+    <table id="routes-table">
+      <thead><tr><th>Route</th><th>Payés</th><th>402 non convertis</th><th>Erreurs</th><th>Capacité atteinte</th><th>Échec règlement</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <div class="grid" id="misc-tiles"></div>
+
+  <section>
+    <h2>File des jobs</h2>
+    <div class="grid" id="jobs-tiles"></div>
+  </section>
+
+  <section>
+    <h2>OpenRouter</h2>
+    <div class="grid" id="openrouter-tiles"></div>
+  </section>
+
+  <section id="testnet-section" style="display:none;">
+    <h2>⚗ Testnet (<span id="testnet-network"></span>) — hors revenu réel</h2>
+    <div class="grid" id="testnet-tiles"></div>
+  </section>
+
+  <section>
+    <h2>Derniers 402 non convertis (intentions)</h2>
+    <table id="intents-table">
+      <thead><tr><th>Heure (UTC)</th><th>Route</th><th>User-Agent</th><th>Corps</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+<script>
+function tile(label, value, opts) {
+  opts = opts || {};
+  const el = document.createElement('div');
+  el.className = 'tile';
+  el.innerHTML = `<div class="label">${label}</div><div class="value${opts.small ? ' small' : ''}">${value}</div>`;
+  return el;
+}
+
+function pct(x) {
+  if (x === null || x === undefined) return '—';
+  return (x * 100).toFixed(1) + '%';
+}
+
+function usd(x) {
+  if (x === null || x === undefined) return '—';
+  return '$' + Number(x).toFixed(2);
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+
+async function refresh() {
+  const banner = document.getElementById('error-banner');
+  try {
+    const res = await fetch('/admin/data.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    banner.style.display = 'none';
+    render(data);
+  } catch (e) {
+    banner.textContent = 'Erreur de chargement : ' + e.message;
+    banner.style.display = 'block';
+  }
+}
+
+function render(data) {
+  document.getElementById('updated-at').textContent = fmtDate(data.generated_at);
+  document.getElementById('network-label').textContent = data.network;
+
+  const alertBox = document.getElementById('settlement-alert');
+  const failures = data.payment_failures_recent || [];
+  if (failures.length) {
+    const items = failures.slice(0, 5).map(f =>
+      `<li>${fmtDate(f.ts)} — ${f.route}${f.payer ? ' — ' + f.payer : ''}${f.error_reason ? ' — ' + f.error_reason : ''}</li>`
+    ).join('');
+    alertBox.innerHTML = `⚠ ${failures.length} échec(s) de règlement dans les dernières 24h — un vrai paiement a été tenté et rejeté.<ul>${items}</ul>`;
+    alertBox.style.display = 'block';
+  } else {
+    alertBox.style.display = 'none';
+  }
+
+  const rev = document.getElementById('revenue-tiles');
+  rev.innerHTML = '';
+  rev.appendChild(tile('Revenu 24h', usd(data.revenue_usdc['24h'])));
+  rev.appendChild(tile('Revenu 7j', usd(data.revenue_usdc['7d'])));
+  rev.appendChild(tile('Revenu 30j', usd(data.revenue_usdc['30d'])));
+  rev.appendChild(tile('Acheteurs distincts', data.buyers.distinct));
+  rev.appendChild(tile('Taux de retour', pct(data.buyers.return_rate)));
+  rev.appendChild(tile('Disponibilité 7j', data.availability_7d_pct === null ? '—' : pct(data.availability_7d_pct)));
+
+  const routesBody = document.querySelector('#routes-table tbody');
+  routesBody.innerHTML = '';
+  const routes = ['search', 'translate', 'jobs'];
+  for (const r of routes) {
+    const c = data.calls_by_route[r] || {};
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r}</td><td>${c.paid || 0}</td><td>${c.unpaid || 0}</td><td>${c.error || 0}</td><td>${c.capacity_reached || 0}</td><td>${c.payment_failed || 0}</td>`;
+    routesBody.appendChild(tr);
+  }
+
+  const misc = document.getElementById('misc-tiles');
+  misc.innerHTML = '';
+  misc.appendChild(tile('Dernier paiement reçu', data.last_payment_at ? fmtDate(data.last_payment_at) : 'aucun', { small: true }));
+  misc.appendChild(tile('Part payeurs mécaniques', data.chain.mechanical_share === null ? 'pas de données on-chain' : pct(data.chain.mechanical_share), { small: data.chain.mechanical_share === null }));
+  misc.appendChild(tile('Paiements on-chain (total)', data.chain.total_payments));
+  misc.appendChild(tile('Tentatives MPP (24h)', data.mpp_attempts_24h));
+
+  const jobs = document.getElementById('jobs-tiles');
+  jobs.innerHTML = '';
+  jobs.appendChild(tile('En attente', data.jobs_queue.queued));
+  jobs.appendChild(tile('En cours', data.jobs_queue.running));
+  jobs.appendChild(tile('Terminés (24h)', data.jobs_queue.done_24h));
+  jobs.appendChild(tile('Échecs (24h)', data.jobs_queue.failed_24h));
+
+  const or_ = document.getElementById('openrouter-tiles');
+  or_.innerHTML = '';
+  if (data.openrouter.error) {
+    or_.appendChild(tile('Statut', 'indisponible', { small: true }));
+  } else {
+    or_.appendChild(tile('Usage jour', usd(data.openrouter.usage_daily)));
+    or_.appendChild(tile('Usage semaine', usd(data.openrouter.usage_weekly)));
+    or_.appendChild(tile('Usage mois', usd(data.openrouter.usage_monthly)));
+    or_.appendChild(tile('Palier gratuit', data.openrouter.is_free_tier ? 'oui' : 'non'));
+  }
+
+  const testnetSection = document.getElementById('testnet-section');
+  if (data.testnet) {
+    testnetSection.style.display = 'block';
+    document.getElementById('testnet-network').textContent = data.testnet.network;
+    const tt = document.getElementById('testnet-tiles');
+    tt.innerHTML = '';
+    tt.appendChild(tile('Revenu 24h (test)', usd(data.testnet.revenue_usdc['24h'])));
+    tt.appendChild(tile('Revenu 30j (test)', usd(data.testnet.revenue_usdc['30d'])));
+    tt.appendChild(tile('Acheteurs distincts (test)', data.testnet.buyers.distinct));
+    tt.appendChild(tile('Dernier paiement (test)', data.testnet.last_payment_at ? fmtDate(data.testnet.last_payment_at) : 'aucun', { small: true }));
+    tt.appendChild(tile('Paiements on-chain (test)', data.testnet.chain.total_payments));
+  } else {
+    testnetSection.style.display = 'none';
+  }
+
+  const intentsBody = document.querySelector('#intents-table tbody');
+  intentsBody.innerHTML = '';
+  for (const it of data.unconverted_recent) {
+    const tr = document.createElement('tr');
+    const ua = (it.user_agent || '').slice(0, 60);
+    const body = (it.body_excerpt || '').replace(/\s+/g, ' ').slice(0, 120);
+    tr.innerHTML = `<td>${fmtDate(it.ts)}</td><td>${it.route}</td><td class="excerpt">${ua}</td><td class="excerpt">${body}</td>`;
+    intentsBody.appendChild(tr);
+  }
+}
+
+refresh();
+setInterval(refresh, 60000);
+</script>
+</body>
+</html>
