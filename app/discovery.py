@@ -80,6 +80,7 @@ def _agent_card() -> dict:
         payment_option = route_config.accepts
         if isinstance(payment_option, list):
             payment_option = payment_option[0]
+        bazaar_info = (route_config.extensions or {}).get("bazaar", {}).get("info", {})
         skills.append(
             {
                 "id": slug,
@@ -89,6 +90,14 @@ def _agent_card() -> dict:
                 "price": payment_option.price,
                 "description": route_config.description,
                 "sample": f"{config.BASE_URL}{path}/sample",
+                # Mêmes clés que /capabilities (app/handlers/capabilities.py),
+                # lues depuis la même extension bazaar : x402watch note ses deux
+                # routes suivies hasInputExample/hasOutputExample=false alors que
+                # /.well-known/x402 et /capabilities portent déjà ces exemples —
+                # agent.json était le seul des trois à ne jamais les exposer, et
+                # rien ne dit lequel des trois son crawler lit (mesuré 14/09).
+                "input_example": bazaar_info.get("input", {}).get("body"),
+                "output_example": bazaar_info.get("output", {}).get("example"),
             }
         )
     skills.sort(key=lambda s: s["id"])
@@ -105,6 +114,8 @@ def _agent_card() -> dict:
                 "to the AgentIndex content kit."
             ),
             "sample": None,
+            "input_example": None,
+            "output_example": None,
         },
     )
     skills.insert(
@@ -120,6 +131,8 @@ def _agent_card() -> dict:
                 "- free, no account, no payment."
             ),
             "sample": f"{config.BASE_URL}/discover/sample",
+            "input_example": None,
+            "output_example": None,
         },
     )
 
@@ -138,6 +151,8 @@ def _agent_card() -> dict:
                 "published unless the agent decided to publish it."
             ),
             "sample": f"{config.BASE_URL}/place",
+            "input_example": None,
+            "output_example": None,
         },
     )
     skills.insert(
@@ -158,6 +173,8 @@ def _agent_card() -> dict:
                 "will know you exist."
             ),
             "sample": f"{config.BASE_URL}/contact/sample",
+            "input_example": None,
+            "output_example": None,
         },
     )
 
