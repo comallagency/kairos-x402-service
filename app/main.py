@@ -18,6 +18,7 @@ from app.handlers.contact import router as contact_router
 from app.handlers.place import router as place_router
 from app.handlers.detect_language import router as detect_language_router
 from app.handlers.discover import router as discover_router
+from app.handlers.discover_paid import router as discover_paid_router
 from app.handlers.extract import router as extract_router
 
 # /fact-check ne depend plus d'OpenRouter (voir app/handlers/fact_check.py,
@@ -100,6 +101,7 @@ inner_app.include_router(extract_router)
 inner_app.include_router(summarize_router)
 inner_app.include_router(detect_language_router)
 inner_app.include_router(discover_router)
+inner_app.include_router(discover_paid_router)
 inner_app.include_router(capabilities_router)
 inner_app.include_router(contact_router)
 inner_app.include_router(place_router)

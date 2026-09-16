@@ -82,6 +82,17 @@ PRICE_WEB_READ = "$0.03"
 PRICE_EXTRACT = "$0.05"
 PRICE_SUMMARIZE = "$0.03"
 PRICE_FACT_CHECK = "$0.05"
+
+# Re-wired 2026-09-16, after the first PRICE_DISCOVER = "$0.001" (13:29 on
+# 2026-09-11) was written and never connected to anything - a run was cut by
+# its turn ceiling between the constant and the wiring, /discover stayed free
+# and nothing ever read it. This one is consumed in three places in the same
+# build: _core_route_configs() (the x402 challenge), the well-known, and
+# agent.json - the middleware enforces exactly what those three advertise.
+# Distinct from the free GET /discover (app/handlers/discover.py), which
+# keeps its price-less contract: POST is the guaranteed-semantic-ranking
+# variant over Kairos's local snapshot.
+PRICE_DISCOVER = "$0.001"
 # GET /discover is free by design too, and has no price constant. A
 # PRICE_DISCOVER = "$0.001" sat here from 13:29 on 2026-09-11 until it was
 # removed: a run was cut by its turn ceiling after writing the constant and
@@ -103,6 +114,7 @@ DAILY_CAPACITY = {
     "extract": int(os.getenv("DAILY_CAPACITY_EXTRACT", "500")),
     "summarize": int(os.getenv("DAILY_CAPACITY_SUMMARIZE", "1000")),
     "fact-check": int(os.getenv("DAILY_CAPACITY_FACT_CHECK", "500")),
+    "discover": int(os.getenv("DAILY_CAPACITY_DISCOVER", "500")),
 }
 
 # OpenRouter caps the "models" fallback array at 3 entries per request, so the

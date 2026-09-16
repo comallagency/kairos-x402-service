@@ -9,7 +9,7 @@ from app.x402_setup import KIT_TAGLINE, ROUTE_SUMMARIES, ROUTE_USE_CASES, build_
 
 router = APIRouter()
 
-_KIT_SLUGS = {"pdf", "web-read", "extract", "summarize", "search", "fact-check", "translate", "jobs"}
+_KIT_SLUGS = {"pdf", "web-read", "extract", "summarize", "search", "fact-check", "translate", "jobs", "discover"}
 
 
 @router.get("/capabilities", openapi_extra={"security": []})

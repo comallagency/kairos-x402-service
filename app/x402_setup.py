@@ -106,6 +106,113 @@ _KIT_MENTION = (
     "detect-language) - see GET /capabilities."
 )
 
+
+# --- POST /discover (paid, semantic search over Kairos's local MCP snapshot) ---
+
+DISCOVER_INPUT_SCHEMA = {
+    "properties": {
+        "q": {
+            "type": "string",
+            "description": (
+                "The need to match, in plain language - e.g. \"read a PDF and "
+                "give me markdown\" or \"persistent knowledge graph\". Matched "
+                "against 2190 observed MCP servers by semantic similarity."
+            ),
+        },
+        "max_results": {
+            "type": "integer", "minimum": 1, "maximum": 25,
+            "description": "Maximum number of servers to return (default 5).",
+        },
+        "min_similarity": {
+            "type": "number", "minimum": 0.0, "maximum": 1.0,
+            "description": (
+                "Minimum cosine similarity to include a result (default 0.30). "
+                "Raise it for fewer, closer matches."
+            ),
+        },
+    },
+    "required": ["q"],
+}
+
+DISCOVER_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "q": {"description": "The query that was matched."},
+        "snapshot_date": {
+            "type": "string",
+            "description": "Date the underlying MCP snapshot was taken.",
+        },
+        "snapshot_rows": {
+            "type": "integer",
+            "description": "Number of MCP servers in the snapshot.",
+        },
+        "min_similarity": {
+            "type": "number",
+            "description": "The similarity threshold applied.",
+        },
+        "matches": {
+            "type": "integer",
+            "description": "Number of servers above the threshold before the top-N cut.",
+        },
+        "results": {
+            "type": "array",
+            "description": "Best-matching MCP servers, most relevant first.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Server name as observed."},
+                    "url": {
+                        "description": "Endpoint URL, when one was observed.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "What the server does, as observed.",
+                    },
+                    "registry": {
+                        "description": "Registry or listing where it was seen.",
+                    },
+                    "relevance": {
+                        "type": "number",
+                        "description": "Cosine similarity between the query and this server, 0 to 1.",
+                    },
+                },
+            },
+        },
+    },
+    "required": ["q", "results"],
+}
+
+DISCOVER_SAMPLE_OUTPUT = {
+    "q": "read a PDF and give me markdown",
+    "snapshot_date": "2026-09-16",
+    "snapshot_rows": 2190,
+    "min_similarity": 0.3,
+    "matches": 3,
+    "results": [
+        {
+            "name": "PDF Extract MCP",
+            "url": "https://example.org/mcp/",
+            "description": "Extract a public PDF into clean markdown text, plus metadata and a real token count.",
+            "registry": "registre-mcp",
+            "relevance": 0.7211,
+        },
+        {
+            "name": "Docling Server",
+            "url": None,
+            "description": "Document conversion to markdown and structured text for LLM agents.",
+            "registry": "annuaire",
+            "relevance": 0.6487,
+        },
+        {
+            "name": "Srclight",
+            "url": "https://example.com/mcp/",
+            "description": "Deep code indexing for AI agents. FTS5 + embeddings + call graphs. Fully local.",
+            "registry": "registre-mcp",
+            "relevance": 0.4102,
+        },
+    ],
+}
+
 ROUTE_DESCRIPTIONS = {
     "search": (
         "Real-time web search - up to 10 results with title, URL, a cleaned page "
@@ -157,6 +264,9 @@ ROUTE_DESCRIPTIONS = {
         "and the sources that support or contradict it, each with its URL and "
         "stance. Returns 'inconclusive' rather than a guess when the sources "
         "don't clearly settle it. Try GET /fact-check/sample. " + _KIT_MENTION
+    ),
+    "discover": (
+        'Find MCP servers matching a need, ranked by semantic similarity over a curated snapshot of 2190 observed MCP servers - what a web search cannot guarantee. Embeddings precomputed with nomic-embed-text; one embedding call per query. Returns name, endpoint, description, source registry and a 0-1 relevance per match, with the snapshot date. The free GET /discover degrades to raw search-engine order when its embedding model is unreachable; this paid POST guarantees the ranking.'
     ),
 }
 
@@ -486,6 +596,11 @@ FACT_CHECK_OUTPUT_SCHEMA = {
 # not a standard field but harmless if unread, and cheap extra signal if
 # AgentCash's indexer scans the whole operation body for embedding text).
 ROUTE_SUMMARIES = {
+    "discover": (
+        "Match a need in plain language against a curated snapshot of 2190 "
+        "observed MCP servers and get the best five with a 0-1 relevance "
+        "score each - semantic ranking a web search cannot guarantee."
+    ),
     "search": (
         "Real-time web search with ranked results, a cleaned page extract, and "
         "an optional short answer - up to 5 queries merged and de-duplicated "
@@ -522,6 +637,12 @@ ROUTE_SUMMARIES = {
 }
 
 ROUTE_USE_CASES = {
+    "discover": [
+        "find the MCP server that fits a need instead of guessing its name",
+        "pick from the best-matching servers with a relevance score before contacting one",
+        "discover servers for a job a web search ranks by keywords, not meaning",
+        "check what kinds of MCP servers exist for a capability before building one",
+    ],
     "search": [
         "search the live web for recent information on a topic",
         "verify a claim against current sources before including it in an answer",
@@ -770,6 +891,20 @@ def _core_route_configs() -> dict[str, RouteConfig]:
                 input_schema=FACT_CHECK_INPUT_SCHEMA,
                 body_type="json",
                 output=OutputConfig(example=FACT_CHECK_SAMPLE_OUTPUT, schema=FACT_CHECK_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /discover": RouteConfig(
+            accepts=_payment_option(config.PRICE_DISCOVER),
+            resource=f"{config.BASE_URL}/discover",
+            description=ROUTE_DESCRIPTIONS["discover"],
+            mime_type="application/json",
+            service_name="AgentIndex Discover",
+            tags=KIT_TAGS + ["mcp discovery", "semantic search", "server discovery", "agent registry"],
+            extensions=declare_discovery_extension(
+                input={"q": "read a PDF and give me markdown"},
+                input_schema=DISCOVER_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=DISCOVER_SAMPLE_OUTPUT, schema=DISCOVER_OUTPUT_SCHEMA),
             ),
         ),
     }
