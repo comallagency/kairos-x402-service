@@ -309,7 +309,7 @@ async def run(route: str | None = None, trigger: str = "cron") -> dict:
     results = []
     for slug, method, price in slugs:
         route_ok = await test_route(slug, method, price)
-        if not discover_ok:
+        if not discover_ok and route is None:
             db.record_route_check(slug, "discover", False, discover_detail)
             route_ok = False
         if not route_ok:
