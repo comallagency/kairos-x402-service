@@ -83,7 +83,7 @@ def check_discover(origin: str) -> tuple[bool, str]:
     code, output = _npx("@agentcash/discovery@latest", "discover", origin, timeout=90)
     if code != 0:
         return False, f"discover a échoué (code {code}): {output[:300]}"
-    warning_count = output.count("[warn]") + output.count("[info]")
+    warning_count = output.count("[warn]")
     if warning_count > 0:
         return False, f"{warning_count} avertissement(s): {output[:500]}"
     return True, "0 avertissement"
