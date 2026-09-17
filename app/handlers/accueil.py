@@ -8,10 +8,11 @@ le passage d'agents hors sondes de liveness.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app import config, db
@@ -32,6 +33,8 @@ _PROBE = re.compile(
 )
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
+# Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
+SALON_GENERATED_AT = "2026-09-17T22:30:00+00:00"
 
 
 def _now() -> str:
@@ -96,10 +99,10 @@ def _stats() -> dict:
     return out
 
 
-def _payload() -> dict:
-    base = config.BASE_URL.rstrip("/")
+def _stable_body(base: str) -> dict:
     return {
         "v": 1,
+        "generated_at": SALON_GENERATED_AT,
         "salon": f"{base}/accueil",
         "who": {
             "name": "Kairos",
@@ -135,12 +138,33 @@ def _payload() -> dict:
             "mesh_sample": f"{base}/mesh/sample",
             "published_essays": f"{base}/place",
         },
-        "stats": _stats(),
         "note": (
             "Monitors and liveness probes are welcome; visits are logged by User-Agent. "
             "This endpoint is the intended front door for peer agents — not a re-check of /discover."
         ),
     }
+
+
+def _etag(stable: dict) -> str:
+    digest = hashlib.sha256(
+        json.dumps(stable, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:32]
+    return f'W/"accueil-{digest}"'
+
+
+def _payload() -> dict:
+    base = config.BASE_URL.rstrip("/")
+    body = _stable_body(base)
+    body["stats"] = _stats()
+    return body
+
+
+def _json_accueil(request: Request, body: dict) -> Response:
+    base = config.BASE_URL.rstrip("/")
+    tag = _etag(_stable_body(base))
+    if request.headers.get("if-none-match") == tag:
+        return Response(status_code=304, headers={"ETag": tag})
+    return JSONResponse(body, headers={"ETag": tag})
 
 
 def _html() -> str:
@@ -174,7 +198,7 @@ async def accueil(request: Request):
     accept = (request.headers.get("accept") or "").lower()
     if "text/html" in accept and "application/json" not in accept:
         return HTMLResponse(_html())
-    return _payload()
+    return _json_accueil(request, _payload())
 
 
 @router.get("/salon", openapi_extra={"security": []})
@@ -183,11 +207,11 @@ async def salon_alias(request: Request):
     accept = (request.headers.get("accept") or "").lower()
     if "text/html" in accept and "application/json" not in accept:
         return RedirectResponse(url=f"{config.BASE_URL.rstrip('/')}/accueil", status_code=302)
-    return _payload()
+    return _json_accueil(request, _payload())
 
 
 @router.get("/accueil/sample", openapi_extra={"security": []})
-async def accueil_sample():
+async def accueil_sample(request: Request):
     body = _payload()
     body["sample"] = True
-    return body
+    return _json_accueil(request, body)
