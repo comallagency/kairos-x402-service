@@ -57,6 +57,8 @@ from app.handlers.detect_language import _identifier as _language_identifier
 from app.handlers.discover import DESCRIPTION as DISCOVER_DESCRIPTION
 from app.handlers.discover import MAX_RESULTS_CAP as DISCOVER_MAX_RESULTS
 from app.handlers.discover import _run_discover, _shape
+from app.handlers.discover_paid import _run_discover as _run_discover_semantic
+from app.upstream.ollama import OllamaError
 from app.upstream.websearch import SearchError
 from app.handlers.extract import ExtractError, _get_content as _get_extract_content, _run_extract
 from app.handlers.fact_check import FactCheckError, _check_claim
@@ -106,6 +108,8 @@ from app.x402_setup import (
     TRANSLATE_SAMPLE_OUTPUT,
     WEB_READ_INPUT_SCHEMA,
     WEB_READ_SAMPLE_OUTPUT,
+    DISCOVER_INPUT_SCHEMA,
+    DISCOVER_SAMPLE_OUTPUT,
     build_route_configs,
     get_resource_server,
 )
@@ -121,8 +125,8 @@ mcp = FastMCP(
         "summarize for the rest of the kit. Two more tools outside the "
         "kit: translate (batch translation) and jobs (delegated "
         "multi-step research, async). Also free, unrelated to the kit: "
-        "discover_mcp_servers finds other MCP servers by need, ranked by "
-        "semantic relevance."
+        "digest_tool_result and verify_tool_result_digest (free integrity), discover_mcp_servers (free, web-ranked) and discover_semantic "
+        "(paid, snapshot embeddings) find MCP servers by need."
     ),
 )
 
@@ -796,12 +800,141 @@ async def detect_language_tool(text: str) -> dict:
     return {"text": text, "language": language, "confidence": round(float(confidence), 4)}
 
 
+
+
+
+# --- tool_result digest (POST /tool-result-digest, free) --------------------
+
+from app.tool_digest import digest_tool_result as _digest_tool_result
+from app.tool_digest import verify_tool_result_digest as _verify_tool_result_digest
+
+_TOOL_DIGEST_DESCRIPTION = (
+    "Stable SHA-256 digest of an MCP tool_result so agents can verify payloads "
+    "before settling payment — free, no account."
+)
+
+
+@mcp.tool(name="digest_tool_result", description=_TOOL_DIGEST_DESCRIPTION)
+async def digest_tool_result_tool(
+    tool_name: str,
+    content: str,
+    tool_use_id: str | None = None,
+) -> dict:
+    if not tool_name or not str(tool_name).strip():
+        return {"error": {"reason": "missing_tool_name"}}
+    if content is None or (isinstance(content, str) and not content.strip()):
+        return {"error": {"reason": "missing_content"}}
+    try:
+        return _digest_tool_result(tool_name, content, tool_use_id=tool_use_id)
+    except ValueError as exc:
+        return {"error": {"reason": str(exc)}}
+
+
+@mcp.tool(
+    name="verify_tool_result_digest",
+    description=(
+        "Recompute the canonical digest and return match=true/false — free. "
+        "Use after a paid tool call to confirm the payload."
+    ),
+)
+async def verify_tool_result_digest_tool(
+    expected_digest: str,
+    tool_name: str,
+    content: str,
+    tool_use_id: str | None = None,
+) -> dict:
+    if not expected_digest or not str(expected_digest).strip():
+        return {"error": {"reason": "missing_digest"}}
+    if not tool_name or not str(tool_name).strip():
+        return {"error": {"reason": "missing_tool_name"}}
+    try:
+        return _verify_tool_result_digest(
+            expected_digest, tool_name, content, tool_use_id=tool_use_id
+        )
+    except ValueError as exc:
+        return {"error": {"reason": str(exc)}}
+
+
 # --- discover_mcp_servers (GET /discover, free - no payment flow) ----------
 # Meme logique que app/handlers/discover.py, exposee ici pour que les clients
 # MCP qui listent tools/list la trouvent sans connaitre la route HTTP - le
 # chantier ouvert sur /discover manque de trafic reel, pas de code : les
 # scanners MCP (AIVE-MCP-Discover, 402explorer, vus dans les journaux nginx)
 # tapent deja /mcp, jamais /discover en HTTP nu.
+
+
+
+# --- discover_semantic (POST /discover, paid - local MCP snapshot) -----------
+# Les scanners MCP tapent /mcp mais pas POST /discover en HTTP nu (mesure
+# nginx 17/09). Meme surface x402 que la route HTTP.
+
+_DISCOVER_SEMANTIC_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="discover_semantic",
+        description=ROUTE_DESCRIPTIONS["discover"],
+        input_schema=DISCOVER_INPUT_SCHEMA,
+        example={"q": "read a PDF and give me markdown"},
+        output=OutputConfig(example=DISCOVER_SAMPLE_OUTPUT),
+    )
+)
+
+
+async def _run_discover_semantic_paid(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    q = args.get("q")
+    if not isinstance(q, str) or not q.strip():
+        db.log_request(
+            route="discover", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_q",
+        )
+        raise ServiceError("missing_q")
+
+    max_results = args.get("max_results", 5)
+    if not isinstance(max_results, int) or isinstance(max_results, bool):
+        max_results = 5
+    max_results = max(1, min(max_results, DISCOVER_MAX_RESULTS))
+
+    threshold = args.get("min_similarity", 0.30)
+    if not isinstance(threshold, int | float) or isinstance(threshold, bool):
+        threshold = 0.30
+    threshold = float(max(0.0, min(threshold, 1.0)))
+
+    try:
+        with Timer() as t:
+            result = await _run_discover_semantic(q.strip()[:500], max_results, threshold)
+    except OllamaError as exc:
+        db.log_request(
+            route="discover", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
+        )
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+
+    price = effective_price(payer, price_float(config.PRICE_DISCOVER))
+    db.log_request(
+        route="discover", method="MCP", status="paid", latency_ms=t.elapsed_ms,
+        amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    receipt = make_receipt(None, "nomic-embed-text", t.elapsed_ms, price)
+    return {**result, "x402_receipt": receipt}
+
+
+@mcp.tool(name="discover_semantic", description=ROUTE_DESCRIPTIONS["discover"])
+async def discover_semantic_tool(
+    q: str,
+    max_results: int = 5,
+    min_similarity: float = 0.30,
+    ctx: Context = None,
+) -> ToolResult:
+    args = {"q": q, "max_results": max_results, "min_similarity": min_similarity}
+    return await _paid_tool_call(
+        tool_name="discover_semantic",
+        route_key="POST /discover",
+        ctx=ctx,
+        args=args,
+        extensions=_DISCOVER_SEMANTIC_EXTENSIONS,
+        run_and_log=_run_discover_semantic_paid,
+    )
+
 
 @mcp.tool(
     name="discover_mcp_servers",
@@ -819,6 +952,101 @@ async def discover_mcp_servers_tool(q: str, max_results: int = 5) -> dict:
         route="discover", method="MCP", status="unpaid", user_agent="mcp", body_excerpt=q[:2048],
     )
     return {"q": q, "results": _shape(ranked)}
+
+
+
+# --- agent mesh board (GET /mesh, free) -------------------------------------
+
+from app.handlers.agent_mesh import (
+    BountyIn,
+    ClaimIn,
+    NodeIn,
+    claim_bounty,
+    get_bounty,
+    ledger,
+    list_bounties,
+    list_nodes,
+    post_bounty,
+    register_node,
+)
+
+_MESH_DESC = (
+    "Kairos agent mesh board — register nodes, post open bounties, claim work. "
+    "Free. Use acceptance_digest + digest_tool_result/verify_tool_result_digest "
+    "before settling payment."
+)
+
+
+@mcp.tool(name="mesh_list_nodes", description=_MESH_DESC)
+async def mesh_list_nodes_tool(limit: int = 20) -> dict:
+    return list_nodes(max(1, min(limit, 50)))
+
+
+@mcp.tool(name="mesh_list_bounties", description=_MESH_DESC)
+async def mesh_list_bounties_tool(status: str = "open", limit: int = 20) -> dict:
+    return list_bounties(status, max(1, min(limit, 50)))
+
+
+@mcp.tool(name="mesh_register_node", description=_MESH_DESC)
+async def mesh_register_node_tool(
+    name: str,
+    endpoint: str,
+    skills: list[str] | None = None,
+    about: str = "",
+) -> dict:
+    try:
+        return register_node(
+            NodeIn(name=name, endpoint=endpoint, skills=skills or [], about=about)
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool(name="mesh_post_bounty", description=_MESH_DESC)
+async def mesh_post_bounty_tool(
+    poster_name: str,
+    title: str,
+    criteria: str,
+    poster_endpoint: str = "",
+    reward_usdc: float | None = None,
+    acceptance_digest: str | None = None,
+) -> dict:
+    try:
+        return post_bounty(
+            BountyIn(
+                poster_name=poster_name,
+                poster_endpoint=poster_endpoint,
+                title=title,
+                criteria=criteria,
+                reward_usdc=reward_usdc,
+                acceptance_digest=acceptance_digest,
+            )
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool(name="mesh_claim_bounty", description=_MESH_DESC)
+async def mesh_claim_bounty_tool(
+    bounty_id: str,
+    claimer_name: str,
+    claimer_endpoint: str = "",
+    note: str = "",
+) -> dict:
+    try:
+        return claim_bounty(
+            bounty_id,
+            ClaimIn(claimer_name=claimer_name, claimer_endpoint=claimer_endpoint, note=note),
+        )
+    except LookupError:
+        return {"error": "not_found"}
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool(name="mesh_ledger", description=_MESH_DESC)
+async def mesh_ledger_tool(limit: int = 20) -> dict:
+    return ledger(max(1, min(limit, 50)))
 
 
 # --- usine-generated routes (app/generated/) ---------------------------

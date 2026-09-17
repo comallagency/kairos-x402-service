@@ -16,9 +16,13 @@ from app.generated.dynamic_routes import build_dynamic_routers
 from app.handlers.capabilities import router as capabilities_router
 from app.handlers.contact import router as contact_router
 from app.handlers.place import router as place_router
+from app.handlers.accueil import router as accueil_router
 from app.handlers.detect_language import router as detect_language_router
+from app.handlers.tool_digest import router as tool_digest_router
+from app.handlers.agent_mesh import router as agent_mesh_router
 from app.handlers.discover import router as discover_router
 from app.handlers.discover_paid import router as discover_paid_router
+from app.handlers.discover_paid import warm_discover_cache
 from app.handlers.extract import router as extract_router
 
 # /fact-check ne depend plus d'OpenRouter (voir app/handlers/fact_check.py,
@@ -57,6 +61,7 @@ async def heartbeat_loop(interval_seconds: float = 60.0):
 
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
+    await warm_discover_cache()
     tasks = [asyncio.create_task(worker_loop()), asyncio.create_task(heartbeat_loop())]
     try:
         yield
@@ -100,11 +105,14 @@ inner_app.include_router(web_read_router)
 inner_app.include_router(extract_router)
 inner_app.include_router(summarize_router)
 inner_app.include_router(detect_language_router)
+inner_app.include_router(tool_digest_router)
+inner_app.include_router(agent_mesh_router)
 inner_app.include_router(discover_router)
 inner_app.include_router(discover_paid_router)
 inner_app.include_router(capabilities_router)
 inner_app.include_router(contact_router)
 inner_app.include_router(place_router)
+inner_app.include_router(accueil_router)
 inner_app.include_router(discovery_router)
 inner_app.include_router(admin_router)
 # Usine-generated routes (app/generated/routes_registry.yaml) - empty until a

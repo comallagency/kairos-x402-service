@@ -116,7 +116,7 @@ DISCOVER_INPUT_SCHEMA = {
             "description": (
                 "The need to match, in plain language - e.g. \"read a PDF and "
                 "give me markdown\" or \"persistent knowledge graph\". Matched "
-                "against 2190 observed MCP servers by semantic similarity."
+                "against 2947 observed MCP servers by semantic similarity."
             ),
         },
         "max_results": {
@@ -184,8 +184,8 @@ DISCOVER_OUTPUT_SCHEMA = {
 
 DISCOVER_SAMPLE_OUTPUT = {
     "q": "read a PDF and give me markdown",
-    "snapshot_date": "2026-09-16",
-    "snapshot_rows": 2190,
+    "snapshot_date": "2026-09-17",
+    "snapshot_rows": 2947,
     "min_similarity": 0.3,
     "matches": 3,
     "results": [
@@ -266,7 +266,7 @@ ROUTE_DESCRIPTIONS = {
         "don't clearly settle it. Try GET /fact-check/sample. " + _KIT_MENTION
     ),
     "discover": (
-        'Find MCP servers matching a need, ranked by semantic similarity over a curated snapshot of 2190 observed MCP servers - what a web search cannot guarantee. Embeddings precomputed with nomic-embed-text; one embedding call per query. Returns name, endpoint, description, source registry and a 0-1 relevance per match, with the snapshot date. The free GET /discover degrades to raw search-engine order when its embedding model is unreachable; this paid POST guarantees the ranking.'
+        'Find MCP servers matching a need, ranked by semantic similarity over a curated snapshot of 2947 observed MCP servers - what a web search cannot guarantee. Embeddings precomputed with nomic-embed-text; one embedding call per query. Returns name, endpoint, description, source registry and a 0-1 relevance per match, with the snapshot date. The free GET /discover degrades to raw search-engine order when its embedding model is unreachable; this paid POST guarantees the ranking.'
     ),
 }
 
@@ -597,7 +597,7 @@ FACT_CHECK_OUTPUT_SCHEMA = {
 # AgentCash's indexer scans the whole operation body for embedding text).
 ROUTE_SUMMARIES = {
     "discover": (
-        "Match a need in plain language against a curated snapshot of 2190 "
+        "Match a need in plain language against a curated snapshot of 2947 "
         "observed MCP servers and get the best five with a 0-1 relevance "
         "score each - semantic ranking a web search cannot guarantee."
     ),

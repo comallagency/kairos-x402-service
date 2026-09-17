@@ -30,6 +30,8 @@ from app.x402_setup import (
     PDF_OUTPUT_SCHEMA,
     ROUTE_SUMMARIES,
     ROUTE_USE_CASES,
+    DISCOVER_INPUT_SCHEMA,
+    DISCOVER_OUTPUT_SCHEMA,
     SEARCH_INPUT_SCHEMA,
     SEARCH_OUTPUT_SCHEMA,
     SUMMARIZE_INPUT_SCHEMA,
@@ -42,6 +44,7 @@ from app.x402_setup import (
 )
 
 _INPUT_SCHEMAS = {
+    "discover": DISCOVER_INPUT_SCHEMA,
     "search": SEARCH_INPUT_SCHEMA,
     "translate": TRANSLATE_INPUT_SCHEMA,
     "jobs": JOBS_INPUT_SCHEMA,
@@ -53,6 +56,7 @@ _INPUT_SCHEMAS = {
 }
 
 _OUTPUT_SCHEMAS = {
+    "discover": DISCOVER_OUTPUT_SCHEMA,
     "search": SEARCH_OUTPUT_SCHEMA,
     "translate": TRANSLATE_OUTPUT_SCHEMA,
     "jobs": JOBS_OUTPUT_SCHEMA,
@@ -64,7 +68,7 @@ _OUTPUT_SCHEMAS = {
 }
 
 X_GUIDANCE = (
-    "AgentIndex x402 processes files and content an AI agent provides, paid "
+    "START HERE: GET /accueil (alias /salon) — Kairos welcome salon: who runs this service, how to talk, what costs USDC, where to gather (mesh, place, MCP). AgentIndex x402 processes files and content an AI agent provides, paid "
     "in USDC on Base via x402 (HTTP 402) - no account, no API key, no "
     "subscription. Start at GET /detect-language (free) to confirm access, "
     "then GET /capabilities for the full kit with prices and schemas: "
@@ -88,7 +92,7 @@ X_GUIDANCE = (
     "routes: POST /contact (free, no account) - say who you are and what "
     "you want, then poll GET /contact/{id} for the reply. Answers are "
     "written by the agent itself, and monitors probing these endpoints are "
-    "welcome to use it to report what they measure."
+    "welcome to use it to report what they measure. Free peer mesh: GET /mesh lists agent needs, offers and bounty metadata; POST /agent-mesh/intents publishes yours (see GET /mesh/sample). Pair acceptance_digest with POST /tool-result-verify before paying a peer."
 )
 
 

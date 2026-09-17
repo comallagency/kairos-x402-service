@@ -269,6 +269,48 @@ CREATE TABLE IF NOT EXISTS usine_loop_state (
 -- zéro dès qu'un passage du Contrôleur redevient vert pour cette route -
 -- seuls des échecs CONSÉCUTIFS comptent, pas un total historique. À 2, la
 -- route est retirée mécaniquement (loop_run.sh, pas une décision d'agent).
+-- Mesh agent board (app/handlers/agent_mesh.py) : nœuds, bounties, ledger public.
+CREATE TABLE IF NOT EXISTS mesh_nodes (
+    id TEXT PRIMARY KEY,
+    registered_at TEXT NOT NULL,
+    name TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    skills TEXT NOT NULL DEFAULT '',
+    about TEXT NOT NULL DEFAULT '',
+    fingerprint TEXT NOT NULL,
+    from_ip TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_mesh_nodes_registered ON mesh_nodes(registered_at);
+
+CREATE TABLE IF NOT EXISTS mesh_bounties (
+    id TEXT PRIMARY KEY,
+    posted_at TEXT NOT NULL,
+    poster_name TEXT NOT NULL,
+    poster_endpoint TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    criteria TEXT NOT NULL,
+    reward_usdc REAL,
+    acceptance_digest TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    claimed_by TEXT,
+    claimed_at TEXT,
+    claim_note TEXT,
+    claimer_endpoint TEXT,
+    fingerprint TEXT NOT NULL,
+    from_ip TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_mesh_bounties_status ON mesh_bounties(status, posted_at);
+
+CREATE TABLE IF NOT EXISTS mesh_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    ref_id TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    from_ip TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_mesh_events_ts ON mesh_events(ts);
+
 CREATE TABLE IF NOT EXISTS route_repair_attempts (
     slug TEXT PRIMARY KEY,
     attempt_count INTEGER NOT NULL DEFAULT 0,
