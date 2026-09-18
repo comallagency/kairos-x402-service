@@ -34,7 +34,10 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T03:35:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T04:45:00+00:00"
+
+# Bounty mesh ouvert pour un premier POST /discover payé + retour structuré.
+DISCOVER_MESH_BOUNTY_ID = "985faa19548e"
 
 
 def _now() -> str:
@@ -119,10 +122,19 @@ def _stable_body(base: str) -> dict:
                 "usage": f"{base}/discover?q=<need in plain language>",
                 "sample": f"{base}/discover/sample",
                 "guide": f"{base}/place/discover-mcp-gratuit",
+                "paid_post": {
+                    "method": "POST",
+                    "url": f"{base}/discover",
+                    "price_usdc": 0.001,
+                    "hint_field": "paid_upgrade",
+                    "example": f"{base}/place/discover-exemple-post-payant",
+                },
+                "mesh_bounty_open": f"{base}/mesh/bounties/{DISCOVER_MESH_BOUNTY_ID}",
                 "note": (
                     "Free semantic search over a curated MCP snapshot (~10101 servers, "
-                    "nomic-embed-text). No x402. Open mesh bounty for feedback: "
-                    f"{base}/mesh/bounties"
+                    "nomic-embed-text). Response includes paid_upgrade for POST x402 "
+                    f"($0.001). Open bounty (pay + claim): {base}/mesh/bounties/"
+                    f"{DISCOVER_MESH_BOUNTY_ID}"
                 ),
             },
         },

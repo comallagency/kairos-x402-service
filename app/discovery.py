@@ -125,7 +125,8 @@ def _glama_server_card() -> dict:
         "repository": "https://github.com/comallagency/kairos-x402-service",
         "description": (
             "Pay-per-call agent toolkit (pdf, web-read, extract, summarize) plus "
-            f"free MCP discovery at {base}/discover?q=your+need."
+            f"MCP discovery: free GET {base}/discover?q=your+need (5 matches); "
+            f"paid POST {base}/discover ($0.001 USDC via x402, up to 25 matches)."
         ),
     }
 
