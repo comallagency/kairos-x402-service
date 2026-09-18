@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app import db
@@ -46,18 +48,26 @@ async def discover_sample():
     description=DESCRIPTION,
     tags=KIT_TAGS + ["discovery", "free"],
 )
-async def discover(request: Request, q: str, max_results: int = DEFAULT_MAX_RESULTS):
+async def discover(
+    request: Request,
+    q: Annotated[str | None, Query(description="Need in plain language")] = None,
+    query: Annotated[str | None, Query(description="Alias for q (common in client SDKs)")] = None,
+    max_results: int = DEFAULT_MAX_RESULTS,
+):
     user_agent = request.headers.get("user-agent")
-    if not q or not q.strip():
-        db.log_request(
-            route="discover", method="GET", status="error",
-            user_agent=user_agent, error_reason="missing_q",
-        )
-        return JSONResponse({"error": {"reason": "missing_q"}}, status_code=400)
+    base = str(request.base_url).rstrip("/")
+    need = (q or query or "").strip()
+    used_example_query = False
+    if not need:
+        # Les sondes (x402watch, httpx, SDKs) appellent souvent l'URL nue ; un 400
+        # court ne leur montre pas la forme de réponse. On renvoie un classement réel
+        # sur la requête d'exemple, avec une indication explicite.
+        need = SAMPLE_QUERY
+        used_example_query = True
 
     max_results = max(1, min(max_results, MAX_RESULTS_CAP))
     try:
-        result = await _run_snapshot_discover(q.strip()[:500], max_results, MIN_SIMILARITY)
+        result = await _run_snapshot_discover(need[:500], max_results, MIN_SIMILARITY)
     except OllamaError as exc:
         db.log_request(
             route="discover", method="GET", status="error",
@@ -69,6 +79,19 @@ async def discover(request: Request, q: str, max_results: int = DEFAULT_MAX_RESU
 
     db.log_request(
         route="discover", method="GET", status="unpaid",
-        user_agent=user_agent, body_excerpt=q[:2048],
+        user_agent=user_agent, body_excerpt=need[:2048],
     )
+    if used_example_query:
+        return {
+            **result,
+            "hint": {
+                "reason": "default_example_query",
+                "detail": (
+                    "No q= or query= was provided; ranked matches below use a fixed "
+                    "example need. Pass your own need in the query string."
+                ),
+                "usage": f"GET {base}/discover?q=your+need",
+                "sample_url": f"{base}/discover/sample",
+            },
+        }
     return result
