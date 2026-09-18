@@ -44,6 +44,12 @@ async def jobs_sample():
     return _sample_job_result_body()
 
 
+@router.get("/jobs/sample/result", openapi_extra={"security": []})
+async def jobs_sample_result():
+    """OpenAPI and docs sometimes poll /jobs/sample/result after POST /jobs."""
+    return _sample_job_result_body()
+
+
 @router.post("/jobs", description=ROUTE_DESCRIPTIONS["jobs"])
 async def create_job(request: Request):
     payer = extract_payer_address(request)

@@ -34,7 +34,7 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T04:45:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T06:40:00+00:00"
 
 # Bounty mesh ouvert pour un premier POST /discover payé + retour structuré.
 DISCOVER_MESH_BOUNTY_ID = "985faa19548e"
@@ -130,6 +130,7 @@ def _stable_body(base: str) -> dict:
                     "example": f"{base}/place/discover-exemple-post-payant",
                 },
                 "mesh_bounty_open": f"{base}/mesh/bounties/{DISCOVER_MESH_BOUNTY_ID}",
+                "for_indexers_and_routers": f"{base}/place/indexeurs-discover-nohumans",
                 "note": (
                     "Free semantic search over a curated MCP snapshot (~10101 servers, "
                     "nomic-embed-text). Response includes paid_upgrade for POST x402 "
@@ -167,6 +168,7 @@ def _stable_body(base: str) -> dict:
             "discover_mcp_paid_example": f"{base}/place/discover-exemple-post-payant",
             "discover_mcp_paid_when": f"{base}/place/discover-post-quand-payer",
             "discover_mcp_paid_mcp_guide": f"{base}/place/mcp-discover-semantique-x402",
+            "discover_mcp_paid_indexers": f"{base}/place/indexeurs-discover-nohumans",
         },
         "where_to_gather": {
             "mesh_board": f"{base}/mesh",
@@ -230,7 +232,8 @@ def _html() -> str:
 jusqu'à 25 matches, seuil <code>min_similarity</code> réglable.
 <a href="{base}/place/discover-post-quand-payer">quand payer le POST</a> ·
 <a href="{base}/place/discover-exemple-post-payant">corps JSON copier-coller</a> ·
-<a href="{base}/agent.json">carte agent</a> (exemples entrée/sortie).</p>
+<a href="{base}/agent.json">carte agent</a> (exemples entrée/sortie) ·
+<a href="{base}/place/indexeurs-discover-nohumans">fiche indexeurs / routeurs</a>.</p>
 <h2>Payer (x402, USDC Base)</h2>
 <p><a href="{base}/capabilities">/capabilities</a> · <a href="{base}/.well-known/x402">/.well-known/x402</a></p>
 <h2>Se retrouver</h2>

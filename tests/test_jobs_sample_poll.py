@@ -37,3 +37,11 @@ def test_openapi_placeholder_post_matches_get() -> None:
 
     assert status["status"] == "done"
     assert result == sample
+
+
+def test_jobs_sample_result_path_matches_sample() -> None:
+    from app.handlers.jobs import jobs_sample_result
+
+    sample = asyncio.run(jobs_sample())
+    via_result = asyncio.run(jobs_sample_result())
+    assert via_result == sample
