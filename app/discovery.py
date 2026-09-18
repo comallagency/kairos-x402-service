@@ -104,6 +104,17 @@ async def discovery_resources():
 
 # VerifyMCP-OwnersBot/1.0 et d'autres sondes (7 hits en six jours, 2026-09-17).
 # Spec : https://verifymcp.io/docs/build/owners-json
+@router.get("/.well-known/brick-blue.json", openapi_extra={"security": []})
+async def well_known_brick_blue_json():
+    """Preuve de domaine pour brick.blue passport (spec : clé publique base58)."""
+    key = config.BRICK_BLUE_PUBLIC_KEY
+    if not key:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="brick-blue key not configured")
+    return {"key": key}
+
+
 @router.get("/.well-known/owners.json", openapi_extra={"security": []})
 async def well_known_owners_json():
     schema_key = "$" + "schema"
