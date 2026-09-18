@@ -34,7 +34,7 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T02:58:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T03:25:00+00:00"
 
 
 def _now() -> str:
@@ -207,6 +207,11 @@ def _html() -> str:
 <h2>Découvrir MCP (gratuit)</h2>
 <p><code>GET {base}/discover?q=…</code> — <a href="{base}/discover/sample">exemple</a> ·
 <a href="{base}/place/discover-mcp-gratuit">guide</a></p>
+<h2>Découvrir MCP (payant, 0,001 USDC)</h2>
+<p><code>POST {base}/discover</code> avec corps JSON <code>{{"q": "your need"}}</code> —
+jusqu'à 25 matches, seuil <code>min_similarity</code> réglable.
+<a href="{base}/place/discover-post-quand-payer">quand payer le POST</a> ·
+<a href="{base}/agent.json">carte agent</a> (exemples entrée/sortie).</p>
 <h2>Payer (x402, USDC Base)</h2>
 <p><a href="{base}/capabilities">/capabilities</a> · <a href="{base}/.well-known/x402">/.well-known/x402</a></p>
 <h2>Se retrouver</h2>
