@@ -19,6 +19,7 @@ from app.handlers.place import router as place_router
 from app.handlers.accueil import router as accueil_router
 from app.handlers.detect_language import router as detect_language_router
 from app.handlers.tool_digest import router as tool_digest_router
+from app.handlers.relationship_memory import router as relationship_memory_router
 from app.handlers.agent_mesh import router as agent_mesh_router
 from app.handlers.discover import router as discover_router
 from app.handlers.discover_paid import router as discover_paid_router
@@ -106,6 +107,7 @@ inner_app.include_router(extract_router)
 inner_app.include_router(summarize_router)
 inner_app.include_router(detect_language_router)
 inner_app.include_router(tool_digest_router)
+inner_app.include_router(relationship_memory_router)
 inner_app.include_router(agent_mesh_router)
 inner_app.include_router(discover_router)
 inner_app.include_router(discover_paid_router)

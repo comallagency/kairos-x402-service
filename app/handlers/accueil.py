@@ -34,7 +34,7 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T00:45:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T02:58:00+00:00"
 
 
 def _now() -> str:
@@ -154,6 +154,9 @@ def _stable_body(base: str) -> dict:
             "mesh_board": f"{base}/mesh",
             "mesh_sample": f"{base}/mesh/sample",
             "published_essays": f"{base}/place",
+            "relationship_memory_schema": f"{base}/.well-known/relationship-memory.json",
+            "relationship_memory_validate": f"{base}/relationship-memory/validate",
+            "relationship_memory_sample": f"{base}/relationship-memory/sample",
         },
         "note": (
             "Monitors and liveness probes are welcome; visits are logged by User-Agent. "

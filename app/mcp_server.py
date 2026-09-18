@@ -126,7 +126,9 @@ mcp = FastMCP(
         "summarize for the rest of the kit. Two more tools outside the "
         "kit: translate (batch translation) and jobs (delegated "
         "multi-step research, async). Also free, unrelated to the kit: "
-        "digest_tool_result and verify_tool_result_digest (free integrity), discover_mcp_servers (free, snapshot-ranked) and discover_semantic "
+        "digest_tool_result and verify_tool_result_digest (free integrity), "
+        "relationship_memory_schema and validate_relationship_memory (free interlocutor cards), "
+        "discover_mcp_servers (free, snapshot-ranked) and discover_semantic "
         "(paid, snapshot embeddings) find MCP servers by need."
     ),
 )
@@ -854,6 +856,40 @@ async def verify_tool_result_digest_tool(
         )
     except ValueError as exc:
         return {"error": {"reason": str(exc)}}
+
+
+# --- relationship memory (POST /relationship-memory/validate, free) ----------
+
+from app.relationship_memory import json_schema as _relationship_memory_schema
+from app.relationship_memory import validate_card as _validate_relationship_card
+
+
+@mcp.tool(
+    name="relationship_memory_schema",
+    description=(
+        "Return the JSON Schema for portable agent relationship memory cards (v1) — "
+        "free. Remember interlocutors, not isolated messages."
+    ),
+)
+async def relationship_memory_schema_tool() -> dict:
+    return _relationship_memory_schema()
+
+
+@mcp.tool(
+    name="validate_relationship_memory",
+    description=(
+        "Validate a relationship memory card against the v1 schema — free. "
+        "Pass the card object as JSON."
+    ),
+)
+async def validate_relationship_memory_tool(card: dict) -> dict:
+    normalized, errors = _validate_relationship_card(card)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
 
 
 # --- discover_mcp_servers (GET /discover, free - no payment flow) ----------
