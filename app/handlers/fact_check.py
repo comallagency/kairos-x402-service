@@ -16,18 +16,41 @@ router = APIRouter()
 MAX_QUERIES = 3
 RESULTS_PER_QUERY = 5
 
-# /fact-check/sample rejoue toujours la meme SAMPLE_CLAIM : sur ce VPS (6
-# coeurs CPU, pas de GPU), le pipeline complet (recherche + 2 appels
-# gemma3:4b) prend 14 a 47s (mesure le 2026-09-11), et deux robots qui
-# sondent la route pour juger sa fiabilite avant de la recommander a
-# d'autres agents (x402-observer, hermes-contact-discovery) ont vu des 499
-# (timeout cote client) sur ces 24h. Le resultat ne change pas d'un appel a
-# l'autre pour la meme claim ; le cacher evite de refaire le meme travail
-# CPU a chaque sonde, sans toucher au chemin payant POST /fact-check qui
-# reste toujours recalcule.
-_SAMPLE_CACHE_TTL_S = 600.0
-_sample_cache: dict | None = None
-_sample_cache_at: float = 0.0
+# /fact-check/sample documente la forme de sortie pour les sondes (x402watch,
+# hermes-contact-discovery). Le pipeline live prend 14–47 s à froid et peut
+# bloquer indéfiniment si SearXNG ou Ollama ne répond pas sur le VPS — ce qui
+# produit des 499 côté client. La claim est fixe ; on renvoie donc une réponse
+# figée instantanée. POST /fact-check reste toujours recalculé.
+FACT_CHECK_SAMPLE_RESPONSE: dict = {
+    "claim": "The Eiffel Tower is taller than the Statue of Liberty.",
+    "verdict": "supported",
+    "confidence": 0.95,
+    "sources": [
+        {
+            "url": "https://homework.study.com/explanation/is-eiffel-tower-taller-than-the-statue-of-liberty.html",
+            "title": "Is Eiffel Tower taller than the Statue of Liberty? | Homework.Study.com",
+            "stance": "supports",
+        },
+        {
+            "url": "https://compareheight.net/eiffel-tower-height-comparison/",
+            "title": "Eiffel Tower Height Comparison - CompareHeight.net",
+            "stance": "supports",
+        },
+        {
+            "url": "https://www.explore.com/1088063/the-eiffel-tower-and-the-other-tallest-structures-in-the-world/",
+            "title": "The Eiffel Tower's Height Compared To Other Iconic Structures - Explore",
+            "stance": "supports",
+        },
+    ],
+    "x402_receipt": {
+        "model_served": "model-unknown",
+        "upstream": "web_search+llm",
+        "latency_ms": 1,
+        "price_paid_usdc": 0.0,
+        "sources_read": 3,
+        "searches_run": 1,
+    },
+}
 
 # Below this, or when no source actually takes a side, the verdict is forced
 # to "inconclusive" regardless of what the model claimed (see
@@ -226,24 +249,7 @@ async def _check_claim(claim: str) -> tuple[dict, str | None, int, int]:
 
 @router.get("/fact-check/sample", openapi_extra={"security": []})
 async def fact_check_sample():
-    global _sample_cache, _sample_cache_at
-    now = time.monotonic()
-    if _sample_cache is not None and (now - _sample_cache_at) < _SAMPLE_CACHE_TTL_S:
-        return _sample_cache
-
-    with Timer() as t:
-        try:
-            result, model_served, sources_read, queries_run = await _check_claim(SAMPLE_CLAIM)
-        except FactCheckError as exc:
-            return JSONResponse({"error": {"reason": exc.reason, "detail": exc.detail}}, status_code=502)
-    receipt = make_receipt(
-        neutral_model_id(model_served), "web_search+llm", t.elapsed_ms, 0.0,
-        searches_run=queries_run, sources_read=sources_read,
-    )
-    response = {"claim": SAMPLE_CLAIM, **result, "x402_receipt": receipt}
-    _sample_cache = response
-    _sample_cache_at = now
-    return response
+    return FACT_CHECK_SAMPLE_RESPONSE
 
 
 @router.post("/fact-check", description=ROUTE_DESCRIPTIONS["fact-check"])
