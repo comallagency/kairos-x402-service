@@ -67,6 +67,11 @@ PER_HOUR_PER_IP = 10
 #: lieu d'en créer un second.
 DEDUPE_WINDOW_HOURS = 24
 
+#: Identifiant fictif dans GET /contact/sample ; les sondes OpenAPI copient
+#: parfois le placeholder `{message_id}` littéralement.
+SAMPLE_POLL_ID = "0f3c9a21b7d4e650"
+OPENAPI_MESSAGE_ID_PLACEHOLDER = "{message_id}"
+
 DESCRIPTION = (
     "Write to the agent that runs this service and get an answer - free, no "
     "account, no payment. Say who you are and what you want; poll "
@@ -204,33 +209,66 @@ def _receipt(identifiant: str, recu_le: str, *, duplicate: bool) -> dict:
     }
 
 
+def _is_sample_message_id(message_id: str) -> bool:
+    return message_id in (SAMPLE_POLL_ID, OPENAPI_MESSAGE_ID_PLACEHOLDER)
+
+
+def _sample_contact_poll_body() -> dict:
+    return {
+        "id": SAMPLE_POLL_ID,
+        "received_at": "2026-09-12T09:14:02.511874+00:00",
+        "sender": "x402-observer (uptime+trust monitor)",
+        "subject": "Your /search and /fact-check routes were delisted",
+        "body": "Both dropped below our uptime floor on 2026-09-11.",
+        "answered_at": None,
+        "answer": None,
+        "status": "unanswered",
+        "declares": None,
+    }
+
+
 @router.get("/contact/sample", openapi_extra={"security": []})
 async def contact_sample():
     """Un exemple réel de ce que la route rend, comme les routes payantes."""
+    corps = _sample_contact_poll_body()
     return {
         "request": {
             "method": "POST",
             "url": f"{config.BASE_URL}/contact",
             "body": {
-                "sender": "x402-observer (uptime+trust monitor)",
-                "subject": "Your /search and /fact-check routes were delisted",
-                "body": "Both dropped below our uptime floor on 2026-09-11.",
+                "sender": corps["sender"],
+                "subject": corps["subject"],
+                "body": corps["body"],
                 "reply_to": "https://x402.fuchss.app/trust",
             },
         },
         "response": {
-            "id": "0f3c9a21b7d4e650",
-            "received_at": "2026-09-12T09:14:02.511874+00:00",
-            "poll": f"{config.BASE_URL}/contact/0f3c9a21b7d4e650",
+            "id": corps["id"],
+            "received_at": corps["received_at"],
+            "poll": f"{config.BASE_URL}/contact/{corps['id']}",
             "duplicate": False,
             "note": "Received. An answer is written by the agent itself ...",
         },
     }
 
 
+@router.post("/contact/{message_id}", openapi_extra={"security": []})
+async def post_contact_poll(message_id: str):
+    """Certaines sondes cataloguent POST sur le template OpenAPI littéralement."""
+    if _is_sample_message_id(message_id):
+        return await get_contact(message_id)
+    return JSONResponse(
+        {"error": {"reason": "method_not_allowed", "hint": "Poll with GET"}},
+        status_code=405,
+        headers={"Allow": "GET"},
+    )
+
+
 @router.get("/contact/{message_id}", openapi_extra={"security": []})
 async def get_contact(message_id: str):
     """Rend le message tel qu'il est arrivé, et la réponse si elle est écrite."""
+    if _is_sample_message_id(message_id):
+        return _sample_contact_poll_body()
     with db.cursor() as cur:
         ligne = cur.execute(
             "SELECT id, received_at, sender, subject, body, answered_at, answer, "
