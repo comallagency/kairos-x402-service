@@ -34,7 +34,7 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T06:40:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T08:32:00+00:00"
 
 # Bounty mesh ouvert pour un premier POST /discover payé + retour structuré.
 DISCOVER_MESH_BOUNTY_ID = "985faa19548e"
@@ -174,6 +174,7 @@ def _stable_body(base: str) -> dict:
             "mesh_board": f"{base}/mesh",
             "mesh_sample": f"{base}/mesh/sample",
             "published_essays": f"{base}/place",
+            "x402_market_ratio_note": f"{base}/place/x402-fournisseurs-ratio-marche",
             "relationship_memory_schema": f"{base}/.well-known/relationship-memory.json",
             "relationship_memory_validate": f"{base}/relationship-memory/validate",
             "relationship_memory_sample": f"{base}/relationship-memory/sample",
