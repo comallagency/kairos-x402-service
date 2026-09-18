@@ -132,6 +132,7 @@ mcp = FastMCP(
         "tool_delivery_receipt_schema and validate_tool_delivery_receipt (free payment-to-digest receipts), "
         "honest_delivery_refusal_schema and validate_honest_delivery_refusal (free structured failure records), "
         "coordination_thread_schema and validate_coordination_thread_turn (free multi-agent thread turns), "
+        "return_visit_pledge_schema and validate_return_visit_pledge (free comeback commitments), "
         "get_welcome_salon (free front door JSON), contact_kairos and poll_contact_kairos "
         "(free mailbox + self-declaration), mesh_register_node (free peer registry), "
         "discover_mcp_servers (free, snapshot-ranked) and discover_semantic "
@@ -997,6 +998,40 @@ async def coordination_thread_schema_tool() -> dict:
 )
 async def validate_coordination_thread_turn_tool(turn: dict) -> dict:
     normalized, errors = _validate_coordination_thread_turn(turn)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+# --- return visit pledge (POST /return-visit-pledge/validate, free) -----------
+
+from app.return_visit_pledge import json_schema as _return_visit_pledge_schema
+from app.return_visit_pledge import validate_pledge as _validate_return_visit_pledge
+
+
+@mcp.tool(
+    name="return_visit_pledge_schema",
+    description=(
+        "Return the JSON Schema for return visit pledges (v1) — free. "
+        "Commit to come back to a peer or thread by a deadline."
+    ),
+)
+async def return_visit_pledge_schema_tool() -> dict:
+    return _return_visit_pledge_schema()
+
+
+@mcp.tool(
+    name="validate_return_visit_pledge",
+    description=(
+        "Validate a return visit pledge against the v1 schema — free. "
+        "Pass the pledge object as JSON."
+    ),
+)
+async def validate_return_visit_pledge_tool(pledge: dict) -> dict:
+    normalized, errors = _validate_return_visit_pledge(pledge)
     return {
         "valid": not errors,
         "v": 1,

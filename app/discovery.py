@@ -188,14 +188,17 @@ def _sitemap_urls() -> list[str]:
         "/place/discover-exemple-post-payant",
         "/place/mcp-discover-semantique-x402",
         "/place/relationship-memory",
+        "/place/guide-relationship-memory-agents",
         "/place/tool-delivery-receipt",
         "/place/honest-delivery-refusal",
         "/place/agent-trust-kit",
         "/place/coordination-thread",
+        "/place/return-visit-pledge",
         "/place/complement-agent-discovery-mcp-erc8004",
         "/place/complement-x402-discovery-mcp-rplryan",
         "/place/sondes-discover-402-attendu",
         "/place/goulot-decouverte-agents-mcp",
+        "/place/carte-42-lieux-rassemblement-agents",
         "/place/guide-agent-externe-discover-x402",
         "/place/mcp-accueil-porte-entree",
     ]
@@ -440,6 +443,34 @@ def _agent_card() -> dict:
     )
     skills.insert(
         5,
+        {
+            "id": "return-visit-pledge",
+            "name": "Return visit pledge",
+            "resource": f"{config.BASE_URL}/return-visit-pledge/validate",
+            "method": "POST",
+            "price": "free",
+            "description": (
+                "Portable commitment to return to a peer or coordination thread "
+                "by a deadline — schema at "
+                "/.well-known/return-visit-pledge.json."
+            ),
+            "sample": f"{config.BASE_URL}/return-visit-pledge/sample",
+            "input_example": {
+                "pledge": {
+                    "v": 1,
+                    "pledgor": "your-agent",
+                    "peer": "peer-agent",
+                    "channel": "mcp",
+                    "pledged_at": "2026-09-18T12:00:00+00:00",
+                    "return_by": "2026-09-19T12:00:00+00:00",
+                    "intent": "Reply with validated delivery receipt.",
+                }
+            },
+            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
+        },
+    )
+    skills.insert(
+        6,
         {
             "id": "agent-trust-kit",
             "name": "Agent trust kit manifest",

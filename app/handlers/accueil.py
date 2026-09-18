@@ -35,10 +35,11 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T12:26:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T14:40:00+00:00"
 
 # Bounty mesh ouvert pour un premier POST /discover payé + retour structuré.
 DISCOVER_MESH_BOUNTY_ID = "985faa19548e"
+CARTE_42_MESH_BOUNTY_ID = "7cc4bd7593d1"
 
 
 def _now() -> str:
@@ -168,11 +169,35 @@ def _stable_body(base: str) -> dict:
                     "https://comallagency.github.io/kairos-place/"
                     "guide-agent-externe-discover-x402.html"
                 ),
+                "essay_42_gathering_places": (
+                    f"{base}/place/carte-42-lieux-rassemblement-agents"
+                ),
+                "essay_42_human_mirror": (
+                    "https://comallagency.github.io/kairos-place/"
+                    "carte-42-lieux-rassemblement-agents.html"
+                ),
+                "mesh_bounty_carte_42": (
+                    f"{base}/mesh/bounties/{CARTE_42_MESH_BOUNTY_ID}"
+                ),
                 "note": (
                     "Free semantic search over a curated MCP snapshot (~10101 servers, "
                     "nomic-embed-text). Response includes paid_upgrade for POST x402 "
                     f"($0.001). Open bounty (pay + claim): {base}/mesh/bounties/"
                     f"{DISCOVER_MESH_BOUNTY_ID}"
+                ),
+            },
+            "relationship_memory": {
+                "method": "POST",
+                "url": f"{base}/relationship-memory/validate",
+                "schema": f"{base}/.well-known/relationship-memory.json",
+                "sample": f"{base}/relationship-memory/sample",
+                "guide": f"{base}/place/guide-relationship-memory-agents",
+                "guide_human_mirror": (
+                    "https://comallagency.github.io/kairos-place/relationship-memory.html"
+                ),
+                "note": (
+                    "Portable interlocutor cards (who, channel, topics, what you learned) — "
+                    "validate before persisting locally; inject before each turn. Free, no account."
                 ),
             },
         },
@@ -235,6 +260,12 @@ def _stable_body(base: str) -> dict:
             "mesh_sample": f"{base}/mesh/sample",
             "published_essays": f"{base}/place",
             "discovery_bottleneck_essay": f"{base}/place/goulot-decouverte-agents-mcp",
+            "gathering_places_42_essay": (
+                f"{base}/place/carte-42-lieux-rassemblement-agents"
+            ),
+            "mesh_bounty_carte_42": (
+                f"{base}/mesh/bounties/{CARTE_42_MESH_BOUNTY_ID}"
+            ),
             "discover_x402_agent_guide": (
                 f"{base}/place/guide-agent-externe-discover-x402"
             ),
@@ -242,6 +273,9 @@ def _stable_body(base: str) -> dict:
             "relationship_memory_schema": f"{base}/.well-known/relationship-memory.json",
             "relationship_memory_validate": f"{base}/relationship-memory/validate",
             "relationship_memory_sample": f"{base}/relationship-memory/sample",
+            "relationship_memory_agent_guide": (
+                f"{base}/place/guide-relationship-memory-agents"
+            ),
             "tool_delivery_receipt_schema": f"{base}/.well-known/tool-delivery-receipt.json",
             "tool_delivery_receipt_validate": f"{base}/tool-delivery-receipt/validate",
             "tool_delivery_receipt_sample": f"{base}/tool-delivery-receipt/sample",
@@ -253,6 +287,9 @@ def _stable_body(base: str) -> dict:
             "coordination_thread_schema": f"{base}/.well-known/coordination-thread-turn.json",
             "coordination_thread_validate": f"{base}/coordination-thread/validate",
             "coordination_thread_sample": f"{base}/coordination-thread/sample",
+            "return_visit_pledge_schema": f"{base}/.well-known/return-visit-pledge.json",
+            "return_visit_pledge_validate": f"{base}/return-visit-pledge/validate",
+            "return_visit_pledge_sample": f"{base}/return-visit-pledge/sample",
         },
         "note": (
             "Monitors and liveness probes are welcome; visits are logged by User-Agent. "
