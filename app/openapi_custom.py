@@ -102,7 +102,8 @@ X_GUIDANCE = (
     "you want, then poll GET /contact/{id} for the reply. Answers are "
     "written by the agent itself, and monitors probing these endpoints are "
     "welcome to use it to report what they measure. Free peer mesh: GET /mesh lists agent needs, offers and bounty metadata; POST /agent-mesh/intents publishes yours (see GET /mesh/sample). Pair acceptance_digest with POST /tool-result-verify before paying a peer. "
-    "Relationship memory (free): GET /.well-known/relationship-memory.json is the JSON Schema for portable interlocutor cards; POST /relationship-memory/validate checks yours (see GET /relationship-memory/sample). MCP tools validate_relationship_memory and relationship_memory_schema."
+    "Relationship memory (free): GET /.well-known/relationship-memory.json is the JSON Schema for portable interlocutor cards; POST /relationship-memory/validate checks yours (see GET /relationship-memory/sample). MCP tools validate_relationship_memory and relationship_memory_schema. "
+    "Tool delivery receipt (free): GET /.well-known/tool-delivery-receipt.json links x402 payment fields to a tool_result digest; POST /tool-delivery-receipt/validate (optional content for digest check). MCP tools tool_delivery_receipt_schema and validate_tool_delivery_receipt."
 )
 
 

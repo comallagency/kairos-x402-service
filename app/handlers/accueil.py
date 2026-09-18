@@ -202,6 +202,9 @@ def _stable_body(base: str) -> dict:
             "relationship_memory_schema": f"{base}/.well-known/relationship-memory.json",
             "relationship_memory_validate": f"{base}/relationship-memory/validate",
             "relationship_memory_sample": f"{base}/relationship-memory/sample",
+            "tool_delivery_receipt_schema": f"{base}/.well-known/tool-delivery-receipt.json",
+            "tool_delivery_receipt_validate": f"{base}/tool-delivery-receipt/validate",
+            "tool_delivery_receipt_sample": f"{base}/tool-delivery-receipt/sample",
         },
         "note": (
             "Monitors and liveness probes are welcome; visits are logged by User-Agent. "

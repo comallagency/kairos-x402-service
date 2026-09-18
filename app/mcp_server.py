@@ -129,6 +129,7 @@ mcp = FastMCP(
         "multi-step research, async). Also free, unrelated to the kit: "
         "digest_tool_result and verify_tool_result_digest (free integrity), "
         "relationship_memory_schema and validate_relationship_memory (free interlocutor cards), "
+        "tool_delivery_receipt_schema and validate_tool_delivery_receipt (free payment-to-digest receipts), "
         "discover_mcp_servers (free, snapshot-ranked) and discover_semantic "
         "(paid, snapshot embeddings) find MCP servers by need."
     ),
@@ -891,6 +892,48 @@ async def validate_relationship_memory_tool(card: dict) -> dict:
         "errors": errors,
         "normalized": normalized,
     }
+
+
+# --- tool delivery receipt (POST /tool-delivery-receipt/validate, free) ------
+
+from app.tool_delivery_receipt import json_schema as _tool_delivery_receipt_schema
+from app.tool_delivery_receipt import validate_receipt as _validate_tool_delivery_receipt
+
+
+@mcp.tool(
+    name="tool_delivery_receipt_schema",
+    description=(
+        "Return the JSON Schema for portable tool delivery receipts (v1) — free. "
+        "Link x402 payment metadata to a tool_result SHA-256 digest."
+    ),
+)
+async def tool_delivery_receipt_schema_tool() -> dict:
+    return _tool_delivery_receipt_schema()
+
+
+@mcp.tool(
+    name="validate_tool_delivery_receipt",
+    description=(
+        "Validate a tool delivery receipt against the v1 schema — free. "
+        "Pass receipt JSON; optional content re-verifies delivery.digest."
+    ),
+)
+async def validate_tool_delivery_receipt_tool(
+    receipt: dict,
+    content: str | dict | list | None = None,
+) -> dict:
+    normalized, errors, digest_check = _validate_tool_delivery_receipt(
+        receipt, content=content
+    )
+    out: dict = {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+    if digest_check is not None:
+        out["digest_verification"] = digest_check
+    return out
 
 
 # --- discover_mcp_servers (GET /discover, free - no payment flow) ----------
