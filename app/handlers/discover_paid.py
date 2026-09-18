@@ -1,5 +1,6 @@
 import json
 import zlib
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app import db
+from app.discover_freshness import combined_relevance, parse_observed_day
 from app.upstream.ollama import OllamaError, embed
 from app.x402_setup import KIT_TAGS
 
@@ -25,6 +27,7 @@ MIN_SIMILARITY = 0.30
 SNAPSHOT_DATE = "2026-09-18"
 SNAPSHOT_ROWS = 10101  # défaut doc ; la réponse utilise len(snapshot) en prod
 _WARMUP_QUERY = "mcp server discovery"
+_REFERENCE_DATE = parse_observed_day(SNAPSHOT_DATE) or date.today()
 
 
 @lru_cache(maxsize=1)
@@ -52,12 +55,23 @@ def _top_matches(
         return 0, []
     idx = np.where(above)[0]
     sub = scores[idx]
-    if len(sub) <= max_results:
-        order = np.argsort(-sub)
+    combined = np.array(
+        [
+            combined_relevance(
+                float(sub[i]),
+                rows[int(idx[i])].get("updated_at"),
+                _REFERENCE_DATE,
+            )
+            for i in range(len(sub))
+        ],
+        dtype=np.float32,
+    )
+    if len(combined) <= max_results:
+        order = np.argsort(-combined)
         picked = [(float(sub[i]), rows[int(idx[i])]) for i in order]
         return match_count, picked
-    top_local = np.argpartition(-sub, max_results)[:max_results]
-    top_local = top_local[np.argsort(-sub[top_local])]
+    top_local = np.argpartition(-combined, max_results)[:max_results]
+    top_local = top_local[np.argsort(-combined[top_local])]
     picked = [(float(sub[i]), rows[int(idx[i])]) for i in top_local]
     return match_count, picked
 
@@ -79,6 +93,11 @@ async def _run_discover(q: str, max_results: int, threshold: float) -> dict:
                 "description": r["desc"],
                 "registry": r["registry"] or None,
                 "relevance": round(score, 4),
+                **(
+                    {"observed_at": r["updated_at"]}
+                    if r.get("updated_at")
+                    else {}
+                ),
             }
             for score, r in top
         ],

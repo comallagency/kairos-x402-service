@@ -168,7 +168,6 @@ def build_rows(merged: list[dict], ollama_url: str) -> list[dict]:
     for row in merged:
         if row.get("_emb_preset") is not None:
             row["emb"] = row.pop("_emb_preset")
-        row.pop("updated_at", None)
         row.pop("_emb_preset", None)
 
     return [
@@ -178,6 +177,7 @@ def build_rows(merged: list[dict], ollama_url: str) -> list[dict]:
             "desc": r.get("desc") or "",
             "registry": r.get("registry") or "",
             "emb": r["emb"],
+            **({"updated_at": r["updated_at"]} if r.get("updated_at") else {}),
         }
         for r in merged
         if r.get("emb")
