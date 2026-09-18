@@ -30,6 +30,7 @@ from app.x402_setup import (
     PDF_OUTPUT_SCHEMA,
     ROUTE_SUMMARIES,
     ROUTE_USE_CASES,
+    DISCOVER_INPUT_EXAMPLE,
     DISCOVER_INPUT_SCHEMA,
     DISCOVER_OUTPUT_SCHEMA,
     DISCOVER_SAMPLE_OUTPUT,
@@ -167,10 +168,13 @@ def _x_payment_info(payment_option) -> dict:
     }
 
 
-def _request_body(input_schema: dict) -> dict:
+def _request_body(input_schema: dict, example: dict | None = None) -> dict:
+    json_body: dict = {"schema": {"type": "object", **input_schema}}
+    if example is not None:
+        json_body["example"] = example
     return {
         "required": True,
-        "content": {"application/json": {"schema": {"type": "object", **input_schema}}},
+        "content": {"application/json": json_body},
     }
 
 
@@ -252,9 +256,9 @@ def build_custom_openapi(app):
             operation["x-payment-info"] = _x_payment_info(payment_option)
             operation.setdefault("security", [])
             operation.setdefault("responses", {})["402"] = _payment_response(payment_option)
-            operation["requestBody"] = _request_body(
-                generated.input_schema if generated else _INPUT_SCHEMAS[route_name]
-            )
+            input_schema = generated.input_schema if generated else _INPUT_SCHEMAS[route_name]
+            input_example = DISCOVER_INPUT_EXAMPLE if route_name == "discover" else None
+            operation["requestBody"] = _request_body(input_schema, example=input_example)
             # Discoverability material for AgentCash's semantic search (see
             # BRIEF-CORRECTIONS.md): their indexer synthesizes ranking
             # keywords/use-cases from summary + description + schemas, not
@@ -271,9 +275,12 @@ def build_custom_openapi(app):
             operation["tags"] = route_config.tags
             operation["x-use-cases"] = generated.use_cases if generated else ROUTE_USE_CASES[route_name]
             output_schema = generated.output_schema if generated else _OUTPUT_SCHEMAS[route_name]
+            success_json: dict = {"schema": output_schema}
+            if route_name == "discover":
+                success_json["example"] = DISCOVER_SAMPLE_OUTPUT
             operation["responses"]["200"] = {
                 "description": "Successful Response",
-                "content": {"application/json": {"schema": output_schema}},
+                "content": {"application/json": success_json},
             }
 
         _enrich_free_discover_operations(schema)

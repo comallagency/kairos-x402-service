@@ -182,6 +182,12 @@ DISCOVER_OUTPUT_SCHEMA = {
     "required": ["q", "results"],
 }
 
+DISCOVER_INPUT_EXAMPLE = {
+    "q": "read a PDF and give me markdown",
+    "max_results": 5,
+    "min_similarity": 0.3,
+}
+
 DISCOVER_SAMPLE_OUTPUT = {
     "q": "read a PDF and give me markdown",
     "snapshot_date": "2026-09-18",

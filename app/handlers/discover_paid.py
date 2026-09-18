@@ -23,7 +23,7 @@ MAX_RESULTS_CAP = 25
 DEFAULT_MAX_RESULTS = 5
 MIN_SIMILARITY = 0.30
 SNAPSHOT_DATE = "2026-09-18"
-SNAPSHOT_ROWS = 2947  # défaut doc ; la réponse utilise len(snapshot) en prod
+SNAPSHOT_ROWS = 10101  # défaut doc ; la réponse utilise len(snapshot) en prod
 _WARMUP_QUERY = "mcp server discovery"
 
 
