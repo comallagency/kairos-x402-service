@@ -10,12 +10,14 @@ from app.x402_setup import ROUTE_DESCRIPTIONS
 router = APIRouter()
 
 JOB_POLL_SLOT_SECONDS = 60
+SAMPLE_JOB_ID = "sample-0000"
+SAMPLE_CREATED_AT = "2026-01-01T00:00:00+00:00"
+SAMPLE_FINISHED_AT = "2026-01-01T00:01:00+00:00"
 
 
-@router.get("/jobs/sample", openapi_extra={"security": []})
-async def jobs_sample():
+def _sample_job_result_body() -> dict:
     return {
-        "job_id": "sample-0000",
+        "job_id": SAMPLE_JOB_ID,
         "status": "done",
         "result": {
             "subject": "Example Corp",
@@ -29,6 +31,11 @@ async def jobs_sample():
             None, "web_search", 0, 0.0, steps_executed=0, sources_read=1
         ),
     }
+
+
+@router.get("/jobs/sample", openapi_extra={"security": []})
+async def jobs_sample():
+    return _sample_job_result_body()
 
 
 @router.post("/jobs", description=ROUTE_DESCRIPTIONS["jobs"])
@@ -64,6 +71,14 @@ async def create_job(request: Request):
 
 @router.get("/jobs/{job_id}", openapi_extra={"security": []})
 async def get_job_status(job_id: str):
+    if job_id == SAMPLE_JOB_ID:
+        return {
+            "job_id": SAMPLE_JOB_ID,
+            "status": "done",
+            "created_at": SAMPLE_CREATED_AT,
+            "finished_at": SAMPLE_FINISHED_AT,
+        }
+
     job = db.get_job(job_id)
     if job is None:
         return JSONResponse({"error": {"reason": "job_not_found"}}, status_code=404)
@@ -80,6 +95,9 @@ async def get_job_status(job_id: str):
 
 @router.get("/jobs/{job_id}/result", openapi_extra={"security": []})
 async def get_job_result(job_id: str):
+    if job_id == SAMPLE_JOB_ID:
+        return _sample_job_result_body()
+
     job = db.get_job(job_id)
     if job is None:
         return JSONResponse({"error": {"reason": "job_not_found"}}, status_code=404)
