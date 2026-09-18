@@ -21,6 +21,30 @@ router = APIRouter()
 
 MAX_RESULTS_CAP = 10
 SAMPLE_QUERY = "extract text from a PDF"
+PAID_MAX_RESULTS_CAP = 25
+PAID_PRICE_USDC = 0.001
+PAID_X402_AMOUNT_MICRO = 1000
+
+
+def _paid_upgrade_hint(base: str) -> dict:
+    """Signal machine-readable pour les clients qui lisent le GET gratuit."""
+    return {
+        "method": "POST",
+        "url": f"{base}/discover",
+        "price_usdc": PAID_PRICE_USDC,
+        "x402_amount_micro": PAID_X402_AMOUNT_MICRO,
+        "network": "base",
+        "max_results_cap": PAID_MAX_RESULTS_CAP,
+        "min_similarity_configurable": True,
+        "mcp_tool": "discover_semantic",
+        "example_body": {
+            "q": SAMPLE_QUERY,
+            "max_results": 5,
+            "min_similarity": MIN_SIMILARITY,
+        },
+        "example_place": f"{base}/place/discover-exemple-post-payant",
+        "when_to_pay": f"{base}/place/discover-post-quand-payer",
+    }
 
 DESCRIPTION = (
     "Discover MCP servers matching a need, ranked by semantic similarity over "
@@ -81,9 +105,11 @@ async def discover(
         route="discover", method="GET", status="unpaid",
         user_agent=user_agent, body_excerpt=need[:2048],
     )
+    paid_upgrade = _paid_upgrade_hint(base)
     if used_example_query:
         return {
             **result,
+            "paid_upgrade": paid_upgrade,
             "hint": {
                 "reason": "default_example_query",
                 "detail": (
@@ -94,4 +120,4 @@ async def discover(
                 "sample_url": f"{base}/discover/sample",
             },
         }
-    return result
+    return {**result, "paid_upgrade": paid_upgrade}
