@@ -64,7 +64,7 @@ async def capabilities():
             "price": "free",
             "summary": (
                 "Find MCP servers by need, ranked by semantic relevance over a "
-                "curated snapshot — no payment (up to 10 matches)."
+                "curated snapshot — no payment (5 by default, max 10 via max_results)."
             ),
             "use_cases": [
                 "discover MCP servers matching a need before wiring a client",

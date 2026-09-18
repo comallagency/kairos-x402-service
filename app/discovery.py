@@ -77,7 +77,8 @@ def _free_discover_resource_entry() -> dict:
         "method": "GET",
         "description": (
             "Free MCP server discovery: semantic ranking over a curated snapshot "
-            "(nomic-embed-text). Query param q=your need; up to 10 matches, no "
+            "(nomic-embed-text). Query param q=your need; 5 matches by default "
+            "(max 10 via max_results), no "
             "account, no x402 payment. Bare GET returns a ranked example plus a "
             "hint when q= is omitted."
         ),
@@ -294,7 +295,8 @@ def _agent_card() -> dict:
             "description": (
                 "Find MCP servers matching a need, ranked by semantic relevance "
                 "over a curated MCP snapshot (nomic-embed-text). Free, no account, "
-                "no payment — query param q=your need, up to 10 matches."
+                "no payment — query param q=your need; 5 matches by default "
+                "(max 10 via max_results)."
             ),
             "sample": f"{config.BASE_URL}/discover/sample",
             "input_example": {"q": "postgresql jdbc read only mcp"},
