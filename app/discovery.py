@@ -449,23 +449,37 @@ async def agent_json():
 # discoverable at the path MCP-aware crawlers already look for.
 @router.get("/.well-known/mcp/server-card.json", openapi_extra={"security": []})
 async def mcp_server_card():
+    base = config.BASE_URL.rstrip("/")
     return {
         "name": "AgentIndex x402",
         "description": (
-            f"{KIT_TAGLINE} A pay-per-call kit (pdf, web-read, extract, "
-            "summarize, detect-language) plus batch translation and "
-            "delegated research jobs. Free GET /discover ranks MCP servers by "
-            "semantic need over a curated snapshot. USDC on Base, no account, "
-            "no API key."
+            f"{KIT_TAGLINE} Pay-per-call kit (pdf, web-read, extract, summarize, "
+            "detect-language) plus batch translation and delegated research jobs. "
+            "MCP discovery: free tool discover_mcp_servers (same as GET /discover, "
+            "5–10 matches) or paid discover_semantic / POST /discover — 0.001 USDC "
+            "on Base (x402 v2), up to 25 ranked matches over a 10101-server snapshot "
+            "(nomic-embed-text). No account, no API key."
         ),
-        "url": config.BASE_URL,
-        "discover": f"{config.BASE_URL}/discover?q=your+need",
-        "mcpEndpoint": f"{config.BASE_URL}/mcp",
+        "url": base,
+        "discover": f"{base}/discover?q=your+need",
+        "discoverPaid": {
+            "url": f"{base}/discover",
+            "method": "POST",
+            "price_usdc": 0.001,
+            "mcp_tool": "discover_semantic",
+            "example": f"{base}/place/discover-exemple-post-payant",
+        },
+        "mcpEndpoint": f"{base}/mcp",
         "protocol": "mcp",
         "transport": "streamable-http",
-        "x402": {"wellKnown": f"{config.BASE_URL}/.well-known/x402"},
-        "openapi": f"{config.BASE_URL}/openapi.json",
-        "capabilities": f"{config.BASE_URL}/capabilities",
+        "x402": {"wellKnown": f"{base}/.well-known/x402"},
+        "openapi": f"{base}/openapi.json",
+        "capabilities": {
+            "streaming": False,
+            "pushNotifications": False,
+            "stateTransitionHistory": False,
+        },
+        "capabilitiesUrl": f"{base}/capabilities",
     }
 
 
