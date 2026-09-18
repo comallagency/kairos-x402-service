@@ -201,6 +201,7 @@ DISCOVER_SAMPLE_OUTPUT = {
             "description": "Extract a public PDF into clean markdown text, plus metadata and a real token count.",
             "registry": "registre-mcp",
             "relevance": 0.7211,
+            "observed_at": "2026-09-02T19:07:49.374328Z",
         },
         {
             "name": "Docling Server",
@@ -208,6 +209,7 @@ DISCOVER_SAMPLE_OUTPUT = {
             "description": "Document conversion to markdown and structured text for LLM agents.",
             "registry": "annuaire",
             "relevance": 0.6487,
+            "observed_at": "2026-09-10T12:00:00Z",
         },
         {
             "name": "Srclight",
@@ -215,6 +217,7 @@ DISCOVER_SAMPLE_OUTPUT = {
             "description": "Deep code indexing for AI agents. FTS5 + embeddings + call graphs. Fully local.",
             "registry": "registre-mcp",
             "relevance": 0.4102,
+            "observed_at": "2026-09-15T08:30:00Z",
         },
     ],
 }

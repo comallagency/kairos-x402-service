@@ -295,7 +295,8 @@ def _agent_card() -> dict:
             "price": "free",
             "description": (
                 "Find MCP servers matching a need, ranked by semantic relevance "
-                "over a curated MCP snapshot (nomic-embed-text). Free, no account, "
+                "and registry freshness (observed_at per result) over a curated "
+                "MCP snapshot (nomic-embed-text). Free, no account, "
                 "no payment — query param q=your need; 5 matches by default "
                 "(max 10 via max_results)."
             ),
@@ -317,6 +318,7 @@ def _agent_card() -> dict:
                         ),
                         "registry": "registre-mcp",
                         "relevance": 0.8123,
+                        "observed_at": "2026-09-02T19:07:49.374328Z",
                     }
                 ],
             },
