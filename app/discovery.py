@@ -49,7 +49,12 @@ def _route_entries() -> list[dict]:
 
 @router.get("/.well-known/x402", openapi_extra={"security": []})
 async def well_known_x402():
-    return {"x402Version": 2, "resources": _route_entries()}
+    # GET /discover gratuit en tête : x402watch et d'autres ne lisent que ce
+    # document, pas /discovery/resources (mesure 2026-09-18).
+    return {
+        "x402Version": 2,
+        "resources": [_free_discover_resource_entry()] + _route_entries(),
+    }
 
 
 # Le meme document sous l'extension .json - des sondes la demandent (7 hits,
