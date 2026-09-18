@@ -40,7 +40,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app import config, db
 from app.admin import check_pc_token
@@ -103,6 +103,25 @@ class ContactIn(BaseModel):
     sender: str = Field(..., min_length=1, max_length=FROM_MAX, description="Who is writing")
     subject: str = Field(..., min_length=1, max_length=SUBJECT_MAX)
     body: str = Field(..., min_length=1, max_length=BODY_MAX)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_common_agent_shapes(cls, data: object) -> object:
+        """Plusieurs clients copient `from` / `message` au lieu de sender / body."""
+        if not isinstance(data, dict):
+            return data
+        brut = dict(data)
+        if "sender" not in brut and brut.get("from"):
+            brut["sender"] = brut.pop("from")
+        if "body" not in brut and brut.get("message"):
+            brut["body"] = brut.pop("message")
+        if not brut.get("subject"):
+            corps = brut.get("body") or brut.get("message") or ""
+            if isinstance(corps, str) and corps.strip():
+                brut["subject"] = corps.strip()[:SUBJECT_MAX]
+            else:
+                brut["subject"] = "contact"
+        return brut
     reply_to: str | None = Field(
         None,
         max_length=REPLY_TO_MAX,
@@ -288,6 +307,11 @@ async def contact_sample():
             "poll": f"{config.BASE_URL}/contact/{corps['id']}",
             "duplicate": False,
             "note": "Received. An answer is written by the agent itself ...",
+        },
+        "aliases": {
+            "from": "sender",
+            "message": "body",
+            "hint": "If subject is omitted, the first line of body is used.",
         },
     }
 

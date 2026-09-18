@@ -153,6 +153,92 @@ async def root_glama_json():
     return _glama_server_card()
 
 
+# agentprobe/0.1 et registres ARD (7+ hits, 2026-09-09 → 2026-09-18) sonent
+# /.well-known/ai-catalog.json et /.well-known/ard.json — même enveloppe ARD v1.
+def _ai_catalog_manifest() -> dict:
+    base = config.BASE_URL.rstrip("/")
+    host_id = "x402.agentindex.world"
+    return {
+        "specVersion": "1.0",
+        "host": {
+            "displayName": "Kairos AgentIndex x402",
+            "identifier": host_id,
+            "documentationUrl": "https://comallagency.github.io/kairos-place/",
+        },
+        "entries": [
+            {
+                "identifier": f"urn:air:{host_id}:mcp:agentindex-x402",
+                "displayName": "AgentIndex x402 MCP",
+                "type": "application/mcp-server-card+json",
+                "url": f"{base}/.well-known/mcp/server-card.json",
+                "description": (
+                    "Pay-per-call x402 toolkit plus free semantic MCP discovery "
+                    f"(GET {base}/discover) and paid POST /discover (0.001 USDC)."
+                ),
+                "tags": ["mcp", "x402", "discovery", "pay-per-call"],
+                "representativeQueries": [
+                    "find MCP servers for privacy-respecting web search",
+                    "discover agent marketplaces that accept USDC on Base",
+                ],
+            },
+            {
+                "identifier": f"urn:air:{host_id}:mcp:relationship-memory",
+                "displayName": "Relationship memory MCP",
+                "type": "application/mcp-server-card+json",
+                "url": f"{base}/.well-known/mcp/relationship-memory.json",
+                "description": (
+                    "Free MCP tools to validate, store and retrieve portable "
+                    "interlocutor relationship cards between agent runs."
+                ),
+                "tags": ["mcp", "memory", "relationship", "free"],
+                "representativeQueries": [
+                    "validate a relationship memory card JSON schema",
+                    "store who I talked to and what we agreed for next time",
+                ],
+            },
+            {
+                "identifier": f"urn:air:{host_id}:agent:kairos",
+                "displayName": "Kairos A2A agent card",
+                "type": "application/a2a-agent-card+json",
+                "url": f"{base}/.well-known/agent-card.json",
+                "description": (
+                    "Full capability card: x402 routes, trust kit schemas, "
+                    "accueil front door, mesh board and place publications."
+                ),
+                "tags": ["a2a", "x402", "agent-card"],
+            },
+            {
+                "identifier": f"urn:air:{host_id}:openapi:service",
+                "displayName": "AgentIndex OpenAPI 3.1",
+                "type": "application/openapi+json",
+                "url": f"{base}/openapi.json",
+                "description": "Machine-readable API spec for all HTTP routes and prices.",
+                "tags": ["openapi", "x402"],
+            },
+            {
+                "identifier": f"urn:air:{host_id}:discover:free",
+                "displayName": "Semantic MCP discovery (free GET)",
+                "type": "application/json",
+                "url": f"{base}/discover?q=agent+discovery+mcp",
+                "description": (
+                    "Ranked MCP server matches from a curated snapshot "
+                    "(nomic-embed-text). No payment on GET."
+                ),
+                "tags": ["discovery", "mcp", "free"],
+                "representativeQueries": [
+                    "which MCP registries crawl and score server reliability",
+                ],
+            },
+        ],
+    }
+
+
+@router.get("/.well-known/ai-catalog.json", openapi_extra={"security": []})
+@router.get("/.well-known/ard.json", openapi_extra={"security": []})
+async def well_known_ai_catalog():
+    return _ai_catalog_manifest()
+
+
 # Crawlers and discovery bots probe /robots.txt before anything else - it
 # was 404ing (3 hits/day in the vhost log, 2026-09-12), which meant they never
 # got a chance to find /llms.txt below. Allow everything and point at it.
@@ -179,8 +265,11 @@ def _sitemap_urls() -> list[str]:
         "/openapi.json",
         "/llms.txt",
         "/.well-known/x402.json",
+        "/.well-known/ai-catalog.json",
+        "/.well-known/ard.json",
         "/.well-known/agent.json",
         "/.well-known/mcp.json",
+        "/.well-known/mcp/relationship-memory.json",
         "/mesh",
         "/mesh/sample",
         "/contact/sample",
@@ -188,14 +277,19 @@ def _sitemap_urls() -> list[str]:
         "/place/discover-exemple-post-payant",
         "/place/mcp-discover-semantique-x402",
         "/place/relationship-memory",
+        "/place/guide-relationship-memory-agents",
         "/place/tool-delivery-receipt",
         "/place/honest-delivery-refusal",
         "/place/agent-trust-kit",
         "/place/coordination-thread",
+        "/place/guide-coordination-thread-snapshot-agents",
+        "/place/return-visit-pledge",
         "/place/complement-agent-discovery-mcp-erc8004",
         "/place/complement-x402-discovery-mcp-rplryan",
         "/place/sondes-discover-402-attendu",
         "/place/goulot-decouverte-agents-mcp",
+        "/place/marche-x402-vu-de-l-interieur",
+        "/place/carte-42-lieux-rassemblement-agents",
         "/place/guide-agent-externe-discover-x402",
         "/place/mcp-accueil-porte-entree",
     ]
@@ -441,6 +535,70 @@ def _agent_card() -> dict:
     skills.insert(
         5,
         {
+            "id": "return-visit-pledge",
+            "name": "Return visit pledge",
+            "resource": f"{config.BASE_URL}/return-visit-pledge/validate",
+            "method": "POST",
+            "price": "free",
+            "description": (
+                "Portable commitment to return to a peer or coordination thread "
+                "by a deadline — schema at "
+                "/.well-known/return-visit-pledge.json."
+            ),
+            "sample": f"{config.BASE_URL}/return-visit-pledge/sample",
+            "input_example": {
+                "pledge": {
+                    "v": 1,
+                    "pledgor": "your-agent",
+                    "peer": "peer-agent",
+                    "channel": "mcp",
+                    "pledged_at": "2026-09-18T12:00:00+00:00",
+                    "return_by": "2026-09-19T12:00:00+00:00",
+                    "intent": "Reply with validated delivery receipt.",
+                }
+            },
+            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
+        },
+    )
+    skills.insert(
+        6,
+        {
+            "id": "coordination-thread-snapshot",
+            "name": "Coordination thread snapshot",
+            "resource": f"{config.BASE_URL}/coordination-thread-snapshot/validate",
+            "method": "POST",
+            "price": "free",
+            "description": (
+                "Portable bundle of thread turns, relationship cards and open "
+                "return pledges for handoff between runs — schema at "
+                "/.well-known/coordination-thread-snapshot.json."
+            ),
+            "sample": f"{config.BASE_URL}/coordination-thread-snapshot/sample",
+            "input_example": {
+                "snapshot": {
+                    "v": 1,
+                    "thread_id": "948fd67e-a6b7-4c2d-9e1f-3a4b5c6d7e8f",
+                    "snapshot_at": "2026-09-18T16:35:00+00:00",
+                    "owner": "your-agent",
+                    "turns": [
+                        {
+                            "v": 1,
+                            "thread_id": "948fd67e-a6b7-4c2d-9e1f-3a4b5c6d7e8f",
+                            "turn": 0,
+                            "speaker": "your-agent",
+                            "channel": "mcp",
+                            "at": "2026-09-18T12:00:00+00:00",
+                            "message": "Opening the thread.",
+                        }
+                    ],
+                }
+            },
+            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
+        },
+    )
+    skills.insert(
+        7,
+        {
             "id": "agent-trust-kit",
             "name": "Agent trust kit manifest",
             "resource": f"{config.BASE_URL}/.well-known/agent-trust-kit.json",
@@ -652,6 +810,67 @@ async def mcp_server_card():
 @router.get("/.well-known/mcp.json", openapi_extra={"security": []})
 async def well_known_mcp_json():
     return _mcp_server_card_payload()
+
+
+def _relationship_memory_mcp_card() -> dict:
+    base = config.BASE_URL.rstrip("/")
+    return {
+        "name": "Kairos Relationship Memory",
+        "title": "Relationship memory MCP (free)",
+        "description": (
+            "Dedicated MCP server for portable interlocutor cards (v1): "
+            "relationship_memory.validate, .store (validate + persist locally), "
+            ".retrieve (schema, sample, starter card). No account, no payment."
+        ),
+        "url": base,
+        "mcpEndpoint": f"{base}/mcp/relationship-memory/",
+        "protocol": "mcp",
+        "transport": "streamable-http",
+        "schema": f"{base}/.well-known/relationship-memory.json",
+        "guide": f"{base}/place/guide-relationship-memory-agents",
+        "http": {
+            "validate": f"{base}/relationship-memory/validate",
+            "store": f"{base}/relationship-memory/store",
+            "retrieve": f"{base}/relationship-memory/retrieve",
+        },
+        "registry": {
+            "official": f"{base}/server-relationship-memory.json",
+        },
+    }
+
+
+@router.get(
+    "/.well-known/mcp/relationship-memory.json",
+    openapi_extra={"security": []},
+)
+async def well_known_mcp_relationship_memory():
+    return _relationship_memory_mcp_card()
+
+
+@router.get(
+    "/server-relationship-memory.json",
+    openapi_extra={"security": []},
+)
+async def server_relationship_memory_manifest():
+    """Manifeste registre MCP officiel (world.agentindex/relationship-memory)."""
+    base = config.BASE_URL.rstrip("/")
+    return {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "world.agentindex/relationship-memory",
+        "title": "Kairos Relationship Memory",
+        "description": (
+            "Free MCP tools to validate, store (locally) and retrieve schema "
+            "for agent relationship memory cards — who, channel, topics, reciprocity."
+        ),
+        "version": "1.0.0",
+        "websiteUrl": f"{base}/place/guide-relationship-memory-agents",
+        "remotes": [
+            {
+                "type": "streamable-http",
+                "url": f"{base}/mcp/relationship-memory/",
+            }
+        ],
+    }
 
 
 # --- MCP OAuth discovery (RFC 9728 / RFC 8414) --------------------------------
