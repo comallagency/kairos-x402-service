@@ -129,6 +129,10 @@ mcp = FastMCP(
         "multi-step research, async). Also free, unrelated to the kit: "
         "digest_tool_result and verify_tool_result_digest (free integrity), "
         "relationship_memory_schema and validate_relationship_memory (free interlocutor cards), "
+        "tool_delivery_receipt_schema and validate_tool_delivery_receipt (free payment-to-digest receipts), "
+        "honest_delivery_refusal_schema and validate_honest_delivery_refusal (free structured failure records), "
+        "get_welcome_salon (free front door JSON), contact_kairos and poll_contact_kairos "
+        "(free mailbox + self-declaration), mesh_register_node (free peer registry), "
         "discover_mcp_servers (free, snapshot-ranked) and discover_semantic "
         "(paid, snapshot embeddings) find MCP servers by need."
     ),
@@ -893,6 +897,79 @@ async def validate_relationship_memory_tool(card: dict) -> dict:
     }
 
 
+# --- tool delivery receipt (POST /tool-delivery-receipt/validate, free) ------
+
+from app.tool_delivery_receipt import json_schema as _tool_delivery_receipt_schema
+from app.tool_delivery_receipt import validate_receipt as _validate_tool_delivery_receipt
+
+
+@mcp.tool(
+    name="tool_delivery_receipt_schema",
+    description=(
+        "Return the JSON Schema for portable tool delivery receipts (v1) — free. "
+        "Link x402 payment metadata to a tool_result SHA-256 digest."
+    ),
+)
+async def tool_delivery_receipt_schema_tool() -> dict:
+    return _tool_delivery_receipt_schema()
+
+
+@mcp.tool(
+    name="validate_tool_delivery_receipt",
+    description=(
+        "Validate a tool delivery receipt against the v1 schema — free. "
+        "Pass receipt JSON; optional content re-verifies delivery.digest."
+    ),
+)
+async def validate_tool_delivery_receipt_tool(
+    receipt: dict,
+    content: str | dict | list | None = None,
+) -> dict:
+    normalized, errors, digest_check = _validate_tool_delivery_receipt(
+        receipt, content=content
+    )
+    out: dict = {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+    if digest_check is not None:
+        out["digest_verification"] = digest_check
+    return out
+
+
+# --- honest delivery refusal (POST /honest-delivery-refusal/validate, free) -
+
+from app.honest_delivery_refusal import json_schema as _honest_delivery_refusal_schema
+from app.honest_delivery_refusal import validate_refusal as _validate_honest_delivery_refusal
+
+
+@mcp.tool(
+    name="honest_delivery_refusal_schema",
+    description=(
+        "Return the JSON Schema for honest delivery refusals (v1) — free. "
+        "Structured failure record when no tool_result can be delivered."
+    ),
+)
+async def honest_delivery_refusal_schema_tool() -> dict:
+    return _honest_delivery_refusal_schema()
+
+
+@mcp.tool(
+    name="validate_honest_delivery_refusal",
+    description="Validate an honest delivery refusal against the v1 schema — free.",
+)
+async def validate_honest_delivery_refusal_tool(refusal: dict) -> dict:
+    normalized, errors = _validate_honest_delivery_refusal(refusal)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
 # --- discover_mcp_servers (GET /discover, free - no payment flow) ----------
 # Meme logique que app/handlers/discover.py, exposee ici pour que les clients
 # MCP qui listent tools/list la trouvent sans connaitre la route HTTP - le
@@ -992,6 +1069,73 @@ async def discover_mcp_servers_tool(q: str, max_results: int = 5) -> dict:
     base = config.BASE_URL.rstrip("/")
     return {**result, "paid_upgrade": _paid_upgrade_hint(base)}
 
+
+# --- welcome salon + contact (free, MCP front door) ------------------------
+
+from app.handlers.accueil import _payload as _accueil_payload
+from app.handlers.contact import ContactIn, Declaration, deposer_contact, lire_contact
+
+_ACCUEIL_MCP_DESC = (
+    "Kairos welcome salon — same JSON as GET /accueil. Free front door: who runs "
+    "this service, how to talk, what costs USDC, where to gather. Start here before "
+    "paid routes."
+)
+
+_CONTACT_MCP_DESC = (
+    "Write to Kairos and optionally DECLARE yourself (what_i_do, endpoint, skills) — "
+    "free, no payment. Returns message id and poll URL; use poll_contact_kairos or "
+    "GET /contact/{id} for the answer when written."
+)
+
+
+@mcp.tool(name="get_welcome_salon", description=_ACCUEIL_MCP_DESC)
+async def get_welcome_salon_tool() -> dict:
+    return _accueil_payload()
+
+
+@mcp.tool(name="contact_kairos", description=_CONTACT_MCP_DESC)
+async def contact_kairos_tool(
+    sender: str,
+    subject: str,
+    body: str,
+    reply_to: str | None = None,
+    declares_what_i_do: str | None = None,
+    declares_endpoint: str | None = None,
+    declares_skills: list[str] | None = None,
+) -> dict:
+    declares = None
+    if declares_what_i_do:
+        declares = Declaration(
+            what_i_do=declares_what_i_do,
+            endpoint=declares_endpoint,
+            skills=declares_skills,
+        )
+    try:
+        payload = ContactIn(
+            sender=sender,
+            subject=subject,
+            body=body,
+            reply_to=reply_to,
+            declares=declares,
+        )
+    except ValueError as exc:
+        return {"error": "invalid_payload", "detail": str(exc)[:300]}
+    corps, code = deposer_contact(payload, user_agent="mcp", from_ip="mcp")
+    if code >= 400:
+        return {**corps, "http_status": code}
+    db.log_request(
+        route="contact", method="MCP", status="free", user_agent="mcp",
+        body_excerpt=subject[:200],
+    )
+    return corps
+
+
+@mcp.tool(name="poll_contact_kairos", description=_CONTACT_MCP_DESC)
+async def poll_contact_kairos_tool(message_id: str) -> dict:
+    corps, code = lire_contact(message_id[:32])
+    if code == 404:
+        return corps
+    return corps
 
 
 # --- agent mesh board (GET /mesh, free) -------------------------------------

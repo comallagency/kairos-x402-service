@@ -133,16 +133,17 @@ def _fingerprint(payload: ContactIn) -> str:
     return hashlib.sha256(brut.encode("utf-8")).hexdigest()
 
 
-@router.post("/contact", status_code=201, openapi_extra={"security": []})
-async def post_contact(payload: ContactIn, request: Request):
-    """Dépose un message pour l'agent, et rend de quoi venir chercher la réponse."""
+def deposer_contact(
+    payload: ContactIn,
+    *,
+    user_agent: str = "",
+    from_ip: str = "",
+) -> tuple[dict, int]:
+    """Dépose un message (HTTP ou MCP). Retourne (corps JSON, code HTTP)."""
     empreinte = _fingerprint(payload)
-    adresse = _client_ip(request)
+    adresse = (from_ip or "mcp")[:64]
     maintenant = datetime.now(timezone.utc)
     with db.cursor() as cur:
-        # Un doublon exact rend l'identifiant deja attribue : un client qui
-        # reessaie apres un timeout reseau n'est pas un spammeur, et lui rendre
-        # une erreur le pousserait a reessayer encore.
         depuis = (maintenant - timedelta(hours=DEDUPE_WINDOW_HOURS)).isoformat()
         deja = cur.execute(
             "SELECT id, received_at FROM contact_messages "
@@ -150,26 +151,20 @@ async def post_contact(payload: ContactIn, request: Request):
             (empreinte, depuis),
         ).fetchone()
         if deja is not None:
-            return JSONResponse(
-                status_code=200,
-                content=_receipt(deja["id"], deja["received_at"], duplicate=True),
-            )
+            return _receipt(deja["id"], deja["received_at"], duplicate=True), 200
         heure = (maintenant - timedelta(hours=1)).isoformat()
         recents = cur.execute(
             "SELECT COUNT(*) AS n FROM contact_messages WHERE from_ip = ? AND received_at >= ?",
             (adresse, heure),
         ).fetchone()["n"]
         if recents >= PER_HOUR_PER_IP:
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "error": "too_many_messages",
-                    "detail": (
-                        f"{PER_HOUR_PER_IP} messages per hour from one address. "
-                        "This is a mailbox, not a queue."
-                    ),
-                },
-            )
+            return {
+                "error": "too_many_messages",
+                "detail": (
+                    f"{PER_HOUR_PER_IP} messages per hour from one address. "
+                    "This is a mailbox, not a queue."
+                ),
+            }, 429
         identifiant = uuid.uuid4().hex[:16]
         recu_le = maintenant.isoformat()
         cur.execute(
@@ -184,7 +179,7 @@ async def post_contact(payload: ContactIn, request: Request):
                 payload.reply_to or "",
                 payload.subject,
                 payload.body,
-                request.headers.get("user-agent", "")[:300],
+                user_agent[:300],
                 adresse,
                 empreinte,
                 payload.declares.what_i_do if payload.declares else None,
@@ -192,7 +187,52 @@ async def post_contact(payload: ContactIn, request: Request):
                 ", ".join(payload.declares.skills or []) if payload.declares else None,
             ),
         )
-    return _receipt(identifiant, recu_le, duplicate=False)
+    return _receipt(identifiant, recu_le, duplicate=False), 201
+
+
+def lire_contact(message_id: str) -> tuple[dict, int]:
+    """Lit un message déposé. Retourne (corps, code HTTP)."""
+    if _is_sample_message_id(message_id):
+        return _sample_contact_poll_body(), 200
+    with db.cursor() as cur:
+        ligne = cur.execute(
+            "SELECT id, received_at, sender, subject, body, answered_at, answer, "
+            "       declares_what, declares_endpoint, declares_skills "
+            "FROM contact_messages WHERE id = ?",
+            (message_id,),
+        ).fetchone()
+    if ligne is None:
+        return {"error": "no_such_message"}, 404
+    return {
+        "id": ligne["id"],
+        "received_at": ligne["received_at"],
+        "sender": ligne["sender"],
+        "subject": ligne["subject"],
+        "body": ligne["body"],
+        "answered_at": ligne["answered_at"],
+        "answer": ligne["answer"],
+        "status": "answered" if ligne["answered_at"] else "unanswered",
+        "declares": (
+            {
+                "what_i_do": ligne["declares_what"],
+                "endpoint": ligne["declares_endpoint"],
+                "skills": [s for s in (ligne["declares_skills"] or "").split(", ") if s],
+            }
+            if ligne["declares_what"]
+            else None
+        ),
+    }, 200
+
+
+@router.post("/contact", status_code=201, openapi_extra={"security": []})
+async def post_contact(payload: ContactIn, request: Request):
+    """Dépose un message pour l'agent, et rend de quoi venir chercher la réponse."""
+    corps, code = deposer_contact(
+        payload,
+        user_agent=request.headers.get("user-agent", ""),
+        from_ip=_client_ip(request),
+    )
+    return JSONResponse(status_code=code, content=corps)
 
 
 def _receipt(identifiant: str, recu_le: str, *, duplicate: bool) -> dict:
@@ -267,36 +307,10 @@ async def post_contact_poll(message_id: str):
 @router.get("/contact/{message_id}", openapi_extra={"security": []})
 async def get_contact(message_id: str):
     """Rend le message tel qu'il est arrivé, et la réponse si elle est écrite."""
-    if _is_sample_message_id(message_id):
-        return _sample_contact_poll_body()
-    with db.cursor() as cur:
-        ligne = cur.execute(
-            "SELECT id, received_at, sender, subject, body, answered_at, answer, "
-            "       declares_what, declares_endpoint, declares_skills "
-            "FROM contact_messages WHERE id = ?",
-            (message_id,),
-        ).fetchone()
-    if ligne is None:
-        return JSONResponse(status_code=404, content={"error": "no_such_message"})
-    return {
-        "id": ligne["id"],
-        "received_at": ligne["received_at"],
-        "sender": ligne["sender"],
-        "subject": ligne["subject"],
-        "body": ligne["body"],
-        "answered_at": ligne["answered_at"],
-        "answer": ligne["answer"],
-        "status": "answered" if ligne["answered_at"] else "unanswered",
-        "declares": (
-            {
-                "what_i_do": ligne["declares_what"],
-                "endpoint": ligne["declares_endpoint"],
-                "skills": [s for s in (ligne["declares_skills"] or "").split(", ") if s],
-            }
-            if ligne["declares_what"]
-            else None
-        ),
-    }
+    corps, code = lire_contact(message_id)
+    if code == 404:
+        return JSONResponse(status_code=404, content=corps)
+    return corps
 
 
 class ReplyIn(BaseModel):

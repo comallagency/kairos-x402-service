@@ -188,9 +188,13 @@ def _sitemap_urls() -> list[str]:
         "/place/discover-exemple-post-payant",
         "/place/mcp-discover-semantique-x402",
         "/place/relationship-memory",
+        "/place/tool-delivery-receipt",
+        "/place/honest-delivery-refusal",
         "/place/complement-agent-discovery-mcp-erc8004",
         "/place/complement-x402-discovery-mcp-rplryan",
         "/place/sondes-discover-402-attendu",
+        "/place/goulot-decouverte-agents-mcp",
+        "/place/guide-agent-externe-discover-x402",
     ]
     return [f"{base}{p}" for p in paths]
 
@@ -337,6 +341,70 @@ def _agent_card() -> dict:
                 "digest": "…",
                 "v": 1,
             },
+        },
+    )
+    skills.insert(
+        3,
+        {
+            "id": "tool-delivery-receipt",
+            "name": "Tool delivery receipt",
+            "resource": f"{config.BASE_URL}/tool-delivery-receipt/validate",
+            "method": "POST",
+            "price": "free",
+            "description": (
+                "Portable receipt linking an x402 payment to a delivered "
+                "tool_result SHA-256 digest — schema at "
+                "/.well-known/tool-delivery-receipt.json."
+            ),
+            "sample": f"{config.BASE_URL}/tool-delivery-receipt/sample",
+            "input_example": {
+                "receipt": {
+                    "v": 1,
+                    "seller": "https://seller.example",
+                    "route": "/summarize",
+                    "paid_at": "2026-09-18T00:00:00+00:00",
+                    "payment": {
+                        "network": "base",
+                        "token": "USDC",
+                        "amount_usdc": 0.05,
+                        "from": "0x1111111111111111111111111111111111111111",
+                        "to": "0x2222222222222222222222222222222222222222",
+                    },
+                    "delivery": {
+                        "tool_name": "summarize_text",
+                        "algorithm": "sha256",
+                        "digest": "a" * 64,
+                    },
+                }
+            },
+            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
+        },
+    )
+    skills.insert(
+        4,
+        {
+            "id": "honest-delivery-refusal",
+            "name": "Honest delivery refusal",
+            "resource": f"{config.BASE_URL}/honest-delivery-refusal/validate",
+            "method": "POST",
+            "price": "free",
+            "description": (
+                "Portable JSON when a seller cannot deliver after x402 engagement — "
+                "reason code, summary, optional payment and remedy — schema at "
+                "/.well-known/honest-delivery-refusal.json."
+            ),
+            "sample": f"{config.BASE_URL}/honest-delivery-refusal/sample",
+            "input_example": {
+                "refusal": {
+                    "v": 1,
+                    "seller": "https://seller.example",
+                    "route": "/summarize",
+                    "refused_at": "2026-09-18T00:00:00+00:00",
+                    "code": "timeout",
+                    "summary": "Upstream fetch timed out.",
+                }
+            },
+            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
         },
     )
     skills.insert(
