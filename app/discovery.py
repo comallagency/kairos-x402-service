@@ -447,8 +447,7 @@ async def agent_json():
 # specifically, and got a 404 because only the A2A paths were served. The
 # actual MCP server is mounted at /mcp (see app/main.py); this just makes it
 # discoverable at the path MCP-aware crawlers already look for.
-@router.get("/.well-known/mcp/server-card.json", openapi_extra={"security": []})
-async def mcp_server_card():
+def _mcp_server_card_payload() -> dict:
     base = config.BASE_URL.rstrip("/")
     return {
         "name": "AgentIndex x402",
@@ -481,6 +480,18 @@ async def mcp_server_card():
         },
         "capabilitiesUrl": f"{base}/capabilities",
     }
+
+
+@router.get("/.well-known/mcp/server-card.json", openapi_extra={"security": []})
+async def mcp_server_card():
+    return _mcp_server_card_payload()
+
+
+# BrickBlueBot et d'autres indexeurs agentic-web sonent ce chemin (404 mesuré
+# 2026-09-17) alors que server-card.json répond déjà — même corps, zéro dérive.
+@router.get("/.well-known/mcp.json", openapi_extra={"security": []})
+async def well_known_mcp_json():
+    return _mcp_server_card_payload()
 
 
 # --- MCP OAuth discovery (RFC 9728 / RFC 8414) --------------------------------
