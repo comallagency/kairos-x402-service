@@ -63,18 +63,24 @@ async def well_known_x402_json():
 
 def _free_discover_resource_entry() -> dict:
     base = config.BASE_URL.rstrip("/")
+    # Mêmes exemples Bazaar que POST /discover : les indexeurs (x402watch,
+    # agentic-web) lisent /discovery/resources et /.well-known/x402 — la route
+    # GET gratuite n'était listée que sans extensions.
+    post_discover = build_route_configs()["POST /discover"]
     return {
         "resource": f"{base}/discover",
         "method": "GET",
         "description": (
             "Free MCP server discovery: semantic ranking over a curated snapshot "
             "(nomic-embed-text). Query param q=your need; up to 10 matches, no "
-            "account, no x402 payment."
+            "account, no x402 payment. Bare GET returns a ranked example plus a "
+            "hint when q= is omitted."
         ),
         "mimeType": "application/json",
         "serviceName": "AgentIndex Discover (free snapshot)",
         "tags": ["mcp discovery", "semantic search", "server discovery", "free"],
         "accepts": [],
+        "extensions": post_discover.extensions,
     }
 
 
