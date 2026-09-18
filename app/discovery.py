@@ -61,6 +61,35 @@ async def well_known_x402_json():
     return await well_known_x402()
 
 
+def _free_discover_resource_entry() -> dict:
+    base = config.BASE_URL.rstrip("/")
+    return {
+        "resource": f"{base}/discover",
+        "method": "GET",
+        "description": (
+            "Free MCP server discovery: semantic ranking over a curated snapshot "
+            "(nomic-embed-text). Query param q=your need; up to 10 matches, no "
+            "account, no x402 payment."
+        ),
+        "mimeType": "application/json",
+        "serviceName": "AgentIndex Discover (free snapshot)",
+        "tags": ["mcp discovery", "semantic search", "server discovery", "free"],
+        "accepts": [],
+    }
+
+
+# BrickBlueBot/0.1 (+https://brick.blue/bot) et d'autres indexeurs agentic-web
+# sonent /discovery/resources sur l'hôte du service (404 mesuré 2026-09-17).
+# Même forme que l'API CDP discovery/resources, avec la route GET /discover
+# gratuite en tête — absente de build_route_configs() qui ne liste que le POST payant.
+@router.get("/discovery/resources", openapi_extra={"security": []})
+async def discovery_resources():
+    return {
+        "x402Version": 2,
+        "items": [_free_discover_resource_entry()] + _route_entries(),
+    }
+
+
 # VerifyMCP-OwnersBot/1.0 et d'autres sondes (7 hits en six jours, 2026-09-17).
 # Spec : https://verifymcp.io/docs/build/owners-json
 @router.get("/.well-known/owners.json", openapi_extra={"security": []})
