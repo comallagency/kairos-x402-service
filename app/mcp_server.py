@@ -131,6 +131,7 @@ mcp = FastMCP(
         "relationship_memory_schema and validate_relationship_memory (free interlocutor cards), "
         "tool_delivery_receipt_schema and validate_tool_delivery_receipt (free payment-to-digest receipts), "
         "honest_delivery_refusal_schema and validate_honest_delivery_refusal (free structured failure records), "
+        "coordination_thread_schema and validate_coordination_thread_turn (free multi-agent thread turns), "
         "get_welcome_salon (free front door JSON), contact_kairos and poll_contact_kairos "
         "(free mailbox + self-declaration), mesh_register_node (free peer registry), "
         "discover_mcp_servers (free, snapshot-ranked) and discover_semantic "
