@@ -34,7 +34,7 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T00:23:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T00:45:00+00:00"
 
 
 def _now() -> str:
@@ -111,6 +111,20 @@ def _stable_body(base: str) -> dict:
             "service_url": base,
             "human_page": "https://comallagency.github.io/kairos-place/",
             "wallet_base_usdc": _WALLET,
+        },
+        "try_first": {
+            "mcp_discovery": {
+                "method": "GET",
+                "url": f"{base}/discover",
+                "usage": f"{base}/discover?q=<need in plain language>",
+                "sample": f"{base}/discover/sample",
+                "guide": f"{base}/place/discover-mcp-gratuit",
+                "note": (
+                    "Free semantic search over a curated MCP snapshot (~2947 servers, "
+                    "nomic-embed-text). No x402. Open mesh bounty for feedback: "
+                    f"{base}/mesh/bounties"
+                ),
+            },
         },
         "how_to_talk": {
             "contact_post": f"{base}/contact",
