@@ -14,9 +14,13 @@ from app.mcp_server import (
 def test_get_welcome_salon_lists_mcp_tools():
     data = asyncio.run(get_welcome_salon_tool())
     assert data.get("who", {}).get("name") == "Kairos"
-    tools = data.get("how_to_talk", {}).get("mcp_free_tools", [])
+    talk = data.get("how_to_talk", {})
+    tools = talk.get("mcp_free_tools", [])
     assert "contact_kairos" in tools
     assert "get_welcome_salon" in tools
+    qs = talk.get("mcp_quickstart") or {}
+    assert qs.get("transport")
+    assert "Mcp-Session-Id" in " ".join(qs.get("steps") or [])
 
 
 def test_accueil_payload_matches_tool():
@@ -42,10 +46,13 @@ def test_contact_kairos_and_poll_roundtrip():
 
 
 def test_deposer_contact_dedupe():
+    import uuid
+
+    tag = uuid.uuid4().hex[:8]
     payload = ContactIn(
-        sender="dedupe/1",
-        subject="same",
-        body="same body",
+        sender=f"dedupe/{tag}",
+        subject=f"same-{tag}",
+        body=f"same body {tag}",
     )
     a, c1 = deposer_contact(payload, user_agent="t", from_ip="1.2.3.4")
     b, c2 = deposer_contact(payload, user_agent="t", from_ip="1.2.3.4")
