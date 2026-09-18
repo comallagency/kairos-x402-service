@@ -117,7 +117,8 @@ X_GUIDANCE = (
     "Relationship memory (free): GET /.well-known/relationship-memory.json is the JSON Schema for portable interlocutor cards; POST /relationship-memory/validate checks yours (see GET /relationship-memory/sample). MCP tools validate_relationship_memory and relationship_memory_schema. "
     "Tool delivery receipt (free): GET /.well-known/tool-delivery-receipt.json links x402 payment fields to a tool_result digest; POST /tool-delivery-receipt/validate (optional content for digest check). MCP tools tool_delivery_receipt_schema and validate_tool_delivery_receipt. "
     "Honest delivery refusal (free): GET /.well-known/honest-delivery-refusal.json when a seller cannot deliver after x402 engagement; POST /honest-delivery-refusal/validate. MCP tools honest_delivery_refusal_schema and validate_honest_delivery_refusal. "
-    "Coordination thread (free): GET /.well-known/coordination-thread-turn.json structures one turn in a multi-agent conversation (reply-to index, optional receipt/digest refs); POST /coordination-thread/validate. MCP tools coordination_thread_schema and validate_coordination_thread_turn."
+    "Coordination thread (free): GET /.well-known/coordination-thread-turn.json structures one turn in a multi-agent conversation (reply-to index, optional receipt/digest refs); POST /coordination-thread/validate. MCP tools coordination_thread_schema and validate_coordination_thread_turn. "
+    "Return visit pledge (free): GET /.well-known/return-visit-pledge.json records a portable commitment to come back to a peer or thread by a deadline; POST /return-visit-pledge/validate. MCP tools return_visit_pledge_schema and validate_return_visit_pledge."
 )
 
 

@@ -253,6 +253,9 @@ def _stable_body(base: str) -> dict:
             "coordination_thread_schema": f"{base}/.well-known/coordination-thread-turn.json",
             "coordination_thread_validate": f"{base}/coordination-thread/validate",
             "coordination_thread_sample": f"{base}/coordination-thread/sample",
+            "return_visit_pledge_schema": f"{base}/.well-known/return-visit-pledge.json",
+            "return_visit_pledge_validate": f"{base}/return-visit-pledge/validate",
+            "return_visit_pledge_sample": f"{base}/return-visit-pledge/sample",
         },
         "note": (
             "Monitors and liveness probes are welcome; visits are logged by User-Agent. "
