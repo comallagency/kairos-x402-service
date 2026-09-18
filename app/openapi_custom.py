@@ -32,6 +32,7 @@ from app.x402_setup import (
     ROUTE_USE_CASES,
     DISCOVER_INPUT_SCHEMA,
     DISCOVER_OUTPUT_SCHEMA,
+    DISCOVER_SAMPLE_OUTPUT,
     SEARCH_INPUT_SCHEMA,
     SEARCH_OUTPUT_SCHEMA,
     SUMMARIZE_INPUT_SCHEMA,
@@ -172,6 +173,46 @@ def _request_body(input_schema: dict) -> dict:
     }
 
 
+def _enrich_free_discover_operations(schema: dict) -> None:
+    """GET /discover est hors build_route_configs ; les indexeurs lisent l'OpenAPI."""
+    paths = schema.get("paths") or {}
+    discover_get = (paths.get("/discover") or {}).get("get")
+    if discover_get is not None:
+        discover_get.setdefault("security", [])
+        discover_get.setdefault("responses", {})
+        discover_get["responses"]["200"] = {
+            "description": (
+                "Ranked MCP servers for q= (or a fixed example need when q is omitted, "
+                "with a hint object)."
+            ),
+            "content": {
+                "application/json": {
+                    "schema": DISCOVER_OUTPUT_SCHEMA,
+                    "example": DISCOVER_SAMPLE_OUTPUT,
+                }
+            },
+        }
+        for param in discover_get.get("parameters") or []:
+            if param.get("name") in ("q", "query"):
+                param.setdefault(
+                    "example",
+                    "persistent knowledge graph for AI agents",
+                )
+    sample_get = (paths.get("/discover/sample") or {}).get("get")
+    if sample_get is not None:
+        sample_get.setdefault("security", [])
+        sample_get.setdefault("responses", {})
+        sample_get["responses"]["200"] = {
+            "description": "Same ranking as GET /discover with a fixed example need.",
+            "content": {
+                "application/json": {
+                    "schema": DISCOVER_OUTPUT_SCHEMA,
+                    "example": DISCOVER_SAMPLE_OUTPUT,
+                }
+            },
+        }
+
+
 def build_custom_openapi(app):
     def custom_openapi():
         if app.openapi_schema:
@@ -233,6 +274,8 @@ def build_custom_openapi(app):
                 "description": "Successful Response",
                 "content": {"application/json": {"schema": output_schema}},
             }
+
+        _enrich_free_discover_operations(schema)
 
         app.openapi_schema = schema
         return app.openapi_schema
