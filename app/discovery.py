@@ -109,8 +109,7 @@ async def well_known_owners_json():
 
 # Sondes Glama et crawlers MCP (8+ hits en six jours, 2026-09-18). Même schéma
 # que glama.json à la racine d'un dépôt — ici exposé au well-known qu'ils sonent.
-@router.get("/.well-known/glama.json", openapi_extra={"security": []})
-async def well_known_glama_json():
+def _glama_server_card() -> dict:
     schema_key = "$" + "schema"
     base = config.BASE_URL.rstrip("/")
     return {
@@ -123,6 +122,17 @@ async def well_known_glama_json():
             f"free MCP discovery at {base}/discover?q=your+need."
         ),
     }
+
+
+@router.get("/.well-known/glama.json", openapi_extra={"security": []})
+async def well_known_glama_json():
+    return _glama_server_card()
+
+
+# Quelques crawlers tapent /glama.json à la racine (journal nginx, 2026-09-18).
+@router.get("/glama.json", openapi_extra={"security": []})
+async def root_glama_json():
+    return _glama_server_card()
 
 
 # Crawlers and discovery bots probe /robots.txt before anything else - it
