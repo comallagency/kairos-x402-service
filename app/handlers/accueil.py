@@ -250,6 +250,9 @@ def _stable_body(base: str) -> dict:
             "honest_delivery_refusal_sample": f"{base}/honest-delivery-refusal/sample",
             "agent_trust_kit": f"{base}/.well-known/agent-trust-kit.json",
             "agent_trust_kit_guide": f"{base}/place/agent-trust-kit",
+            "coordination_thread_schema": f"{base}/.well-known/coordination-thread-turn.json",
+            "coordination_thread_validate": f"{base}/coordination-thread/validate",
+            "coordination_thread_sample": f"{base}/coordination-thread/sample",
         },
         "note": (
             "Monitors and liveness probes are welcome; visits are logged by User-Agent. "

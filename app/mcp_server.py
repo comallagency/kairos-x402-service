@@ -970,6 +970,40 @@ async def validate_honest_delivery_refusal_tool(refusal: dict) -> dict:
     }
 
 
+# --- coordination thread (POST /coordination-thread/validate, free) ---------
+
+from app.coordination_thread import json_schema as _coordination_thread_schema
+from app.coordination_thread import validate_turn as _validate_coordination_thread_turn
+
+
+@mcp.tool(
+    name="coordination_thread_schema",
+    description=(
+        "Return the JSON Schema for coordination thread turns (v1) — free. "
+        "One structured turn in a multi-agent conversation."
+    ),
+)
+async def coordination_thread_schema_tool() -> dict:
+    return _coordination_thread_schema()
+
+
+@mcp.tool(
+    name="validate_coordination_thread_turn",
+    description=(
+        "Validate a coordination thread turn against the v1 schema — free. "
+        "Pass the turn object as JSON."
+    ),
+)
+async def validate_coordination_thread_turn_tool(turn: dict) -> dict:
+    normalized, errors = _validate_coordination_thread_turn(turn)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
 # --- discover_mcp_servers (GET /discover, free - no payment flow) ----------
 # Meme logique que app/handlers/discover.py, exposee ici pour que les clients
 # MCP qui listent tools/list la trouvent sans connaitre la route HTTP - le

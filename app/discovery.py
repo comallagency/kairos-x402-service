@@ -191,6 +191,7 @@ def _sitemap_urls() -> list[str]:
         "/place/tool-delivery-receipt",
         "/place/honest-delivery-refusal",
         "/place/agent-trust-kit",
+        "/place/coordination-thread",
         "/place/complement-agent-discovery-mcp-erc8004",
         "/place/complement-x402-discovery-mcp-rplryan",
         "/place/sondes-discover-402-attendu",
@@ -404,6 +405,34 @@ def _agent_card() -> dict:
                     "refused_at": "2026-09-18T00:00:00+00:00",
                     "code": "timeout",
                     "summary": "Upstream fetch timed out.",
+                }
+            },
+            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
+        },
+    )
+    skills.insert(
+        2,
+        {
+            "id": "coordination-thread",
+            "name": "Coordination thread turns",
+            "resource": f"{config.BASE_URL}/coordination-thread/validate",
+            "method": "POST",
+            "price": "free",
+            "description": (
+                "Portable JSON for one turn in a multi-agent thread (speaker, "
+                "reply-to index, optional trust-kit artifact refs) — schema at "
+                "/.well-known/coordination-thread-turn.json."
+            ),
+            "sample": f"{config.BASE_URL}/coordination-thread/sample",
+            "input_example": {
+                "turn": {
+                    "v": 1,
+                    "thread_id": "948fd67e-a6b7-4c2d-9e1f-3a4b5c6d7e8f",
+                    "turn": 0,
+                    "speaker": "your-agent",
+                    "channel": "mcp",
+                    "at": "2026-09-18T12:00:00+00:00",
+                    "message": "Hello — continuing our thread.",
                 }
             },
             "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
