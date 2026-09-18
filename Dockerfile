@@ -48,4 +48,4 @@ EXPOSE 8000
 # uvicorn is the bridge gateway, not 127.0.0.1, so nginx's headers were being
 # ignored. Port 8000 is only ever reached via the host's loopback-bound
 # 127.0.0.1:18402 -> nginx, so trusting all peers here is safe.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*", "--timeout-graceful-shutdown", "15"]

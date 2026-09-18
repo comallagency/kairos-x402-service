@@ -10,9 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app import config, db
@@ -72,17 +73,30 @@ def _client_ip(request: Request) -> str:
     return ""
 
 
-def _log_visit(request: Request, path: str) -> None:
+def _log_visit_row(path: str, user_agent: str, is_probe: int, ip_hash: str) -> None:
     _ensure_table()
-    ua = (request.headers.get("user-agent") or "")[:500]
-    is_probe = 1 if _PROBE.search(ua) else 0
-    ip_hash = hashlib.sha256(_client_ip(request).encode()).hexdigest()[:16]
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO accueil_visits (ts, path, user_agent, is_probe, ip_hash) "
             "VALUES (?, ?, ?, ?, ?)",
-            (_now(), path, ua, is_probe, ip_hash),
+            (_now(), path, user_agent[:500], is_probe, ip_hash),
         )
+
+
+def _visit_fields(request: Request) -> tuple[str, int, str]:
+    ua = request.headers.get("user-agent") or ""
+    is_probe = 1 if _PROBE.search(ua) else 0
+    ip_hash = hashlib.sha256(_client_ip(request).encode()).hexdigest()[:16]
+    return ua, is_probe, ip_hash
+
+
+def _schedule_visit_log(background: BackgroundTasks, request: Request, path: str) -> None:
+    ua, is_probe, ip_hash = _visit_fields(request)
+    background.add_task(_log_visit_row, path, ua, is_probe, ip_hash)
+
+
+_stats_cache: tuple[float, dict] | None = None
+_STATS_TTL_SECONDS = 45.0
 
 
 def _stats() -> dict:
@@ -100,6 +114,16 @@ def _stats() -> dict:
     if last:
         out["last_non_probe"] = {"at": last["ts"], "user_agent": last["user_agent"][:200]}
     return out
+
+
+def _stats_cached() -> dict:
+    global _stats_cache
+    now = time.monotonic()
+    if _stats_cache is not None and now - _stats_cache[0] < _STATS_TTL_SECONDS:
+        return _stats_cache[1]
+    data = _stats()
+    _stats_cache = (now, data)
+    return data
 
 
 def _stable_body(base: str) -> dict:
@@ -196,7 +220,7 @@ def _etag(stable: dict) -> str:
 def _payload() -> dict:
     base = config.BASE_URL.rstrip("/")
     body = _stable_body(base)
-    body["stats"] = _stats()
+    body["stats"] = _stats_cached()
     return body
 
 
@@ -244,8 +268,8 @@ jusqu'à 25 matches, seuil <code>min_similarity</code> réglable.
 
 
 @router.get("/accueil", openapi_extra={"security": []})
-async def accueil(request: Request):
-    _log_visit(request, "/accueil")
+async def accueil(request: Request, background_tasks: BackgroundTasks):
+    _schedule_visit_log(background_tasks, request, "/accueil")
     accept = (request.headers.get("accept") or "").lower()
     if "text/html" in accept and "application/json" not in accept:
         return HTMLResponse(_html())
@@ -253,8 +277,8 @@ async def accueil(request: Request):
 
 
 @router.get("/salon", openapi_extra={"security": []})
-async def salon_alias(request: Request):
-    _log_visit(request, "/salon")
+async def salon_alias(request: Request, background_tasks: BackgroundTasks):
+    _schedule_visit_log(background_tasks, request, "/salon")
     accept = (request.headers.get("accept") or "").lower()
     if "text/html" in accept and "application/json" not in accept:
         return RedirectResponse(url=f"{config.BASE_URL.rstrip('/')}/accueil", status_code=302)
@@ -262,7 +286,8 @@ async def salon_alias(request: Request):
 
 
 @router.get("/accueil/sample", openapi_extra={"security": []})
-async def accueil_sample(request: Request):
+async def accueil_sample(request: Request, background_tasks: BackgroundTasks):
+    _schedule_visit_log(background_tasks, request, "/accueil/sample")
     body = _payload()
     body["sample"] = True
     return _json_accueil(request, body)
