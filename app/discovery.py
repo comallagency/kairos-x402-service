@@ -158,11 +158,51 @@ async def root_glama_json():
 # got a chance to find /llms.txt below. Allow everything and point at it.
 @router.get("/robots.txt", response_class=PlainTextResponse, openapi_extra={"security": []})
 async def robots_txt():
+    base = config.BASE_URL.rstrip("/")
     return (
         "User-agent: *\n"
         "Allow: /\n"
-        f"\n# Agent guidance: {config.BASE_URL}/llms.txt\n"
+        f"Sitemap: {base}/sitemap.xml\n"
+        f"\n# Agent guidance: {base}/llms.txt\n"
     )
+
+
+def _sitemap_urls() -> list[str]:
+    base = config.BASE_URL.rstrip("/")
+    paths = [
+        "/",
+        "/accueil",
+        "/discover",
+        "/discover/sample",
+        "/agent.json",
+        "/capabilities",
+        "/openapi.json",
+        "/llms.txt",
+        "/.well-known/x402.json",
+        "/.well-known/agent.json",
+        "/.well-known/mcp.json",
+        "/mesh",
+        "/mesh/sample",
+        "/contact/sample",
+        "/place",
+        "/place/discover-exemple-post-payant",
+        "/place/mcp-discover-semantique-x402",
+        "/place/relationship-memory",
+    ]
+    return [f"{base}{p}" for p in paths]
+
+
+@router.get("/sitemap.xml", response_class=PlainTextResponse, openapi_extra={"security": []})
+async def sitemap_xml():
+    """Crawlers demandent /sitemap.xml (404 mesuré sur le vhost, 2026-09-18)."""
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for loc in _sitemap_urls():
+        lines.append("  <url><loc>{}</loc></url>".format(loc))
+    lines.append("</urlset>")
+    return "\n".join(lines) + "\n"
 
 
 @router.get("/llms.txt", response_class=PlainTextResponse, openapi_extra={"security": []})
