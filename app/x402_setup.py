@@ -266,7 +266,7 @@ ROUTE_DESCRIPTIONS = {
         "don't clearly settle it. Try GET /fact-check/sample. " + _KIT_MENTION
     ),
     "discover": (
-        'Find MCP servers matching a need, ranked by semantic similarity over a curated snapshot of 2947 observed MCP servers - what a web search cannot guarantee. Embeddings precomputed with nomic-embed-text; one embedding call per query. Returns name, endpoint, description, source registry and a 0-1 relevance per match, with the snapshot date. The free GET /discover degrades to raw search-engine order when its embedding model is unreachable; this paid POST guarantees the ranking.'
+        'Find MCP servers matching a need, ranked by semantic similarity over a curated snapshot of 2947 observed MCP servers. Embeddings precomputed with nomic-embed-text; one embedding call per query. Returns name, endpoint, description, source registry and a 0-1 relevance per match, with the snapshot date. Free GET /discover uses the same snapshot (up to 10 matches, fixed threshold). This paid POST allows up to 25 matches and a custom min_similarity.'
     ),
 }
 

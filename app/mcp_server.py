@@ -56,7 +56,8 @@ from app.generated.registry import RouteSpec, live_routes
 from app.handlers.detect_language import _identifier as _language_identifier
 from app.handlers.discover import DESCRIPTION as DISCOVER_DESCRIPTION
 from app.handlers.discover import MAX_RESULTS_CAP as DISCOVER_MAX_RESULTS
-from app.handlers.discover import _run_discover, _shape
+from app.handlers.discover_paid import _run_discover as _run_discover_snapshot
+from app.handlers.discover_paid import MIN_SIMILARITY
 from app.handlers.discover_paid import _run_discover as _run_discover_semantic
 from app.upstream.ollama import OllamaError
 from app.upstream.websearch import SearchError
@@ -125,7 +126,7 @@ mcp = FastMCP(
         "summarize for the rest of the kit. Two more tools outside the "
         "kit: translate (batch translation) and jobs (delegated "
         "multi-step research, async). Also free, unrelated to the kit: "
-        "digest_tool_result and verify_tool_result_digest (free integrity), discover_mcp_servers (free, web-ranked) and discover_semantic "
+        "digest_tool_result and verify_tool_result_digest (free integrity), discover_mcp_servers (free, snapshot-ranked) and discover_semantic "
         "(paid, snapshot embeddings) find MCP servers by need."
     ),
 )
@@ -945,13 +946,13 @@ async def discover_mcp_servers_tool(q: str, max_results: int = 5) -> dict:
         return {"error": {"reason": "missing_q"}}
     max_results = max(1, min(max_results, DISCOVER_MAX_RESULTS))
     try:
-        ranked, _ = await _run_discover(q, max_results)
-    except SearchError as exc:
+        result = await _run_discover_snapshot(q.strip()[:500], max_results, MIN_SIMILARITY)
+    except OllamaError as exc:
         return {"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}
     db.log_request(
         route="discover", method="MCP", status="unpaid", user_agent="mcp", body_excerpt=q[:2048],
     )
-    return {"q": q, "results": _shape(ranked)}
+    return result
 
 
 

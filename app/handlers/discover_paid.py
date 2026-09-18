@@ -13,17 +13,10 @@ from app.x402_setup import KIT_TAGS
 
 router = APIRouter()
 
-# Un POST /discover PAYANT, distinct du GET /discover gratuit (app/handlers/
-# discover.py). Le GET passe par SearXNG — une recherche web qui reclasse ce
-# qu'elle a indexe. Celui-ci interroge un instantané de la base locale de
-# Kairos : 2190 serveurs MCP actifs, observés dehors, chacun avec un embedding
-# nomic-embed-text (768 dims) précalculé. Le classement est un produit scalaire
-# sur des vecteurs déjà normalisés : un appel d'embedding pour la requête,
-# aucun pour les résultats.
-#
-# Pourquoi payer : le GET gratuit dégrade en classement SearXNG brut quand
-# l'embedding échoue. Celui-ci garantit le classement sémantique — vecteurs
-# précalculés, fraîcheur datée, seuil de similarité explicite.
+# POST /discover payant : même instantané MCP que GET /discover (discover.py),
+# avec plafond de résultats plus haut (25 vs 10) et seuil min_similarity
+# réglable dans le corps JSON. Le paiement x402 cible les agents qui veulent
+# ces paramètres ou le flux HTTP 402 habituel du kit.
 
 SNAPSHOT_PATH = Path("/app/data/acteurs_mcp.json.z")
 MAX_RESULTS_CAP = 25

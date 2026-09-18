@@ -72,6 +72,24 @@ async def well_known_owners_json():
     }
 
 
+# Sondes Glama et crawlers MCP (8+ hits en six jours, 2026-09-18). Même schéma
+# que glama.json à la racine d'un dépôt — ici exposé au well-known qu'ils sonent.
+@router.get("/.well-known/glama.json", openapi_extra={"security": []})
+async def well_known_glama_json():
+    schema_key = "$" + "schema"
+    base = config.BASE_URL.rstrip("/")
+    return {
+        schema_key: "https://glama.ai/mcp/schemas/server.json",
+        "maintainers": ["comallagency"],
+        "name": "AgentIndex x402",
+        "repository": "https://github.com/comallagency/kairos-x402-service",
+        "description": (
+            "Pay-per-call agent toolkit (pdf, web-read, extract, summarize) plus "
+            f"free MCP discovery at {base}/discover?q=your+need."
+        ),
+    }
+
+
 # Crawlers and discovery bots probe /robots.txt before anything else - it
 # was 404ing (3 hits/day in the vhost log, 2026-09-12), which meant they never
 # got a chance to find /llms.txt below. Allow everything and point at it.
@@ -191,18 +209,37 @@ def _agent_card() -> dict:
     skills.insert(
         2,
         {
-            "id": "discover-web",
-            "name": "MCP server discovery (web)",
+            "id": "discover-snapshot",
+            "name": "MCP server discovery (snapshot)",
             "resource": f"{config.BASE_URL}/discover",
             "method": "GET",
             "price": "free",
             "description": (
                 "Find MCP servers matching a need, ranked by semantic relevance "
-                "- free, no account, no payment."
+                "over a curated MCP snapshot (nomic-embed-text). Free, no account, "
+                "no payment — query param q=your need, up to 10 matches."
             ),
             "sample": f"{config.BASE_URL}/discover/sample",
-            "input_example": None,
-            "output_example": None,
+            "input_example": {"q": "postgresql jdbc read only mcp"},
+            "output_example": {
+                "q": "postgresql jdbc read only mcp",
+                "snapshot_date": "2026-09-17",
+                "snapshot_rows": 2947,
+                "min_similarity": 0.3,
+                "matches": 12,
+                "results": [
+                    {
+                        "name": "JDBC MCP Server",
+                        "url": "https://example.org/mcp/",
+                        "description": (
+                            "Read-only PostgreSQL, Oracle and SQL Server access "
+                            "for AI agents: SQL, plans, schema, index stats"
+                        ),
+                        "registry": "registre-mcp",
+                        "relevance": 0.8123,
+                    }
+                ],
+            },
         },
     )
 
@@ -314,9 +351,12 @@ async def mcp_server_card():
         "description": (
             f"{KIT_TAGLINE} A pay-per-call kit (pdf, web-read, extract, "
             "summarize, detect-language) plus batch translation and "
-            "delegated research jobs. USDC on Base, no account, no API key."
+            "delegated research jobs. Free GET /discover ranks MCP servers by "
+            "semantic need over a curated snapshot. USDC on Base, no account, "
+            "no API key."
         ),
         "url": config.BASE_URL,
+        "discover": f"{config.BASE_URL}/discover?q=your+need",
         "mcpEndpoint": f"{config.BASE_URL}/mcp",
         "protocol": "mcp",
         "transport": "streamable-http",
