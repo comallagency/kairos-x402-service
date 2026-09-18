@@ -11,6 +11,9 @@ def test_mcp_server_card_capabilities_object_and_paid_discover() -> None:
     r = client.get("/.well-known/mcp/server-card.json")
     assert r.status_code == 200
     card = r.json()
+    alt = client.get("/.well-known/mcp.json")
+    assert alt.status_code == 200
+    assert alt.json() == card
     caps = card["capabilities"]
     assert isinstance(caps, dict)
     assert caps.get("streaming") is False
