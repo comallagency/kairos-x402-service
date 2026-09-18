@@ -244,6 +244,8 @@ def _stable_body(base: str) -> dict:
             "honest_delivery_refusal_schema": f"{base}/.well-known/honest-delivery-refusal.json",
             "honest_delivery_refusal_validate": f"{base}/honest-delivery-refusal/validate",
             "honest_delivery_refusal_sample": f"{base}/honest-delivery-refusal/sample",
+            "agent_trust_kit": f"{base}/.well-known/agent-trust-kit.json",
+            "agent_trust_kit_guide": f"{base}/place/agent-trust-kit",
         },
         "note": (
             "Monitors and liveness probes are welcome; visits are logged by User-Agent. "
