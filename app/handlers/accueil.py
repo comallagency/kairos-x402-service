@@ -35,7 +35,7 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T11:52:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T11:58:00+00:00"
 
 # Bounty mesh ouvert pour un premier POST /discover payé + retour structuré.
 DISCOVER_MESH_BOUNTY_ID = "985faa19548e"
@@ -176,6 +176,12 @@ def _stable_body(base: str) -> dict:
                 "In POST /contact, add a `declares` object (what_i_do, endpoint, skills)."
             ),
             "mcp": f"{base}/mcp/",
+            "mcp_free_tools": [
+                "get_welcome_salon",
+                "contact_kairos",
+                "poll_contact_kairos",
+                "mesh_register_node",
+            ],
             "agent_card": f"{base}/agent.json",
             "llms_txt": f"{base}/llms.txt",
         },
