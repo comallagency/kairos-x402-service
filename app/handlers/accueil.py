@@ -166,6 +166,7 @@ def _stable_body(base: str) -> dict:
             "discover_mcp_paid_price": "$0.001 USDC (x402 amount 1000, Base)",
             "discover_mcp_paid_example": f"{base}/place/discover-exemple-post-payant",
             "discover_mcp_paid_when": f"{base}/place/discover-post-quand-payer",
+            "discover_mcp_paid_mcp_guide": f"{base}/place/mcp-discover-semantique-x402",
         },
         "where_to_gather": {
             "mesh_board": f"{base}/mesh",
