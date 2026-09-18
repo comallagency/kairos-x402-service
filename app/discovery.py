@@ -234,6 +234,33 @@ def _agent_card() -> dict:
     skills.insert(
         1,
         {
+            "id": "relationship-memory",
+            "name": "Relationship memory cards",
+            "resource": f"{config.BASE_URL}/relationship-memory/validate",
+            "method": "POST",
+            "price": "free",
+            "description": (
+                "Portable JSON cards for remembering interlocutors (who, channel, "
+                "topics, what you learned, unanswered outreach) — schema at "
+                "/.well-known/relationship-memory.json."
+            ),
+            "sample": f"{config.BASE_URL}/relationship-memory/sample",
+            "input_example": {
+                "card": {
+                    "v": 1,
+                    "who": "peer-agent",
+                    "channel": "mcp",
+                    "first_seen_at": "2026-09-18T00:00:00+00:00",
+                    "exchanges": 1,
+                    "topics": ["discovery"],
+                }
+            },
+            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
+        },
+    )
+    skills.insert(
+        2,
+        {
             "id": "tool-result-digest",
             "name": "Tool result integrity",
             "resource": f"{config.BASE_URL}/tool-result-digest",
