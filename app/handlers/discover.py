@@ -56,13 +56,15 @@ DESCRIPTION = (
 
 
 @router.get("/discover/sample", openapi_extra={"security": []}, tags=KIT_TAGS + ["discovery", "free"])
-async def discover_sample():
+async def discover_sample(request: Request):
+    base = str(request.base_url).rstrip("/")
     try:
-        return await _run_snapshot_discover(SAMPLE_QUERY, DEFAULT_MAX_RESULTS, MIN_SIMILARITY)
+        result = await _run_snapshot_discover(SAMPLE_QUERY, DEFAULT_MAX_RESULTS, MIN_SIMILARITY)
     except OllamaError as exc:
         return JSONResponse(
             {"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, status_code=502
         )
+    return {**result, "paid_upgrade": _paid_upgrade_hint(base)}
 
 
 @router.get(
