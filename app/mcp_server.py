@@ -970,6 +970,23 @@ async def validate_honest_delivery_refusal_tool(refusal: dict) -> dict:
     }
 
 
+# --- agent trust kit (GET /.well-known/agent-trust-kit.json, free) -----------
+
+from app.agent_trust_kit import build_manifest as _build_agent_trust_kit
+
+
+@mcp.tool(
+    name="get_agent_trust_kit",
+    description=(
+        "Return the agent trust kit manifest (v1) — free index of relationship "
+        "memory, tool-result digest, delivery receipts and honest refusals "
+        "with a suggested x402 workflow."
+    ),
+)
+async def get_agent_trust_kit_tool() -> dict:
+    return _build_agent_trust_kit()
+
+
 # --- discover_mcp_servers (GET /discover, free - no payment flow) ----------
 # Meme logique que app/handlers/discover.py, exposee ici pour que les clients
 # MCP qui listent tools/list la trouvent sans connaitre la route HTTP - le
