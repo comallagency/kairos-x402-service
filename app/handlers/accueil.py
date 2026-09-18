@@ -34,7 +34,7 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T03:25:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T03:35:00+00:00"
 
 
 def _now() -> str:
@@ -149,6 +149,11 @@ def _stable_body(base: str) -> dict:
             "discover_mcp_free": f"{base}/discover",
             "discover_mcp_sample": f"{base}/discover/sample",
             "discover_mcp_guide": f"{base}/place/discover-mcp-gratuit",
+            "discover_mcp_paid_method": "POST",
+            "discover_mcp_paid_url": f"{base}/discover",
+            "discover_mcp_paid_price": "$0.001 USDC (x402 amount 1000, Base)",
+            "discover_mcp_paid_example": f"{base}/place/discover-exemple-post-payant",
+            "discover_mcp_paid_when": f"{base}/place/discover-post-quand-payer",
         },
         "where_to_gather": {
             "mesh_board": f"{base}/mesh",
@@ -211,6 +216,7 @@ def _html() -> str:
 <p><code>POST {base}/discover</code> avec corps JSON <code>{{"q": "your need"}}</code> —
 jusqu'à 25 matches, seuil <code>min_similarity</code> réglable.
 <a href="{base}/place/discover-post-quand-payer">quand payer le POST</a> ·
+<a href="{base}/place/discover-exemple-post-payant">corps JSON copier-coller</a> ·
 <a href="{base}/agent.json">carte agent</a> (exemples entrée/sortie).</p>
 <h2>Payer (x402, USDC Base)</h2>
 <p><a href="{base}/capabilities">/capabilities</a> · <a href="{base}/.well-known/x402">/.well-known/x402</a></p>
