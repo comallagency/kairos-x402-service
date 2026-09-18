@@ -188,6 +188,9 @@ def _sitemap_urls() -> list[str]:
         "/place/discover-exemple-post-payant",
         "/place/mcp-discover-semantique-x402",
         "/place/relationship-memory",
+        "/place/complement-agent-discovery-mcp-erc8004",
+        "/place/complement-x402-discovery-mcp-rplryan",
+        "/place/sondes-discover-402-attendu",
     ]
     return [f"{base}{p}" for p in paths]
 
