@@ -190,11 +190,13 @@ def _sitemap_urls() -> list[str]:
         "/place/relationship-memory",
         "/place/tool-delivery-receipt",
         "/place/honest-delivery-refusal",
+        "/place/agent-trust-kit",
         "/place/complement-agent-discovery-mcp-erc8004",
         "/place/complement-x402-discovery-mcp-rplryan",
         "/place/sondes-discover-402-attendu",
         "/place/goulot-decouverte-agents-mcp",
         "/place/guide-agent-externe-discover-x402",
+        "/place/mcp-accueil-porte-entree",
     ]
     return [f"{base}{p}" for p in paths]
 
@@ -405,6 +407,24 @@ def _agent_card() -> dict:
                 }
             },
             "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
+        },
+    )
+    skills.insert(
+        5,
+        {
+            "id": "agent-trust-kit",
+            "name": "Agent trust kit manifest",
+            "resource": f"{config.BASE_URL}/.well-known/agent-trust-kit.json",
+            "method": "GET",
+            "price": "free",
+            "description": (
+                "Single index linking relationship memory, tool-result digest, "
+                "delivery receipts and honest refusals — workflow for x402 buyers "
+                "and sellers. Local CLI in comallagency/kairos outils/."
+            ),
+            "sample": f"{config.BASE_URL}/agent-trust-kit",
+            "input_example": None,
+            "output_example": {"v": 1, "formats": [], "workflow": []},
         },
     )
     skills.insert(
