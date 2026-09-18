@@ -56,6 +56,7 @@ from app.generated.registry import RouteSpec, live_routes
 from app.handlers.detect_language import _identifier as _language_identifier
 from app.handlers.discover import DESCRIPTION as DISCOVER_DESCRIPTION
 from app.handlers.discover import MAX_RESULTS_CAP as DISCOVER_MAX_RESULTS
+from app.handlers.discover import _paid_upgrade_hint
 from app.handlers.discover_paid import _run_discover as _run_discover_snapshot
 from app.handlers.discover_paid import MIN_SIMILARITY
 from app.handlers.discover_paid import _run_discover as _run_discover_semantic
@@ -988,7 +989,8 @@ async def discover_mcp_servers_tool(q: str, max_results: int = 5) -> dict:
     db.log_request(
         route="discover", method="MCP", status="unpaid", user_agent="mcp", body_excerpt=q[:2048],
     )
-    return result
+    base = config.BASE_URL.rstrip("/")
+    return {**result, "paid_upgrade": _paid_upgrade_hint(base)}
 
 
 
