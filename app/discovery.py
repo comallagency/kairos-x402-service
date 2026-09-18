@@ -402,6 +402,7 @@ def _agent_card() -> dict:
         },
     )
 
+    base = config.BASE_URL.rstrip("/")
     return {
         "name": "AgentIndex x402",
         "description": (
@@ -411,12 +412,19 @@ def _agent_card() -> dict:
             "semantic need over a curated snapshot. USDC on Base, no account, "
             "no API key."
         ),
-        "url": config.BASE_URL,
+        "url": base,
         "repository": "https://github.com/comallagency/kairos-x402-service",
         "version": "1.0.0",
-        "x402": {"wellKnown": f"{config.BASE_URL}/.well-known/x402"},
-        "openapi": f"{config.BASE_URL}/openapi.json",
-        "capabilities": f"{config.BASE_URL}/capabilities",
+        "protocolVersion": "0.3.0",
+        "x402": {"wellKnown": f"{base}/.well-known/x402"},
+        "openapi": f"{base}/openapi.json",
+        # A2A / Wellknown attend un objet capabilities, pas l'URL du kit HTTP.
+        "capabilities": {
+            "streaming": False,
+            "pushNotifications": False,
+            "stateTransitionHistory": False,
+        },
+        "capabilitiesUrl": f"{base}/capabilities",
         "skills": skills,
     }
 
