@@ -68,6 +68,10 @@ DB_PATH = DATA_DIR / "requests.db"
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
+# Clé ed25519 (base58) publiée sur /.well-known/brick-blue.json pour revendiquer
+# la fiche brick.blue (BrickBlueBot a sonné 404 le 2026-09-17).
+BRICK_BLUE_PUBLIC_KEY = os.getenv("BRICK_BLUE_PUBLIC_KEY") or None
+
 PRICE_TRANSLATE = "$0.10"
 PRICE_JOB = "$1.00"
 
