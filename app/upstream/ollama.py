@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Any
 
@@ -64,20 +65,35 @@ async def embed(texts: list[str], timeout: float = 30.0) -> list[list[float]]:
     vectors = []
     async with httpx.AsyncClient(timeout=timeout) as client:
         for text in texts:
-            try:
-                resp = await client.post(
-                    f"{config.OLLAMA_URL}/api/embeddings",
-                    json={"model": "nomic-embed-text", "prompt": text},
-                )
-            except httpx.TimeoutException:
-                raise OllamaError("ollama_embed_timeout")
-            except httpx.RequestError as exc:
-                raise OllamaError(f"ollama_embed_failed: {exc}"[:200])
-            if resp.status_code >= 400:
-                raise OllamaError(f"Ollama embed error {resp.status_code}: {resp.text[:300]}")
-            data = resp.json()
-            embedding = data.get("embedding")
-            if not embedding:
-                raise OllamaError(f"Ollama embed response missing 'embedding': {json.dumps(data)[:300]}")
-            vectors.append(embedding)
+            last_err: OllamaError | None = None
+            for attempt in range(2):
+                try:
+                    resp = await client.post(
+                        f"{config.OLLAMA_URL}/api/embeddings",
+                        json={"model": "nomic-embed-text", "prompt": text},
+                    )
+                except httpx.TimeoutException:
+                    last_err = OllamaError("ollama_embed_timeout")
+                except httpx.RequestError as exc:
+                    last_err = OllamaError(f"ollama_embed_failed: {exc}"[:200])
+                else:
+                    if resp.status_code >= 400:
+                        last_err = OllamaError(
+                            f"Ollama embed error {resp.status_code}: {resp.text[:300]}"
+                        )
+                    else:
+                        data = resp.json()
+                        embedding = data.get("embedding")
+                        if not embedding:
+                            last_err = OllamaError(
+                                f"Ollama embed response missing 'embedding': {json.dumps(data)[:300]}"
+                            )
+                        else:
+                            vectors.append(embedding)
+                            last_err = None
+                            break
+                if attempt == 0:
+                    await asyncio.sleep(0.35)
+            if last_err is not None:
+                raise last_err
     return vectors
