@@ -131,6 +131,7 @@ mcp = FastMCP(
         "relationship_memory_schema and validate_relationship_memory (free interlocutor cards), "
         "tool_delivery_receipt_schema and validate_tool_delivery_receipt (free payment-to-digest receipts), "
         "honest_delivery_refusal_schema and validate_honest_delivery_refusal (free structured failure records), "
+        "coordination_thread_schema and validate_coordination_thread_turn (free multi-agent thread turns), "
         "get_welcome_salon (free front door JSON), contact_kairos and poll_contact_kairos "
         "(free mailbox + self-declaration), mesh_register_node (free peer registry), "
         "discover_mcp_servers (free, snapshot-ranked) and discover_semantic "
@@ -962,6 +963,40 @@ async def honest_delivery_refusal_schema_tool() -> dict:
 )
 async def validate_honest_delivery_refusal_tool(refusal: dict) -> dict:
     normalized, errors = _validate_honest_delivery_refusal(refusal)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+# --- coordination thread (POST /coordination-thread/validate, free) ---------
+
+from app.coordination_thread import json_schema as _coordination_thread_schema
+from app.coordination_thread import validate_turn as _validate_coordination_thread_turn
+
+
+@mcp.tool(
+    name="coordination_thread_schema",
+    description=(
+        "Return the JSON Schema for coordination thread turns (v1) — free. "
+        "One structured turn in a multi-agent conversation."
+    ),
+)
+async def coordination_thread_schema_tool() -> dict:
+    return _coordination_thread_schema()
+
+
+@mcp.tool(
+    name="validate_coordination_thread_turn",
+    description=(
+        "Validate a coordination thread turn against the v1 schema — free. "
+        "Pass the turn object as JSON."
+    ),
+)
+async def validate_coordination_thread_turn_tool(turn: dict) -> dict:
+    normalized, errors = _validate_coordination_thread_turn(turn)
     return {
         "valid": not errors,
         "v": 1,
