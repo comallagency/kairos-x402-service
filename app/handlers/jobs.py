@@ -11,8 +11,14 @@ router = APIRouter()
 
 JOB_POLL_SLOT_SECONDS = 60
 SAMPLE_JOB_ID = "sample-0000"
+# OpenAPI path template copied literally by catalog probes and trust monitors.
+OPENAPI_JOB_ID_PLACEHOLDER = "{job_id}"
 SAMPLE_CREATED_AT = "2026-01-01T00:00:00+00:00"
 SAMPLE_FINISHED_AT = "2026-01-01T00:01:00+00:00"
+
+
+def _is_sample_job_id(job_id: str) -> bool:
+    return job_id in (SAMPLE_JOB_ID, OPENAPI_JOB_ID_PLACEHOLDER)
 
 
 def _sample_job_result_body() -> dict:
@@ -71,7 +77,7 @@ async def create_job(request: Request):
 
 @router.get("/jobs/{job_id}", openapi_extra={"security": []})
 async def get_job_status(job_id: str):
-    if job_id == SAMPLE_JOB_ID:
+    if _is_sample_job_id(job_id):
         return {
             "job_id": SAMPLE_JOB_ID,
             "status": "done",
@@ -95,7 +101,7 @@ async def get_job_status(job_id: str):
 
 @router.get("/jobs/{job_id}/result", openapi_extra={"security": []})
 async def get_job_result(job_id: str):
-    if job_id == SAMPLE_JOB_ID:
+    if _is_sample_job_id(job_id):
         return _sample_job_result_body()
 
     job = db.get_job(job_id)
