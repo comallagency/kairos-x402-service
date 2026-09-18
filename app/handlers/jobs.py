@@ -75,6 +75,18 @@ async def create_job(request: Request):
     return {"job_id": job_id, "eta_seconds": eta_seconds}
 
 
+@router.post("/jobs/{job_id}", openapi_extra={"security": []})
+async def post_job_status(job_id: str):
+    """Catalog probes sometimes POST the OpenAPI path template literally."""
+    if _is_sample_job_id(job_id):
+        return await get_job_status(job_id)
+    return JSONResponse(
+        {"error": {"reason": "method_not_allowed", "hint": "Poll job status with GET"}},
+        status_code=405,
+        headers={"Allow": "GET"},
+    )
+
+
 @router.get("/jobs/{job_id}", openapi_extra={"security": []})
 async def get_job_status(job_id: str):
     if _is_sample_job_id(job_id):
@@ -97,6 +109,22 @@ async def get_job_status(job_id: str):
     if job["finished_at"]:
         response["finished_at"] = job["finished_at"]
     return response
+
+
+@router.post("/jobs/{job_id}/result", openapi_extra={"security": []})
+async def post_job_result(job_id: str):
+    if _is_sample_job_id(job_id):
+        return await get_job_result(job_id)
+    return JSONResponse(
+        {
+            "error": {
+                "reason": "method_not_allowed",
+                "hint": "Fetch job results with GET /jobs/{job_id}/result",
+            }
+        },
+        status_code=405,
+        headers={"Allow": "GET"},
+    )
 
 
 @router.get("/jobs/{job_id}/result", openapi_extra={"security": []})
