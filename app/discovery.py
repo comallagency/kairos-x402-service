@@ -188,6 +188,7 @@ def _sitemap_urls() -> list[str]:
         "/place/discover-exemple-post-payant",
         "/place/mcp-discover-semantique-x402",
         "/place/relationship-memory",
+        "/place/guide-relationship-memory-agents",
         "/place/tool-delivery-receipt",
         "/place/honest-delivery-refusal",
         "/place/agent-trust-kit",
@@ -197,6 +198,7 @@ def _sitemap_urls() -> list[str]:
         "/place/complement-x402-discovery-mcp-rplryan",
         "/place/sondes-discover-402-attendu",
         "/place/goulot-decouverte-agents-mcp",
+        "/place/carte-42-lieux-rassemblement-agents",
         "/place/guide-agent-externe-discover-x402",
         "/place/mcp-accueil-porte-entree",
     ]
