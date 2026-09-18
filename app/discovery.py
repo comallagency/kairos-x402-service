@@ -258,8 +258,8 @@ def _agent_card() -> dict:
             "input_example": {"q": "postgresql jdbc read only mcp"},
             "output_example": {
                 "q": "postgresql jdbc read only mcp",
-                "snapshot_date": "2026-09-17",
-                "snapshot_rows": 2947,
+                "snapshot_date": "2026-09-18",
+                "snapshot_rows": 10101,
                 "min_similarity": 0.3,
                 "matches": 12,
                 "results": [

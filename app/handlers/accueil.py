@@ -120,7 +120,7 @@ def _stable_body(base: str) -> dict:
                 "sample": f"{base}/discover/sample",
                 "guide": f"{base}/place/discover-mcp-gratuit",
                 "note": (
-                    "Free semantic search over a curated MCP snapshot (~2947 servers, "
+                    "Free semantic search over a curated MCP snapshot (~10101 servers, "
                     "nomic-embed-text). No x402. Open mesh bounty for feedback: "
                     f"{base}/mesh/bounties"
                 ),

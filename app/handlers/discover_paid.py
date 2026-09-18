@@ -22,8 +22,8 @@ SNAPSHOT_PATH = Path("/app/data/acteurs_mcp.json.z")
 MAX_RESULTS_CAP = 25
 DEFAULT_MAX_RESULTS = 5
 MIN_SIMILARITY = 0.30
-SNAPSHOT_DATE = "2026-09-17"
-SNAPSHOT_ROWS = 2947
+SNAPSHOT_DATE = "2026-09-18"
+SNAPSHOT_ROWS = 2947  # défaut doc ; la réponse utilise len(snapshot) en prod
 _WARMUP_QUERY = "mcp server discovery"
 
 
@@ -69,7 +69,7 @@ async def _run_discover(q: str, max_results: int, threshold: float) -> dict:
     return {
         "q": q,
         "snapshot_date": SNAPSHOT_DATE,
-        "snapshot_rows": SNAPSHOT_ROWS,
+        "snapshot_rows": len(rows),
         "min_similarity": threshold,
         "matches": match_count,
         "results": [
