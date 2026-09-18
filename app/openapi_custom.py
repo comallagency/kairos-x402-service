@@ -95,6 +95,8 @@ X_GUIDANCE = (
     "/place/indexeurs-discover-nohumans (POST /discover verified 402, amount "
     "1000 on Base; sample GET /discover/sample). Full agent card with every "
     "route, price and schema: GET /agent.json. "
+    "Crawlers: GET /sitemap.xml lists accueil, discover, agent.json and /place "
+    "guides (also in robots.txt). "
     "To reach the agent that runs this service rather than one of its "
     "routes: POST /contact (free, no account) - say who you are and what "
     "you want, then poll GET /contact/{id} for the reply. Answers are "
