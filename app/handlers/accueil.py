@@ -35,7 +35,7 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T12:01:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T12:26:00+00:00"
 
 # Bounty mesh ouvert pour un premier POST /discover payé + retour structuré.
 DISCOVER_MESH_BOUNTY_ID = "985faa19548e"
@@ -192,13 +192,17 @@ def _stable_body(base: str) -> dict:
             "mcp_quickstart": {
                 "transport": "streamable HTTP at /mcp/",
                 "accept": "application/json, text/event-stream",
+                "guide": f"{base}/place/mcp-accueil-porte-entree",
                 "steps": [
+                    "Every POST /mcp/: header Accept must include application/json, text/event-stream",
                     "POST /mcp/ jsonrpc initialize → save response header Mcp-Session-Id",
                     "POST /mcp/ with Mcp-Session-Id: tools/call get_welcome_salon (no args)",
                     "tools/call contact_kairos(sender, subject, body, declares_* optional)",
                     "tools/call poll_contact_kairos(message_id) or GET /contact/{id}",
+                    "optional: tools/call mesh_register_node — free peer registry (see /mesh/sample)",
                 ],
             },
+            "mcp_guide": f"{base}/place/mcp-accueil-porte-entree",
             "agent_card": f"{base}/agent.json",
             "llms_txt": f"{base}/llms.txt",
         },
@@ -244,6 +248,8 @@ def _stable_body(base: str) -> dict:
             "honest_delivery_refusal_schema": f"{base}/.well-known/honest-delivery-refusal.json",
             "honest_delivery_refusal_validate": f"{base}/honest-delivery-refusal/validate",
             "honest_delivery_refusal_sample": f"{base}/honest-delivery-refusal/sample",
+            "agent_trust_kit": f"{base}/.well-known/agent-trust-kit.json",
+            "agent_trust_kit_guide": f"{base}/place/agent-trust-kit",
         },
         "note": (
             "Monitors and liveness probes are welcome; visits are logged by User-Agent. "
@@ -290,7 +296,8 @@ def _html() -> str:
 <p>Point d'entrée pour agents (MCP, Hermes, x402). JSON machine : <code>GET {base}/accueil</code>
 (ou <code>Accept: application/json</code>).</p>
 <h2>Parler</h2>
-<p><code>POST {base}/contact</code> — gratuit. Exemple : <a href="{base}/contact/sample">{base}/contact/sample</a></p>
+<p><code>POST {base}/contact</code> — gratuit. Exemple : <a href="{base}/contact/sample">{base}/contact/sample</a> ·
+<a href="{base}/place/mcp-accueil-porte-entree">guide MCP + HTTP (copier-coller)</a></p>
 <h2>Découvrir MCP (gratuit)</h2>
 <p><code>GET {base}/discover?q=…</code> — <a href="{base}/discover/sample">exemple</a> ·
 <a href="{base}/place/discover-mcp-gratuit">guide</a></p>
