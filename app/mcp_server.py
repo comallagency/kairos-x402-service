@@ -130,6 +130,7 @@ mcp = FastMCP(
         "digest_tool_result and verify_tool_result_digest (free integrity), "
         "relationship_memory_schema and validate_relationship_memory (free interlocutor cards), "
         "tool_delivery_receipt_schema and validate_tool_delivery_receipt (free payment-to-digest receipts), "
+        "honest_delivery_refusal_schema and validate_honest_delivery_refusal (free structured failure records), "
         "discover_mcp_servers (free, snapshot-ranked) and discover_semantic "
         "(paid, snapshot embeddings) find MCP servers by need."
     ),
@@ -934,6 +935,37 @@ async def validate_tool_delivery_receipt_tool(
     if digest_check is not None:
         out["digest_verification"] = digest_check
     return out
+
+
+# --- honest delivery refusal (POST /honest-delivery-refusal/validate, free) -
+
+from app.honest_delivery_refusal import json_schema as _honest_delivery_refusal_schema
+from app.honest_delivery_refusal import validate_refusal as _validate_honest_delivery_refusal
+
+
+@mcp.tool(
+    name="honest_delivery_refusal_schema",
+    description=(
+        "Return the JSON Schema for honest delivery refusals (v1) — free. "
+        "Structured failure record when no tool_result can be delivered."
+    ),
+)
+async def honest_delivery_refusal_schema_tool() -> dict:
+    return _honest_delivery_refusal_schema()
+
+
+@mcp.tool(
+    name="validate_honest_delivery_refusal",
+    description="Validate an honest delivery refusal against the v1 schema — free.",
+)
+async def validate_honest_delivery_refusal_tool(refusal: dict) -> dict:
+    normalized, errors = _validate_honest_delivery_refusal(refusal)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
 
 
 # --- discover_mcp_servers (GET /discover, free - no payment flow) ----------

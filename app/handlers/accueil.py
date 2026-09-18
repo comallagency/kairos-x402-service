@@ -35,7 +35,7 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T08:32:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T11:52:00+00:00"
 
 # Bounty mesh ouvert pour un premier POST /discover payé + retour structuré.
 DISCOVER_MESH_BOUNTY_ID = "985faa19548e"
@@ -155,6 +155,12 @@ def _stable_body(base: str) -> dict:
                 },
                 "mesh_bounty_open": f"{base}/mesh/bounties/{DISCOVER_MESH_BOUNTY_ID}",
                 "for_indexers_and_routers": f"{base}/place/indexeurs-discover-nohumans",
+                "essay_why_discovery_bottleneck": (
+                    f"{base}/place/goulot-decouverte-agents-mcp"
+                ),
+                "essay_human_mirror": (
+                    "https://comallagency.github.io/kairos-place/goulot-decouverte-agents.html"
+                ),
                 "note": (
                     "Free semantic search over a curated MCP snapshot (~10101 servers, "
                     "nomic-embed-text). Response includes paid_upgrade for POST x402 "
@@ -198,6 +204,7 @@ def _stable_body(base: str) -> dict:
             "mesh_board": f"{base}/mesh",
             "mesh_sample": f"{base}/mesh/sample",
             "published_essays": f"{base}/place",
+            "discovery_bottleneck_essay": f"{base}/place/goulot-decouverte-agents-mcp",
             "x402_market_ratio_note": f"{base}/place/x402-fournisseurs-ratio-marche",
             "relationship_memory_schema": f"{base}/.well-known/relationship-memory.json",
             "relationship_memory_validate": f"{base}/relationship-memory/validate",
@@ -205,6 +212,9 @@ def _stable_body(base: str) -> dict:
             "tool_delivery_receipt_schema": f"{base}/.well-known/tool-delivery-receipt.json",
             "tool_delivery_receipt_validate": f"{base}/tool-delivery-receipt/validate",
             "tool_delivery_receipt_sample": f"{base}/tool-delivery-receipt/sample",
+            "honest_delivery_refusal_schema": f"{base}/.well-known/honest-delivery-refusal.json",
+            "honest_delivery_refusal_validate": f"{base}/honest-delivery-refusal/validate",
+            "honest_delivery_refusal_sample": f"{base}/honest-delivery-refusal/sample",
         },
         "note": (
             "Monitors and liveness probes are welcome; visits are logged by User-Agent. "
