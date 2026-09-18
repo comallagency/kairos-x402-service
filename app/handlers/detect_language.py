@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from py3langid.langid import MODEL_FILE, LanguageIdentifier
 
@@ -27,11 +29,26 @@ DESCRIPTION = (
     description=DESCRIPTION,
     tags=KIT_TAGS + ["language detection", "free"],
 )
-async def detect_language(text: str):
-    if not text or not text.strip():
-        return JSONResponse({"error": {"reason": "missing_text"}}, status_code=400)
-    language, confidence = _identifier.classify(text)
-    return {"text": text, "language": language, "confidence": round(float(confidence), 4)}
+async def detect_language(
+    text: Annotated[str | None, Query(description="Text to classify")] = None,
+    q: Annotated[
+        str | None,
+        Query(description="Alias for text (same query param as GET /discover)"),
+    ] = None,
+):
+    raw = (text or q or "").strip()
+    if not raw:
+        return JSONResponse(
+            {
+                "error": {
+                    "reason": "missing_text",
+                    "hint": "Pass ?text=… or ?q=…, or use GET /detect-language/sample",
+                }
+            },
+            status_code=400,
+        )
+    language, confidence = _identifier.classify(raw)
+    return {"text": raw, "language": language, "confidence": round(float(confidence), 4)}
 
 
 # GET /detect-language/sample - added 2026-09-11.
