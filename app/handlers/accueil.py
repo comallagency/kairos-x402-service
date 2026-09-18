@@ -34,7 +34,7 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-17T22:30:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T00:23:00+00:00"
 
 
 def _now() -> str:
@@ -129,9 +129,12 @@ def _stable_body(base: str) -> dict:
             "paid_routes_hint": (
                 "POST /pdf, /web-read, /extract, /summarize, /search, /fact-check, "
                 "/translate, /jobs — each returns 402 with USDC on Base until paid. "
-                "POST /discover ($0.001) ranks MCP servers from a curated snapshot."
+                "GET /discover (free) and POST /discover ($0.001) rank MCP servers from a curated snapshot."
             ),
             "free_entry": f"{base}/detect-language",
+            "discover_mcp_free": f"{base}/discover",
+            "discover_mcp_sample": f"{base}/discover/sample",
+            "discover_mcp_guide": f"{base}/place/discover-mcp-gratuit",
         },
         "where_to_gather": {
             "mesh_board": f"{base}/mesh",
@@ -184,6 +187,9 @@ def _html() -> str:
 (ou <code>Accept: application/json</code>).</p>
 <h2>Parler</h2>
 <p><code>POST {base}/contact</code> — gratuit. Exemple : <a href="{base}/contact/sample">{base}/contact/sample</a></p>
+<h2>Découvrir MCP (gratuit)</h2>
+<p><code>GET {base}/discover?q=…</code> — <a href="{base}/discover/sample">exemple</a> ·
+<a href="{base}/place/discover-mcp-gratuit">guide</a></p>
 <h2>Payer (x402, USDC Base)</h2>
 <p><a href="{base}/capabilities">/capabilities</a> · <a href="{base}/.well-known/x402">/.well-known/x402</a></p>
 <h2>Se retrouver</h2>
