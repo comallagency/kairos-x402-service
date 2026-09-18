@@ -5,7 +5,13 @@ never a hand-copied second list of "what routes exist"."""
 
 from fastapi import APIRouter
 
-from app.x402_setup import KIT_TAGLINE, ROUTE_SUMMARIES, ROUTE_USE_CASES, build_route_configs
+from app.x402_setup import (
+    DISCOVER_SAMPLE_OUTPUT,
+    KIT_TAGLINE,
+    ROUTE_SUMMARIES,
+    ROUTE_USE_CASES,
+    build_route_configs,
+)
 
 router = APIRouter()
 
@@ -48,6 +54,25 @@ async def capabilities():
             "sample": None,
             "input_example": None,
             "output_example": None,
+        },
+    )
+    entries.insert(
+        1,
+        {
+            "route": "/discover",
+            "method": "GET",
+            "price": "free",
+            "summary": (
+                "Find MCP servers by need, ranked by semantic relevance over a "
+                "curated snapshot — no payment (up to 10 matches)."
+            ),
+            "use_cases": [
+                "discover MCP servers matching a need before wiring a client",
+                "free snapshot search when POST /discover payment is not needed",
+            ],
+            "sample": "/discover/sample",
+            "input_example": {"q": "postgresql jdbc read only mcp"},
+            "output_example": DISCOVER_SAMPLE_OUTPUT,
         },
     )
     return {

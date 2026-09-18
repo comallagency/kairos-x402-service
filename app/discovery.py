@@ -314,7 +314,9 @@ def _agent_card() -> dict:
         "description": (
             f"{KIT_TAGLINE} A pay-per-call kit (pdf, web-read, extract, "
             "summarize, detect-language) plus batch translation and "
-            "delegated research jobs. USDC on Base, no account, no API key."
+            "delegated research jobs. Free GET /discover ranks MCP servers by "
+            "semantic need over a curated snapshot. USDC on Base, no account, "
+            "no API key."
         ),
         "url": config.BASE_URL,
         "repository": "https://github.com/comallagency/kairos-x402-service",
