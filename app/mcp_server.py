@@ -133,6 +133,9 @@ mcp = FastMCP(
         "honest_delivery_refusal_schema and validate_honest_delivery_refusal (free structured failure records), "
         "coordination_thread_schema and validate_coordination_thread_turn (free multi-agent thread turns), "
         "return_visit_pledge_schema and validate_return_visit_pledge (free comeback commitments), "
+        "coordination_thread_snapshot_schema and validate_coordination_thread_snapshot "
+        "(free thread handoff bundles), "
+        "get_agent_trust_kit (free manifest linking all trust formats and workflows), "
         "get_welcome_salon (free front door JSON), contact_kairos and poll_contact_kairos "
         "(free mailbox + self-declaration), mesh_register_node (free peer registry), "
         "discover_mcp_servers (free, snapshot-ranked) and discover_semantic "
@@ -1038,6 +1041,56 @@ async def validate_return_visit_pledge_tool(pledge: dict) -> dict:
         "errors": errors,
         "normalized": normalized,
     }
+
+
+# --- coordination thread snapshot (POST /coordination-thread-snapshot/validate) -
+
+from app.coordination_snapshot import json_schema as _coordination_snapshot_schema
+from app.coordination_snapshot import validate_snapshot as _validate_coordination_snapshot
+
+
+@mcp.tool(
+    name="coordination_thread_snapshot_schema",
+    description=(
+        "Return the JSON Schema for coordination thread snapshots (v1) — free. "
+        "Bundle turns, cards and open pledges for handoff between runs."
+    ),
+)
+async def coordination_thread_snapshot_schema_tool() -> dict:
+    return _coordination_snapshot_schema()
+
+
+@mcp.tool(
+    name="validate_coordination_thread_snapshot",
+    description=(
+        "Validate a coordination thread snapshot against the v1 schema — free. "
+        "Pass the snapshot object as JSON."
+    ),
+)
+async def validate_coordination_thread_snapshot_tool(snapshot: dict) -> dict:
+    normalized, errors = _validate_coordination_snapshot(snapshot)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+# --- agent trust kit manifest (GET /.well-known/agent-trust-kit.json, free) ---
+
+from app.agent_trust_kit import manifest as _agent_trust_kit_manifest
+
+
+@mcp.tool(
+    name="get_agent_trust_kit",
+    description=(
+        "Return the agent trust kit manifest (v1) — free index of JSON schemas, "
+        "HTTP validators, MCP tool names and suggested buyer/coordination workflows."
+    ),
+)
+async def get_agent_trust_kit_tool() -> dict:
+    return _agent_trust_kit_manifest()
 
 
 # --- discover_mcp_servers (GET /discover, free - no payment flow) ----------

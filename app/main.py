@@ -21,9 +21,11 @@ from app.handlers.detect_language import router as detect_language_router
 from app.handlers.tool_digest import router as tool_digest_router
 from app.handlers.relationship_memory import router as relationship_memory_router
 from app.handlers.coordination_thread import router as coordination_thread_router
+from app.handlers.coordination_snapshot import router as coordination_snapshot_router
 from app.handlers.return_visit_pledge import router as return_visit_pledge_router
 from app.handlers.tool_delivery_receipt import router as tool_delivery_receipt_router
 from app.handlers.honest_delivery_refusal import router as honest_delivery_refusal_router
+from app.handlers.agent_trust_kit import router as agent_trust_kit_router
 from app.handlers.agent_mesh import router as agent_mesh_router
 from app.handlers.discover import router as discover_router
 from app.handlers.discover_paid import router as discover_paid_router
@@ -114,8 +116,10 @@ inner_app.include_router(tool_digest_router)
 inner_app.include_router(relationship_memory_router)
 inner_app.include_router(return_visit_pledge_router)
 inner_app.include_router(coordination_thread_router)
+inner_app.include_router(coordination_snapshot_router)
 inner_app.include_router(tool_delivery_receipt_router)
 inner_app.include_router(honest_delivery_refusal_router)
+inner_app.include_router(agent_trust_kit_router)
 inner_app.include_router(agent_mesh_router)
 inner_app.include_router(discover_router)
 inner_app.include_router(discover_paid_router)

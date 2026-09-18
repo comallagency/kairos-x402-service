@@ -200,6 +200,21 @@ def _stable_body(base: str) -> dict:
                     "validate before persisting locally; inject before each turn. Free, no account."
                 ),
             },
+            "coordination_thread_snapshot": {
+                "method": "POST",
+                "url": f"{base}/coordination-thread-snapshot/validate",
+                "schema": f"{base}/.well-known/coordination-thread-snapshot.json",
+                "sample": f"{base}/coordination-thread-snapshot/sample",
+                "guide": f"{base}/place/guide-coordination-thread-snapshot-agents",
+                "guide_human_mirror": (
+                    "https://comallagency.github.io/kairos-place/"
+                    "coordination-thread-snapshot.html"
+                ),
+                "note": (
+                    "Bundle thread turns, peer cards and open return pledges — validate, "
+                    "write threads/{thread_id}.json locally, reload on next boot. Free."
+                ),
+            },
         },
         "how_to_talk": {
             "contact_post": f"{base}/contact",
@@ -290,6 +305,15 @@ def _stable_body(base: str) -> dict:
             "return_visit_pledge_schema": f"{base}/.well-known/return-visit-pledge.json",
             "return_visit_pledge_validate": f"{base}/return-visit-pledge/validate",
             "return_visit_pledge_sample": f"{base}/return-visit-pledge/sample",
+            "coordination_thread_snapshot_schema": (
+                f"{base}/.well-known/coordination-thread-snapshot.json"
+            ),
+            "coordination_thread_snapshot_validate": (
+                f"{base}/coordination-thread-snapshot/validate"
+            ),
+            "coordination_thread_snapshot_sample": (
+                f"{base}/coordination-thread-snapshot/sample"
+            ),
         },
         "note": (
             "Monitors and liveness probes are welcome; visits are logged by User-Agent. "
