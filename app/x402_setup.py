@@ -272,7 +272,7 @@ ROUTE_DESCRIPTIONS = {
         "don't clearly settle it. Try GET /fact-check/sample. " + _KIT_MENTION
     ),
     "discover": (
-        'Find MCP servers matching a need, ranked by semantic similarity over a curated snapshot of 10101 MCP servers (registry.modelcontextprotocol.io plus observed registries). Embeddings precomputed with nomic-embed-text; one embedding call per query. Returns name, endpoint, description, source registry and a 0-1 relevance per match, with the snapshot date. Free GET /discover uses the same snapshot (up to 10 matches, fixed threshold). This paid POST allows up to 25 matches and a custom min_similarity.'
+        'Find MCP servers matching a need, ranked by semantic similarity over a curated snapshot of 10101 MCP servers (registry.modelcontextprotocol.io plus observed registries). Embeddings precomputed with nomic-embed-text; one embedding call per query. Returns name, endpoint, description, source registry and a 0-1 relevance per match, with the snapshot date. Free GET /discover uses the same snapshot (5 default, 10 max via max_results). Paid POST: up to 25 matches and custom min_similarity.'
     ),
 }
 
