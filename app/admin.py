@@ -261,6 +261,7 @@ async def collect_dashboard_data() -> dict:
         "routes": routes_map,
         "events": events_payload,
         "stats_24h": _activity_stats(recent),
+        "history_7d": db.history_7d(),
         "commercial": {
             "unique_services": len(routes_map),
             "paid_http_routes": len(route_configs),

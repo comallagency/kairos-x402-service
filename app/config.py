@@ -9,6 +9,9 @@ load_dotenv()
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 X402_PAY_TO = os.getenv("X402_PAY_TO", "0x0000000000000000000000000000000000000000")
+# Excluded from history_7d()'s distinct-identity count: our own curl/verification
+# traffic against the public domain would otherwise count as a visitor.
+VPS_PUBLIC_IP = os.getenv("VPS_PUBLIC_IP", "")
 X402_NETWORK = os.getenv("X402_NETWORK", "eip155:84532")
 
 CDP_API_KEY_ID = os.getenv("CDP_API_KEY_ID") or None

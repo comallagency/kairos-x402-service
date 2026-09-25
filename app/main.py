@@ -18,6 +18,7 @@ from fastmcp.utilities.lifespan import combine_lifespans
 from app import db
 from app.admin import router as admin_router
 from app.capacity import CapacityGateMiddleware
+from app.client_ip import ClientIpMiddleware
 from app.db import init_db
 from app.discovery import router as discovery_router
 from app.generated.dynamic_routes import build_dynamic_routers
@@ -150,5 +151,7 @@ payment_wrapped = build_payment_middleware(mcp_accept_compat)
 intent_logged = IntentLoggingMiddleware(payment_wrapped)
 mpp_wrapped = MPPMiddleware(intent_logged, inner_app)
 capacity_gated = CapacityGateMiddleware(mpp_wrapped)
-# Outside everything: rewrite empty v2 402 bodies so body-parsing agents can pay.
-app = PaymentBodyCompatMiddleware(capacity_gated)
+body_compat = PaymentBodyCompatMiddleware(capacity_gated)
+# Outermost: captures the client IP (already resolved from X-Forwarded-For
+# by uvicorn proxy-headers) before anything else runs, purely observational.
+app = ClientIpMiddleware(body_compat)

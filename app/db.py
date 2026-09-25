@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS requests (
     body_excerpt TEXT,
     error_reason TEXT,
     mpp_attempted INTEGER DEFAULT 0,
-    network TEXT
+    network TEXT,
+    client_ip TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests(ts);
 CREATE INDEX IF NOT EXISTS idx_requests_route ON requests(route);
@@ -389,6 +390,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass  # column already exists
 
+    try:
+        conn.execute("ALTER TABLE requests ADD COLUMN client_ip TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
 
 def init_db() -> None:
     global _initialized
@@ -430,14 +436,19 @@ def log_request(
     error_reason: str | None = None,
     mpp_attempted: bool = False,
     network: str | None = None,
+    client_ip: str | None = None,
 ) -> None:
     if body_excerpt is not None:
         body_excerpt = body_excerpt[:2048]
+    if client_ip is None:
+        from app.client_ip import current_client_ip
+
+        client_ip = current_client_ip()
     with cursor() as cur:
         cur.execute(
             """INSERT INTO requests
-               (ts, route, method, status, latency_ms, amount_usdc, payer, user_agent, body_excerpt, error_reason, mpp_attempted, network)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+               (ts, route, method, status, latency_ms, amount_usdc, payer, user_agent, body_excerpt, error_reason, mpp_attempted, network, client_ip)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 now_iso(),
                 route,
@@ -451,6 +462,7 @@ def log_request(
                 error_reason,
                 int(mpp_attempted),
                 network or config.X402_NETWORK,
+                client_ip,
             ),
         )
 
@@ -1367,3 +1379,60 @@ def reset_repair_attempts(slug: str) -> None:
     CONSECUTIVE failures count toward the 2-strikes kill."""
     with cursor() as cur:
         cur.execute("DELETE FROM route_repair_attempts WHERE slug=?", (slug,))
+
+
+# Same classification as app/templates/live.html::isScanner() (front-end,
+# kept in sync by hand - no shared module between the JS dashboard and this
+# backend query). Used only for history_7d() below.
+_SCANNER_UA_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"x402-list", r"forgemesh", r"x402scan|poncho", r"402index",
+        r"autonomous-directory", r"directory.?probe", r"ampersend",
+        r"nohumans", r"uptime|pingdom|healthcheck|monitor",
+        r"\bprobe\b", r"\bscanner\b", r"\bcrawler\b", r"\bbot\b",
+        r"AgentIndex-probe", r"circle.*scan", r"coinbase.*crawl",
+        r"^node$", r"^conform/", r"^ops-check/", r"^post-cut/",
+        r"^live-dashboard-smoke/", r"^discover-post-probe/",
+        r"^hermes-contact-discovery/", r"^x402watch/",
+    )
+]
+
+
+def _is_scanner_ua(user_agent: str | None) -> bool:
+    ua = user_agent or ""
+    return any(pattern.search(ua) for pattern in _SCANNER_UA_PATTERNS)
+
+
+def history_7d() -> list[dict]:
+    """Per UTC day, last 7 days: total requests, distinct client IPs that are
+    neither a known scanner UA nor our own VPS (config.VPS_PUBLIC_IP - our own
+    curl/verification traffic against the public domain), and real payments
+    (status='paid')."""
+    with cursor() as cur:
+        cur.execute(
+            "SELECT ts, client_ip, user_agent, status FROM requests WHERE ts >= ?",
+            (_since(24 * 7),),
+        )
+        rows = cur.fetchall()
+
+    by_day: dict[str, dict] = {}
+    for row in rows:
+        day = row["ts"][:10]
+        bucket = by_day.setdefault(day, {"requests_total": 0, "identities": set(), "payments_real": 0})
+        bucket["requests_total"] += 1
+        ip = row["client_ip"]
+        if ip and ip != config.VPS_PUBLIC_IP and not _is_scanner_ua(row["user_agent"]):
+            bucket["identities"].add(ip)
+        if row["status"] == "paid":
+            bucket["payments_real"] += 1
+
+    return [
+        {
+            "day": day,
+            "requests_total": bucket["requests_total"],
+            "distinct_identities": len(bucket["identities"]),
+            "payments_real": bucket["payments_real"],
+        }
+        for day, bucket in sorted(by_day.items())
+    ]
