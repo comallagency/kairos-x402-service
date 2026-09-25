@@ -46,13 +46,13 @@ JOBS_SAMPLE_OUTPUT = {
 
 PDF_SAMPLE_OUTPUT = {
     "markdown": (
-        "Universal Declaration of Human Rights \nPreamble \nWhereas recognition "
-        "of the inherent dignity and of the equal and inalienable \nrights of "
-        "all members of the human family is the foundation of freedom, "
-        "justice \nand peace in the world, ..."
+        "# Universal Declaration of Human Rights \n\n## Preamble \n\nWhereas "
+        "recognition of the inherent dignity and of the equal and inalienable "
+        "rights of all members of the human family is the foundation of "
+        "freedom, justice and peace in the world, ..."
     ),
-    "metadata": {"title": None, "author": "lindner", "pages": 8, "date": "2001-09-10T01:04:58-17:00"},
-    "token_count": 2330,
+    "metadata": {"title": None, "author": "lindner", "pages": 8, "date": "2001-09-10T01:04:58-07:00"},
+    "token_count": 2164,
 }
 
 WEB_READ_SAMPLE_OUTPUT = {
@@ -205,8 +205,8 @@ X402_ECHO_SAMPLE_OUTPUT = {
     "ok": True,
     "purpose": "x402-mainnet-conformance",
     "network": "eip155:8453",
-    "price_usdc": 0.000001,
-    "price_atomic_usdc": "1",
+    "price_usdc": 0.001,
+    "price_atomic_usdc": "1000",
     "payer": "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d",
     "request": {"method": "POST", "echo": {"hello": "agent"}},
 }
@@ -484,8 +484,8 @@ ROUTE_DESCRIPTIONS = {
         "ten paid requests. Try GET /wallet-intelligence/sample."
     ),
     "x402-echo": (
-        "Cheapest possible Base-mainnet x402 conformance call: settle exactly "
-        "one atomic unit of USDC ($0.000001) and receive payer identity, request "
+        "Cheapest possible Base-mainnet x402 conformance call: settle $0.001 "
+        "of USDC and receive payer identity, request "
         "echo and receipt. Built for agents testing wallets, Payment-Signature, "
         "facilitators and settlement. Try GET /x402-echo/sample."
     ),
@@ -1244,7 +1244,7 @@ ROUTE_SUMMARIES = {
         "Replace ten wallet and gas requests with one five-network payment preflight."
     ),
     "x402-echo": (
-        "Prove an x402 mainnet client works with a one-atomic-USDC settlement."
+        "Prove an x402 mainnet client works with the cheapest real settlement ($0.001)."
     ),
     "agent-health": (
         "Verify that an agent is reachable, discoverable and payment-ready now."
@@ -1409,7 +1409,7 @@ ROUTE_USE_CASES = {
     "x402-echo": [
         "test a Base-mainnet x402 client with the cheapest possible real settlement",
         "validate Payment-Signature generation and facilitator compatibility",
-        "obtain payer identity and a receipt from a one-atomic-USDC call",
+        "obtain payer identity and a receipt from the cheapest real settlement ($0.001)",
         "exercise the complete 402 sign retry settle flow in CI",
     ],
     "agent-health": [

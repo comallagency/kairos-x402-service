@@ -323,7 +323,7 @@ def _llms_catalog() -> str:
         "# AgentIndex x402",
         "",
         f"> Pay-per-call tools for AI agents. USDC on Base via HTTP 402 (x402).",
-        f"> No account. No API key. Price from $0.0001. Home: {base}",
+        f"> No account. No API key. Price from $0.001. Home: {base}",
         "",
         "## How to pay (Hermes, OpenClaw, PipRail, any x402 client)",
         "",
@@ -332,11 +332,11 @@ def _llms_catalog() -> str:
         "3. Or use PipRail: `piprail_quote_payment` → `piprail_pay_request` on the URL.",
         "4. Or mount our MCP: " + f"{base}/mcp/ (tools: weather, crypto, news, can_pay, probe, …).",
         "",
-        "## Cheapest first calls ($0.0001 USDC on Base) — start here",
+        "## Cheapest first calls ($0.001 USDC on Base) — start here",
         "",
         f"- [Wallet Balance]({base}/wallet-balance?address=0xYOUR&network=base): native + USDC balances on five EVM networks",
         f"- [Gas Price]({base}/gas-price?network=base): gas, base fee and transfer-cost estimate on five EVM networks",
-        f"- [x402 Mainnet Echo]({base}/x402-echo?message=hello): complete real settlement test for one atomic USDC ($0.000001)",
+        f"- [x402 Mainnet Echo]({base}/x402-echo?message=hello): complete real settlement test at the cheapest available price ($0.001)",
         f"- [Agent Health]({base}/agent-health?url=https://example.com): live operational, x402, MCP/A2A and discovery audit ($0.001)",
         f"- [Wallet Intelligence]({base}/wallet-intelligence?address=0xYOUR): one $0.001 call replaces wallet+gas reads on five EVM networks",
         "",
@@ -351,7 +351,7 @@ def _llms_catalog() -> str:
         "",
         "## High-value web and document tools",
         "",
-        f"- [Search + Content]({base}/search): POST `{{\"query\":\"...\",\"include_content\":true}}` — live results plus clean Markdown from the top 3 pages (launch price $0.0001)",
+        f"- [Search + Content]({base}/search): POST `{{\"query\":\"...\",\"include_content\":true}}` — live results plus clean Markdown from the top 3 pages (launch price $0.001)",
         f"- [PDF to Markdown]({base}/pdf): POST `{{\"url\":\"https://...pdf\"}}` — text, metadata and token count ($0.002)",
         f"- [Web Read]({base}/web-read): POST `{{\"url\":\"https://...\"}}` — main content as clean Markdown ($0.002)",
         f"- [Structured Extract]({base}/extract): POST URL/text plus JSON schema ($0.003)",
@@ -453,7 +453,7 @@ def _agent_card() -> dict:
         "description": (
             f"{KIT_TAGLINE} Start with GET /wallet-intelligence ($0.001): "
             "one signature replaces wallet and gas reads on five EVM networks. "
-            "Cheapest single reads cost $0.0001. USDC on Base (x402), no "
+            "Cheapest single reads cost $0.001. USDC on Base (x402), no "
             "account, no API key."
         ),
         "url": base,

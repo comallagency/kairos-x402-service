@@ -1,4 +1,4 @@
-"""GET|POST /x402-echo — one-atomic-USDC mainnet conformance endpoint."""
+"""GET|POST /x402-echo — cheapest real Base-mainnet x402 conformance endpoint ($0.001)."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ SAMPLE_RESPONSE = {
     "ok": True,
     "purpose": "x402-mainnet-conformance",
     "network": "eip155:8453",
-    "price_usdc": 0.000001,
-    "price_atomic_usdc": "1",
+    "price_usdc": 0.001,
+    "price_atomic_usdc": "1000",
     "payer": "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d",
     "request": {"method": "POST", "echo": {"hello": "agent"}},
 }
@@ -27,7 +27,7 @@ SAMPLE_RESPONSE = {
 async def x402_echo_sample():
     return {
         **SAMPLE_RESPONSE,
-        "note": "Paid route settles exactly one atomic unit of Base USDC.",
+        "note": "Paid route settles $0.001 of Base USDC.",
         "x402_receipt": make_receipt(None, "x402-echo", 1, 0.0),
     }
 

@@ -740,19 +740,23 @@ def chain_summary(network: str) -> dict:
 
 
 def chain_revenue_since(network: str, hours: int) -> float:
+    """Excludes MECHANICAL_WALLETS (is_mechanical=1) - self-funded bootstrap
+    settlements (Bazaar indexing, ping-pong top-ups) are not revenue."""
     with cursor() as cur:
         cur.execute(
             "SELECT COALESCE(SUM(amount_usdc), 0) AS total FROM chain_payments "
-            "WHERE network=? AND block_time >= ?",
+            "WHERE network=? AND block_time >= ? AND is_mechanical=0",
             (network, _since(hours)),
         )
         return cur.fetchone()["total"]
 
 
 def chain_buyer_stats(network: str) -> dict:
+    """Excludes MECHANICAL_WALLETS - see chain_revenue_since()."""
     with cursor() as cur:
         cur.execute(
-            "SELECT from_address, COUNT(*) AS n FROM chain_payments WHERE network=? GROUP BY from_address",
+            "SELECT from_address, COUNT(*) AS n FROM chain_payments "
+            "WHERE network=? AND is_mechanical=0 GROUP BY from_address",
             (network,),
         )
         rows = cur.fetchall()
@@ -763,8 +767,12 @@ def chain_buyer_stats(network: str) -> dict:
 
 
 def chain_last_payment_at(network: str) -> str | None:
+    """Excludes MECHANICAL_WALLETS - see chain_revenue_since()."""
     with cursor() as cur:
-        cur.execute("SELECT MAX(block_time) AS t FROM chain_payments WHERE network=?", (network,))
+        cur.execute(
+            "SELECT MAX(block_time) AS t FROM chain_payments WHERE network=? AND is_mechanical=0",
+            (network,),
+        )
         row = cur.fetchone()
         return row["t"] if row else None
 
