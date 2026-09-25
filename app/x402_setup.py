@@ -67,7 +67,7 @@ EXTRACT_SAMPLE_OUTPUT = {"data": {"product_name": "Widget Pro", "price": 29.99, 
 SUMMARIZE_SAMPLE_OUTPUT = {
     "summary": "The article explains how photosynthesis converts light energy into chemical energy in plants.",
     "length": "short",
-    "sources": ["https://example.com/photosynthesis"],
+    "sources": ["https://en.wikipedia.org/wiki/Photosynthesis"],
 }
 
 FACT_CHECK_SAMPLE_OUTPUT = {
@@ -1510,7 +1510,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             service_name="pdf-to-markdown",
             tags=KIT_TAGS + ["pdf", "document parsing", "metadata"],
             extensions=declare_discovery_extension(
-                input={"url": "https://example.com/report.pdf"},
+                input={"url": "https://www.ohchr.org/sites/default/files/UDHR/Documents/UDHR_Translations/eng.pdf"},
                 input_schema=PDF_INPUT_SCHEMA,
                 body_type="json",
                 output=OutputConfig(example=PDF_SAMPLE_OUTPUT, schema=PDF_OUTPUT_SCHEMA),
@@ -1539,7 +1539,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             tags=KIT_TAGS + ["structured data", "json schema", "web scraping"],
             extensions=declare_discovery_extension(
                 input={
-                    "url": "https://example.com/product/widget-pro",
+                    "url": "https://en.wikipedia.org/wiki/Widget_(economics)",
                     "schema": {
                         "type": "object",
                         "properties": {
@@ -1562,7 +1562,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             service_name="summarize-text",
             tags=KIT_TAGS + ["summarization", "tl;dr"],
             extensions=declare_discovery_extension(
-                input={"url": "https://example.com/photosynthesis", "length": "short"},
+                input={"url": "https://en.wikipedia.org/wiki/Photosynthesis", "length": "short"},
                 input_schema=SUMMARIZE_INPUT_SCHEMA,
                 body_type="json",
                 output=OutputConfig(example=SUMMARIZE_SAMPLE_OUTPUT, schema=SUMMARIZE_OUTPUT_SCHEMA),
@@ -1947,7 +1947,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             service_name="agent-verification-listing",
             tags=["agent registry", "verification badge", "discovery", "trust", "x402"],
             extensions=declare_discovery_extension(
-                input={"url": "https://agent.example", "name": "Example Agent"},
+                input={"url": "https://x402.agentindex.world", "name": "AgentIndex x402"},
                 input_schema={
                     "type": "object",
                     "required": ["url"],
@@ -1961,7 +1961,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
                 output=OutputConfig(
                     example={
                         "id": "8e6c3b7ef184b00c3a21",
-                        "url": "https://agent.example",
+                        "url": "https://x402.agentindex.world",
                         "score": 95,
                         "verdict": "operational",
                         "verified_at": "2026-09-20T02:20:00Z",
