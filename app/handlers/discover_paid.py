@@ -102,13 +102,23 @@ def _own_route_rows() -> list[dict]:
     return rows
 
 
+def _embed_text_for(row: dict) -> str:
+    """Seule la première phrase de la description sert a l'embedding - la
+    description publiée (build_route_configs(), /.well-known/x402,
+    /capabilities) reste inchangée et plus détaillée."""
+    desc = row["description"] or ""
+    idx = desc.find(".")
+    first_sentence = desc[: idx + 1] if idx != -1 else desc
+    return f"{row['name']}: {first_sentence}"
+
+
 async def _load_own_routes() -> tuple[list[dict], np.ndarray]:
     """Même schéma que _load_snapshot(), mais embed() est async donc pas de
     lru_cache direct - un dict-cache calculé une seule fois par process."""
     if "matrix" in _own_routes_cache:
         return _own_routes_cache["rows"], _own_routes_cache["matrix"]
     rows = _own_route_rows()
-    texts = [f"{r['name']}: {r['description']}" for r in rows]
+    texts = [_embed_text_for(r) for r in rows]
     vectors = await embed(texts)
     matrix = np.asarray(vectors, dtype=np.float32)
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)

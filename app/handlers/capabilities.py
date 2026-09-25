@@ -59,5 +59,6 @@ async def capabilities():
     return {
         "name": "AgentIndex content kit",
         "description": KIT_TAGLINE,
+        "source": "https://github.com/comallagency/kairos-x402-service",
         "routes": entries,
     }
