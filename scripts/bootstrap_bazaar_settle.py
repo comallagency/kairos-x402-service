@@ -1,73 +1,46 @@
 #!/usr/bin/env python3
-"""Bootstrap CDP Bazaar indexing via a ping-pong self-settle between two
-wallets on Base mainnet.
+"""Settle the two remaining $0.002 CDP Bazaar routes (pdf, web-read) with a
+consolidation top-up when neither wallet alone can afford one.
 
-Why ping-pong, not a plain self-pay
--------------------------------------
-Three things learned the hard way (2026-09-25):
-  1. Amounts below $0.001 (search/wallet-balance/gas-price/x402-echo used to
-     be $0.0001 or $0.000001) are rejected by the CDP facilitator with
-     invalidReason "amount_too_low" - a facilitator floor. Fixed at the
-     source: those four PRICE_* constants are now $0.001 in app/config.py.
-  2. A genuine self-pay (payer == payTo, same address) is rejected outright
-     with "self_send_not_allowed" - CDP will not settle a transfer to itself.
-  3. Re-querying the on-chain balance right after a settlement is unreliable:
-     the previous transfer is not always visible yet by the time the next
-     eth_call lands (RPC read lag vs. facilitator settlement), which showed
-     up as spurious "execution reverted" on a payment that should have been
-     affordable. Fixed by never deciding on a live re-read (see below).
+State this script assumes (2026-09-25, after the previous ping-pong run)
+---------------------------------------------------------------------------
+9 routes already settled (search, news, can-pay, probe, wallet-balance,
+gas-price, wallet-intelligence, x402-echo, agent-health). X402_PAY_TO is
+back on A. The $0.002 total is now split $0.001 on A and $0.001 on B - the
+straight ping-pong (one side holds it all) no longer applies: neither A nor
+B alone covers a $0.002 route, but together they do.
 
-Fix: two real wallets, A (the live payTo) and B (funded by A's first
-ping-pong run: weather + crypto already settled to it). X402_PAY_TO on the
-server is flipped between them and whichever wallet currently HOLDS the USDC
-pays - so every settlement is a real transfer between two different
-addresses, never a self-send. The CDP Facilitator covers gas both ways.
+Consolidation top-up
+----------------------
+For the current target route, read both balances fresh (no local tracking
+carried between routes - only two routes here, a live read each time is
+cheap and exactly matches what "regroupement" needs to reason about).
+  - if one side alone covers the price -> pay normally, that side to the
+    other.
+  - else if the SUM covers it -> the side with LESS pays x402-echo
+    ($0.001) to the side with MORE, topping it up to $0.002; that side then
+    pays the target route back to the original sender.
+  - else -> stop, insufficient funds even combined.
 
-Local balance bookkeeping, not live re-reads
------------------------------------------------
-At the START of each holding session (right after flipping payTo and
-confirming it), the holder's on-chain balance is read ONCE. From then on,
-every successful (200) payment subtracts that route's price from this local
-running total - the actual chain is never re-queried mid-session to decide
-whether the NEXT payment is affordable. Flip to the other holder as soon as
-the next unpaid route's price would exceed what is locally left.
+x402-echo is the only route ever paid a second time (previous run already
+settled it once for indexing) - explicitly allowed here, and only here, as
+a pure balance-consolidation instrument. Neither pdf nor web-read is ever
+paid twice: each is dropped from the queue the moment it settles or comes
+back amount_too_low.
 
-If a payment nonetheless comes back as "execution reverted" (the RPC-lag
-scenario above), it is NOT treated as a stop condition: the route is put
-back for a later session, the local balance for the rest of THIS session is
-treated as exhausted (no further attempts this session - the same class of
-failure would likely repeat), and the loop flips immediately.
+Per-payment outcome (route or consolidation, same handling)
+--------------------------------------------------------------
+- 200 -> settled, tx noted, removed from the queue (route) or unblocks the
+  pending route (consolidation).
+- invalidReason "amount_too_low" -> noted, route removed (not expected at
+  $0.001/$0.002 but handled defensively).
+- "execution reverted" (exception or response body) -> treated as transient
+  (RPC balance-read lag against a settlement that just landed) - short
+  sleep, retry the same step. Not a stop.
+- anything else -> the whole run stops immediately.
 
-Loop
-----
-  holder = B (USDC is currently there), other = A
-  while there are still unpaid eligible routes and iterations remain:
-    - flip X402_PAY_TO on the VPS to `other` (SSH from this WSL clone),
-      rebuild + recreate x402-app, poll the live 402 until it echoes `other`
-    - read `holder`'s on-chain balance once for this session
-    - `holder`'s key pays each remaining unpaid route once, cheapest first,
-      as long as the LOCAL running balance covers that route's price
-    - swap holder/other, repeat
-
-Eligible routes: price <= $0.002, /discover excluded (already indexed
-25/09), /weather and /crypto excluded (already settled in the first
-ping-pong run). Method/price/example body for every route are read live from
-GET /.well-known/x402 - never hand-copied (same rule as the rest of this
-project, see app/mpp_middleware.py). GET preferred over POST when a route
-exposes both, so a slug is never paid twice under two different methods.
-
-Per-payment outcome
---------------------
-- 200 -> settled, tx noted, local balance debited, route removed.
-- invalidReason "amount_too_low" (string search in the response body,
-  independent of exact JSON shape) -> noted, route removed, never retried.
-- "execution reverted" (in an exception message or in a non-200 body) ->
-  route kept for later, this session ends early, loop flips. Not a stop.
-- anything else -> the WHOLE run stops immediately.
-
-Whatever happens - full success, a stopped run, a broken SSH step - the
-`finally` block always flips X402_PAY_TO back to A, rebuilds, recreates, and
-re-polls the live 402 to confirm A is back before the script exits.
+Whatever happens, the `finally` block always flips X402_PAY_TO back to A,
+rebuilds, recreates, and re-polls the live 402 to confirm A before exit.
 
 Usage
 -----
@@ -78,11 +51,10 @@ Usage
 
 Safety
 ------
-- Refuses to run unless KEY_A derives to ADDRESS_A and KEY_B derives to
-  ADDRESS_B exactly.
+- Refuses to run unless KEY_A derives to ADDRESS_A and KEY_B to ADDRESS_B.
 - Never prints, logs or otherwise surfaces KEY_A or KEY_B.
-- SSH to the VPS only ever edits X402_PAY_TO / MECHANICAL_WALLETS in .env
-  (backed up before every write, outside the repo) and recreates x402-app.
+- SSH to the VPS only ever edits X402_PAY_TO in .env (backed up before every
+  write, outside the repo) and recreates x402-app.
 """
 from __future__ import annotations
 
@@ -99,6 +71,8 @@ from eth_account import Account
 
 ADDRESS_A = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 ADDRESS_B = "0x3cedc3Cba49c3809EE46B9bf60da75d6607b45Ec"
+TARGET_SLUGS = ["pdf", "web-read"]
+CONSOLIDATION_SLUG = "x402-echo"
 MAX_PRICE_USDC = 0.002
 BASE_URL = "https://x402.agentindex.world"
 NETWORK = "eip155:8453"
@@ -106,6 +80,7 @@ EXCLUDED_SLUGS = {"discover", "weather", "crypto"}
 AMOUNT_TOO_LOW_MARKER = "amount_too_low"
 EXECUTION_REVERTED_MARKER = "execution reverted"
 MAX_ITERATIONS = 20
+RETRY_DELAY_S = 10
 
 SSH_KEY = os.path.expanduser("~/.ssh/hermes_vps_key")
 SSH_HOST = "root@169.58.121.36"
@@ -136,21 +111,12 @@ _PATCH_ENV_TEMPLATE = """import re
 path = "{remote_env_path}"
 s = open(path, encoding="utf-8").read()
 s = re.sub(r"^X402_PAY_TO=.*$", "X402_PAY_TO={pay_to}", s, flags=re.MULTILINE)
-{mechanical_block}
 open(path, "w", encoding="utf-8").write(s)
 print("patched")
 """
 
-_MECHANICAL_BLOCK_TEMPLATE = """m = re.search(r"^MECHANICAL_WALLETS=(.*)$", s, re.MULTILINE)
-current = m.group(1) if m else ""
-wallets = [w.strip() for w in current.split(",") if w.strip()]
-if "{addr}".lower() not in [w.lower() for w in wallets]:
-    wallets.append("{addr}")
-s = re.sub(r"^MECHANICAL_WALLETS=.*$", "MECHANICAL_WALLETS=" + ",".join(wallets), s, flags=re.MULTILINE)
-"""
 
-
-def apply_env_and_recreate(pay_to: str, mechanical_wallet_to_add: str | None = None) -> None:
+def apply_env_and_recreate(pay_to: str) -> None:
     backup = _ssh_exec(
         "mkdir -p /root/x402-preclaude-backups && "
         f"cp {REMOTE_ENV_PATH} /root/x402-preclaude-backups/.env.bak-ping-pong-$(date +%Y%m%dT%H%M%S)"
@@ -158,11 +124,7 @@ def apply_env_and_recreate(pay_to: str, mechanical_wallet_to_add: str | None = N
     if backup.returncode != 0:
         raise RuntimeError(f"echec backup .env: {backup.stderr[:300]}")
 
-    mech_block = _MECHANICAL_BLOCK_TEMPLATE.format(addr=mechanical_wallet_to_add) if mechanical_wallet_to_add else ""
-    patch_script = _PATCH_ENV_TEMPLATE.format(
-        remote_env_path=REMOTE_ENV_PATH, pay_to=pay_to, mechanical_block=mech_block
-    )
-
+    patch_script = _PATCH_ENV_TEMPLATE.format(remote_env_path=REMOTE_ENV_PATH, pay_to=pay_to)
     push = _ssh_pipe("cat > /tmp/_patch_env.py", patch_script)
     if push.returncode != 0:
         raise RuntimeError(f"echec envoi du patch .env: {push.stderr[:300]}")
@@ -196,7 +158,7 @@ async def wait_for_pay_to(expected: str, timeout_s: int = 150) -> None:
     raise RuntimeError(f"payTo n'a jamais affiche {expected} apres {timeout_s}s")
 
 
-# --- Base mainnet USDC balance (read once per holding session) ------------
+# --- Base mainnet USDC balance ---------------------------------------------
 
 async def usdc_balance(address: str) -> float:
     data = "0x70a08231000000000000000000000000" + address[2:].lower()
@@ -211,7 +173,7 @@ async def usdc_balance(address: str) -> float:
     return int(raw, 16) / 1_000_000
 
 
-# --- route discovery (live, never hand-copied) ----------------------------
+# --- route discovery (live, never hand-copied) ------------------------------
 
 def _price(accepts: list[dict]) -> float | None:
     if not accepts:
@@ -249,9 +211,7 @@ async def fetch_eligible_routes() -> list[dict]:
             "price": price,
             "bazaar_input": (r.get("extensions") or {}).get("bazaar", {}).get("info", {}).get("input", {}),
         }
-
-    routes = sorted(by_slug.values(), key=lambda r: r["price"])
-    return routes
+    return by_slug
 
 
 def _decode_tx_hash(headers: httpx.Headers) -> str | None:
@@ -286,12 +246,14 @@ def _outcome(status: int, body_text: str) -> str:
         return "reglee"
     if AMOUNT_TOO_LOW_MARKER in body_text:
         return "amount_too_low"
+    if EXECUTION_REVERTED_MARKER in body_text.lower():
+        return "execution_reverted"
     return "autre_erreur"
 
 
 def _print_table(results: list[tuple[str, str, str | None, str, str | None]]) -> None:
     print("\n=== resume ===")
-    print(f"{'route':22s} {'payeur':44s} {'resultat'}")
+    print(f"{'route':26s} {'payeur':44s} {'resultat'}")
     for slug, payer, tx, outcome, detail in results:
         label = {
             "reglee": f"reglee, tx={tx}",
@@ -299,94 +261,98 @@ def _print_table(results: list[tuple[str, str, str | None, str, str | None]]) ->
             "execution_reverted": "execution reverted - non reglee, reportee",
             "autre_erreur": f"autre erreur: {detail}",
         }[outcome]
-        print(f"{slug:22s} {payer:44s} {label}")
+        print(f"{slug:26s} {payer:44s} {label}")
 
 
-# --- ping-pong loop --------------------------------------------------------
+# --- settlement with consolidation top-up -----------------------------------
 
-async def run_ping_pong(account_a: Account, account_b: Account, results: list) -> None:
+async def _attempt_payment(accounts: dict, payer_addr: str, payto_addr: str, route: dict) -> tuple[str, str | None, str | None]:
     from x402 import x402Client
     from x402.http.clients.httpx import x402HttpxClient
     from x402.mechanisms.evm.exact.register import register_exact_evm_client
 
-    accounts = {ADDRESS_A.lower(): account_a, ADDRESS_B.lower(): account_b}
-    unpaid = await fetch_eligible_routes()
-    print(f"{len(unpaid)} route(s) eligible(s) (prix <= ${MAX_PRICE_USDC}, hors discover/weather/crypto):")
-    for r in unpaid:
-        print(f"  {r['slug']:22s} {r['method']:4s} ${r['price']}")
+    apply_env_and_recreate(payto_addr)
+    await wait_for_pay_to(payto_addr)
 
-    # L'USDC est actuellement sur B (weather+crypto deja regles vers B lors
-    # du run precedent) - premiere bascule vers A pour que B puisse payer.
-    holder, other = ADDRESS_B, ADDRESS_A
-    first_flip = True
+    signer = accounts[payer_addr.lower()]
+    client = x402Client()
+    register_exact_evm_client(client, signer=signer, networks=NETWORK)
+    try:
+        async with x402HttpxClient(client, timeout=60.0) as http:
+            status, tx, body_text = await pay_once(http, route)
+    except Exception as exc:
+        if EXECUTION_REVERTED_MARKER in str(exc).lower():
+            return "execution_reverted", None, None
+        return "autre_erreur", None, str(exc)[:300]
+
+    outcome = _outcome(status, body_text)
+    detail = None if outcome == "reglee" else body_text[:300]
+    return outcome, tx, detail
+
+
+async def run_pdf_web_read(account_a: Account, account_b: Account, results: list) -> None:
+    accounts = {ADDRESS_A.lower(): account_a, ADDRESS_B.lower(): account_b}
+    by_slug = await fetch_eligible_routes()
+
+    missing = [s for s in TARGET_SLUGS if s not in by_slug]
+    if missing:
+        raise RuntimeError(f"route(s) cible(s) introuvable(s) dans /.well-known/x402: {missing}")
+    consolidation_route = by_slug.get(CONSOLIDATION_SLUG)
+    if consolidation_route is None:
+        raise RuntimeError(f"route de regroupement '{CONSOLIDATION_SLUG}' introuvable")
+
+    unpaid = [by_slug[s] for s in TARGET_SLUGS]
+    print(f"routes a regler: {[r['slug'] for r in unpaid]}")
+    print(f"route de regroupement disponible: {CONSOLIDATION_SLUG} (${consolidation_route['price']})")
 
     for iteration in range(1, MAX_ITERATIONS + 1):
         if not unpaid:
             break
-        print(f"\n--- iteration {iteration}: bascule payTo -> {other}, paie {holder} ---")
-        apply_env_and_recreate(other, mechanical_wallet_to_add=ADDRESS_B if first_flip else None)
-        first_flip = False
-        await wait_for_pay_to(other)
+        route = unpaid[0]
+        bal_a = await usdc_balance(ADDRESS_A)
+        bal_b = await usdc_balance(ADDRESS_B)
+        print(f"\n--- iteration {iteration}: cible={route['slug']} (${route['price']}) | solde A={bal_a:.6f} B={bal_b:.6f} ---")
 
-        local_balance = await usdc_balance(holder)
-        print(f"  solde de depart pour {holder}: {local_balance:.6f} (lu une fois, plus jamais re-interroge ce tour)")
+        if bal_a >= route["price"]:
+            payer, payto = ADDRESS_A, ADDRESS_B
+        elif bal_b >= route["price"]:
+            payer, payto = ADDRESS_B, ADDRESS_A
+        elif bal_a + bal_b >= route["price"]:
+            sender, recipient = (ADDRESS_A, ADDRESS_B) if bal_a <= bal_b else (ADDRESS_B, ADDRESS_A)
+            print(
+                f"  ni A ni B seul ne couvre ${route['price']} (A={bal_a:.6f}, B={bal_b:.6f}) mais la somme oui - "
+                f"regroupement: {sender} paie {CONSOLIDATION_SLUG} (${consolidation_route['price']}) vers {recipient}"
+            )
+            outcome, tx, detail = await _attempt_payment(accounts, sender, recipient, consolidation_route)
+            results.append((f"{CONSOLIDATION_SLUG} (regroupement)", sender, tx, outcome, detail))
+            if outcome == "reglee":
+                print(f"  regroupement reglee, tx={tx}")
+                payer, payto = recipient, sender
+            elif outcome == "execution_reverted":
+                print(f"  regroupement: execution reverted - nouvel essai dans {RETRY_DELAY_S}s")
+                await asyncio.sleep(RETRY_DELAY_S)
+                continue
+            else:
+                raise RuntimeError(f"echec du regroupement {CONSOLIDATION_SLUG}: {detail}")
+        else:
+            raise RuntimeError(f"solde combine insuffisant pour {route['slug']}: A={bal_a:.6f} B={bal_b:.6f}")
 
-        signer = accounts[holder.lower()]
-        client = x402Client()
-        register_exact_evm_client(client, signer=signer, networks=NETWORK)
-
-        remaining_routes: list[dict] = []
-        progressed = False
-        reverted_this_session = False
-        async with x402HttpxClient(client, timeout=60.0) as http:
-            for route in unpaid:
-                if reverted_this_session or route["price"] > local_balance:
-                    remaining_routes.append(route)
-                    continue
-
-                try:
-                    status, tx, body_text = await pay_once(http, route)
-                except Exception as exc:
-                    if EXECUTION_REVERTED_MARKER in str(exc).lower():
-                        print(f"  {route['slug']:22s} execution reverted - solde traite comme epuise, bascule")
-                        results.append((route["slug"], holder, None, "execution_reverted", None))
-                        remaining_routes.append(route)
-                        reverted_this_session = True
-                        progressed = True
-                        continue
-                    results.append((route["slug"], holder, None, "autre_erreur", str(exc)[:300]))
-                    raise RuntimeError(f"erreur inattendue sur {route['slug']}: {exc}")
-
-                if status != 200 and EXECUTION_REVERTED_MARKER in body_text.lower():
-                    print(f"  {route['slug']:22s} execution reverted - solde traite comme epuise, bascule")
-                    results.append((route["slug"], holder, None, "execution_reverted", None))
-                    remaining_routes.append(route)
-                    reverted_this_session = True
-                    progressed = True
-                    continue
-
-                outcome = _outcome(status, body_text)
-                if outcome == "reglee":
-                    print(f"  {route['slug']:22s} status=200 tx={tx}")
-                    results.append((route["slug"], holder, tx, "reglee", None))
-                    local_balance -= route["price"]
-                    progressed = True
-                elif outcome == "amount_too_low":
-                    print(f"  {route['slug']:22s} amount_too_low - notee")
-                    results.append((route["slug"], holder, None, "amount_too_low", None))
-                    progressed = True
-                else:
-                    results.append((route["slug"], holder, None, "autre_erreur", body_text[:300]))
-                    raise RuntimeError(f"erreur {status} sur {route['slug']}: {body_text[:300]}")
-
-        unpaid = remaining_routes
-        holder, other = other, holder
-        if not progressed and unpaid:
-            print("  aucun progres ce tour et routes restantes - arret de la boucle.", file=sys.stderr)
-            break
+        outcome, tx, detail = await _attempt_payment(accounts, payer, payto, route)
+        results.append((route["slug"], payer, tx, outcome, detail))
+        if outcome == "reglee":
+            print(f"  {route['slug']:22s} status=200 tx={tx} payeur={payer}")
+            unpaid = unpaid[1:]
+        elif outcome == "amount_too_low":
+            print(f"  {route['slug']:22s} amount_too_low - notee")
+            unpaid = unpaid[1:]
+        elif outcome == "execution_reverted":
+            print(f"  {route['slug']:22s} execution reverted - nouvel essai dans {RETRY_DELAY_S}s")
+            await asyncio.sleep(RETRY_DELAY_S)
+        else:
+            raise RuntimeError(f"erreur sur {route['slug']}: {detail}")
 
     if unpaid:
-        print(f"\niterations epuisees ou plus de progres possible, jamais tentees: {[r['slug'] for r in unpaid]}", file=sys.stderr)
+        print(f"\niterations epuisees, jamais reglees: {[r['slug'] for r in unpaid]}", file=sys.stderr)
 
 
 async def main() -> int:
@@ -419,7 +385,7 @@ async def main() -> int:
     results: list[tuple[str, str, str | None, str, str | None]] = []
     exit_code = 0
     try:
-        await run_ping_pong(account_a, account_b, results)
+        await run_pdf_web_read(account_a, account_b, results)
     except Exception as exc:
         print(f"\nARRET: {exc}", file=sys.stderr)
         exit_code = 1
