@@ -1399,6 +1399,14 @@ _SCANNER_UA_PATTERNS = [
 ]
 
 
+def _mechanical_wallets() -> set[str]:
+    """Same parsing as chain_payments.py::_mechanical_wallets() - duplicated
+    on purpose rather than imported, to keep db.py free of that module's
+    own import surface."""
+    raw = getattr(config, "MECHANICAL_WALLETS", "") or ""
+    return {w.strip().lower() for w in raw.split(",") if w.strip()}
+
+
 def _is_scanner_ua(user_agent: str | None) -> bool:
     ua = user_agent or ""
     return any(pattern.search(ua) for pattern in _SCANNER_UA_PATTERNS)
@@ -1408,10 +1416,12 @@ def history_7d() -> list[dict]:
     """Per UTC day, last 7 days: total requests, distinct client IPs that are
     neither a known scanner UA nor our own VPS (config.VPS_PUBLIC_IP - our own
     curl/verification traffic against the public domain), and real payments
-    (status='paid')."""
+    (status='paid', payer not in MECHANICAL_WALLETS - same rule as
+    chain_revenue_since(), self-funded bootstrap settlements are not revenue)."""
+    mechanical = _mechanical_wallets()
     with cursor() as cur:
         cur.execute(
-            "SELECT ts, client_ip, user_agent, status FROM requests WHERE ts >= ?",
+            "SELECT ts, client_ip, user_agent, status, payer FROM requests WHERE ts >= ?",
             (_since(24 * 7),),
         )
         rows = cur.fetchall()
@@ -1424,7 +1434,7 @@ def history_7d() -> list[dict]:
         ip = row["client_ip"]
         if ip and ip != config.VPS_PUBLIC_IP and not _is_scanner_ua(row["user_agent"]):
             bucket["identities"].add(ip)
-        if row["status"] == "paid":
+        if row["status"] == "paid" and (row["payer"] or "").lower() not in mechanical:
             bucket["payments_real"] += 1
 
     return [
