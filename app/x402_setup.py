@@ -1200,8 +1200,8 @@ ROUTE_SUMMARIES = {
         "brief instead of running many searches yourself."
     ),
     "pdf": (
-        "Extract a PDF (by URL or base64) into clean markdown with metadata "
-        "and a real token count - deterministic, no model."
+        "Extract a PDF (by URL or base64) into clean Markdown with headings "
+        "and tables preserved, plus metadata and a real token count."
     ),
     "web-read": (
         "Fetch a URL and return its main content as clean markdown, "
