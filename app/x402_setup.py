@@ -1455,7 +1455,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/search",
             description=ROUTE_DESCRIPTIONS["search"],
             mime_type="application/json",
-            service_name="AgentIndex Search",
+            service_name="web-search",
             tags=KIT_TAGS + ["web search", "live search", "SERP", "multi-query"],
             extensions=declare_discovery_extension(
                 input={"query": "best ramen restaurants in Shibuya Tokyo"},
@@ -1487,7 +1487,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/jobs",
             description=ROUTE_DESCRIPTIONS["jobs"],
             mime_type="application/json",
-            service_name="AgentIndex Research Jobs",
+            service_name="web-research",
             tags=[
                 "research brief", "cited synthesis", "multi-source report",
                 "delegate research", "sourced report", "async research",
@@ -1507,7 +1507,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/pdf",
             description=ROUTE_DESCRIPTIONS["pdf"],
             mime_type="application/json",
-            service_name="AgentIndex PDF Extract",
+            service_name="pdf-to-markdown",
             tags=KIT_TAGS + ["pdf", "document parsing", "metadata"],
             extensions=declare_discovery_extension(
                 input={"url": "https://example.com/report.pdf"},
@@ -1521,7 +1521,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/web-read",
             description=ROUTE_DESCRIPTIONS["web-read"],
             mime_type="application/json",
-            service_name="AgentIndex Web Read",
+            service_name="web-page-to-text",
             tags=KIT_TAGS + ["article extraction", "readability", "page to markdown"],
             extensions=declare_discovery_extension(
                 input={"url": "https://www.w3.org/"},
@@ -1535,7 +1535,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/extract",
             description=ROUTE_DESCRIPTIONS["extract"],
             mime_type="application/json",
-            service_name="AgentIndex Structured Extract",
+            service_name="extract-structured-data",
             tags=KIT_TAGS + ["structured data", "json schema", "web scraping"],
             extensions=declare_discovery_extension(
                 input={
@@ -1559,7 +1559,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/summarize",
             description=ROUTE_DESCRIPTIONS["summarize"],
             mime_type="application/json",
-            service_name="AgentIndex Summarize",
+            service_name="summarize-text",
             tags=KIT_TAGS + ["summarization", "tl;dr"],
             extensions=declare_discovery_extension(
                 input={"url": "https://example.com/photosynthesis", "length": "short"},
@@ -1579,7 +1579,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/fact-check",
             description=ROUTE_DESCRIPTIONS["fact-check"],
             mime_type="application/json",
-            service_name="AgentIndex Fact Check",
+            service_name="fact-check",
             tags=KIT_TAGS + ["fact checking", "claim verification", "verification"],
             extensions=declare_discovery_extension(
                 input={"claim": "The Eiffel Tower is taller than the Statue of Liberty."},
@@ -1593,7 +1593,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/discover",
             description=ROUTE_DESCRIPTIONS["discover"],
             mime_type="application/json",
-            service_name="AgentIndex Discover",
+            service_name="mcp-discovery",
             tags=KIT_TAGS + ["mcp discovery", "semantic search", "server discovery", "agent registry"],
             extensions=declare_discovery_extension(
                 input={"q": "read a PDF and give me markdown"},
@@ -1607,7 +1607,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/weather",
             description=ROUTE_DESCRIPTIONS["weather"],
             mime_type="application/json",
-            service_name="AgentIndex Weather",
+            service_name="weather-forecast",
             tags=["weather", "forecast", "temperature", "climate", "open data"],
             extensions=declare_discovery_extension(
                 input={"city": "Paris"},
@@ -1622,7 +1622,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/weather",
             description=ROUTE_DESCRIPTIONS["weather"],
             mime_type="application/json",
-            service_name="AgentIndex Weather",
+            service_name="weather-forecast",
             tags=["weather", "forecast", "temperature", "climate", "open data"],
             extensions=declare_discovery_extension(
                 input={"city": "Paris"},
@@ -1635,7 +1635,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/crypto",
             description=ROUTE_DESCRIPTIONS["crypto"],
             mime_type="application/json",
-            service_name="AgentIndex Crypto Prices",
+            service_name="crypto-price",
             tags=["crypto", "price", "bitcoin", "ethereum", "spot", "market data"],
             extensions=declare_discovery_extension(
                 input={"coins": ["btc", "eth"], "vs_currency": "usd"},
@@ -1649,7 +1649,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/crypto",
             description=ROUTE_DESCRIPTIONS["crypto"],
             mime_type="application/json",
-            service_name="AgentIndex Crypto Prices",
+            service_name="crypto-price",
             tags=["crypto", "price", "bitcoin", "ethereum", "spot", "market data"],
             extensions=declare_discovery_extension(
                 input={"coins": "btc,eth", "vs_currency": "usd"},
@@ -1662,7 +1662,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/news",
             description=ROUTE_DESCRIPTIONS["news"],
             mime_type="application/json",
-            service_name="AgentIndex News",
+            service_name="tech-news-headlines",
             tags=["news", "headlines", "hacker news", "tech news", "trending"],
             extensions=declare_discovery_extension(
                 input={"limit": 10},
@@ -1676,7 +1676,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/news",
             description=ROUTE_DESCRIPTIONS["news"],
             mime_type="application/json",
-            service_name="AgentIndex News",
+            service_name="tech-news-headlines",
             tags=["news", "headlines", "hacker news", "tech news", "trending"],
             extensions=declare_discovery_extension(
                 input={"limit": 10},
@@ -1689,7 +1689,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/can-pay",
             description=ROUTE_DESCRIPTIONS["can-pay"],
             mime_type="application/json",
-            service_name="AgentIndex Can Pay",
+            service_name="wallet-can-pay",
             tags=["wallet", "usdc", "balance", "preflight", "base", "can pay"],
             extensions=declare_discovery_extension(
                 input={"address": "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d", "amount": 0.001},
@@ -1703,7 +1703,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/can-pay",
             description=ROUTE_DESCRIPTIONS["can-pay"],
             mime_type="application/json",
-            service_name="AgentIndex Can Pay",
+            service_name="wallet-can-pay",
             tags=["wallet", "usdc", "balance", "preflight", "base", "can pay"],
             extensions=declare_discovery_extension(
                 input={"address": "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d", "amount": 0.001},
@@ -1716,7 +1716,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/probe",
             description=ROUTE_DESCRIPTIONS["probe"],
             mime_type="application/json",
-            service_name="AgentIndex Probe",
+            service_name="x402-paywall-probe",
             tags=["x402", "probe", "discovery", "paywall", "price check"],
             extensions=declare_discovery_extension(
                 input={"url": "https://x402.shizu.me/weather?lat=48.85&lon=2.35"},
@@ -1730,7 +1730,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/probe",
             description=ROUTE_DESCRIPTIONS["probe"],
             mime_type="application/json",
-            service_name="AgentIndex Probe",
+            service_name="x402-paywall-probe",
             tags=["x402", "probe", "discovery", "paywall", "price check"],
             extensions=declare_discovery_extension(
                 input={"url": "https://x402.shizu.me/weather?lat=48.85&lon=2.35"},
@@ -1743,7 +1743,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/wallet-balance",
             description=ROUTE_DESCRIPTIONS["wallet-balance"],
             mime_type="application/json",
-            service_name="AgentIndex Multi-chain Wallet Balance",
+            service_name="wallet-balance-checker",
             tags=["wallet", "balance", "USDC", "ERC-20", "EVM", "onchain", "RPC"],
             extensions=declare_discovery_extension(
                 input={
@@ -1763,7 +1763,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/wallet-balance",
             description=ROUTE_DESCRIPTIONS["wallet-balance"],
             mime_type="application/json",
-            service_name="AgentIndex Multi-chain Wallet Balance",
+            service_name="wallet-balance-checker",
             tags=["wallet", "balance", "USDC", "ERC-20", "EVM", "onchain", "RPC"],
             extensions=declare_discovery_extension(
                 input={
@@ -1782,7 +1782,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/gas-price",
             description=ROUTE_DESCRIPTIONS["gas-price"],
             mime_type="application/json",
-            service_name="AgentIndex Multi-chain Gas Price",
+            service_name="gas-price-checker",
             tags=["gas", "fee", "EIP-1559", "EVM", "onchain", "RPC"],
             extensions=declare_discovery_extension(
                 input={"network": "base"},
@@ -1799,7 +1799,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/gas-price",
             description=ROUTE_DESCRIPTIONS["gas-price"],
             mime_type="application/json",
-            service_name="AgentIndex Multi-chain Gas Price",
+            service_name="gas-price-checker",
             tags=["gas", "fee", "EIP-1559", "EVM", "onchain", "RPC"],
             extensions=declare_discovery_extension(
                 input={"network": "base"},
@@ -1815,7 +1815,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/wallet-intelligence",
             description=ROUTE_DESCRIPTIONS["wallet-intelligence"],
             mime_type="application/json",
-            service_name="AgentIndex Wallet Intelligence",
+            service_name="wallet-and-gas-lookup",
             tags=[
                 "wallet intelligence", "multi-chain", "USDC", "gas",
                 "payment preflight", "EVM", "RPC bundle",
@@ -1839,7 +1839,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/wallet-intelligence",
             description=ROUTE_DESCRIPTIONS["wallet-intelligence"],
             mime_type="application/json",
-            service_name="AgentIndex Wallet Intelligence",
+            service_name="wallet-and-gas-lookup",
             tags=[
                 "wallet intelligence", "multi-chain", "USDC", "gas",
                 "payment preflight", "EVM", "RPC bundle",
@@ -1862,7 +1862,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/x402-echo",
             description=ROUTE_DESCRIPTIONS["x402-echo"],
             mime_type="application/json",
-            service_name="AgentIndex x402 Mainnet Echo",
+            service_name="x402-payment-test",
             tags=[
                 "x402 test", "mainnet conformance", "payment signature",
                 "USDC atomic", "facilitator test", "echo",
@@ -1882,7 +1882,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/x402-echo",
             description=ROUTE_DESCRIPTIONS["x402-echo"],
             mime_type="application/json",
-            service_name="AgentIndex x402 Mainnet Echo",
+            service_name="x402-payment-test",
             tags=[
                 "x402 test", "mainnet conformance", "payment signature",
                 "USDC atomic", "facilitator test", "echo",
@@ -1901,7 +1901,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/tip",
             description=ROUTE_DESCRIPTIONS["tip"],
             mime_type="application/json",
-            service_name="Support AgentIndex",
+            service_name="usdc-tip",
             tags=["tip", "support", "sponsor", "USDC", "agent infrastructure"],
             extensions=declare_discovery_extension(
                 input={"message": "Keep building agent infrastructure"},
@@ -1923,7 +1923,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/tip",
             description=ROUTE_DESCRIPTIONS["tip"],
             mime_type="application/json",
-            service_name="Support AgentIndex",
+            service_name="usdc-tip",
             tags=["tip", "support", "sponsor", "USDC", "agent infrastructure"],
             extensions=declare_discovery_extension(
                 input={"message": "Keep building agent infrastructure"},
@@ -1944,7 +1944,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/agent-claim",
             description=ROUTE_DESCRIPTIONS["agent-claim"],
             mime_type="application/json",
-            service_name="AgentIndex Verified Agent Claim",
+            service_name="agent-verification-listing",
             tags=["agent registry", "verification badge", "discovery", "trust", "x402"],
             extensions=declare_discovery_extension(
                 input={"url": "https://agent.example", "name": "Example Agent"},
@@ -1990,7 +1990,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/agent-health",
             description=ROUTE_DESCRIPTIONS["agent-health"],
             mime_type="application/json",
-            service_name="AgentIndex Agent Health",
+            service_name="api-health-check",
             tags=[
                 "agent health", "uptime", "MCP", "A2A", "x402 audit",
                 "latency", "operational status", "monitoring",
@@ -2014,7 +2014,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/agent-health",
             description=ROUTE_DESCRIPTIONS["agent-health"],
             mime_type="application/json",
-            service_name="AgentIndex Agent Health",
+            service_name="api-health-check",
             tags=[
                 "agent health", "uptime", "MCP", "A2A", "x402 audit",
                 "latency", "operational status", "monitoring",

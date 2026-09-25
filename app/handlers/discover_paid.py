@@ -99,51 +99,22 @@ def _own_route_rows() -> list[dict]:
             "price_usdc": accepts[0].price,
             "example_body": body,
         })
-    return rows
-
-
-# Préfixe littéral remplaçant le nom de service pour l'embedding de certaines
-# routes - mesure 2026-09-25 : "AgentIndex PDF Extract:" dilue la similarité
-# cosinus vs des concurrents nommés "pdf-to-markdown"/"file2markdown" ; un
-# préfixe collé au vocabulaire de la requête gagne +0.14. N'affecte que
-# l'embedding (classement /discover), jamais la description publiée.
-_EMBED_PREFIX_OVERRIDES = {
-    "/pdf": "pdf-to-markdown",
-    "/search": "web-search",
-    "/jobs": "web-research",
-    "/web-read": "web-page-to-text",
-    "/extract": "extract-structured-data",
-    "/summarize": "summarize-text",
-    "/fact-check": "fact-check",
-    "/discover": "mcp-discovery",
-    "/weather": "weather-forecast",
-    "/crypto": "crypto-price",
-    "/news": "tech-news-headlines",
-    "/can-pay": "wallet-can-pay",
-    "/probe": "x402-paywall-probe",
-    "/wallet-balance": "wallet-balance-checker",
-    "/gas-price": "gas-price-checker",
-    "/wallet-intelligence": "wallet-and-gas-lookup",
-    "/x402-echo": "x402-payment-test",
-    "/tip": "usdc-tip",
-    "/agent-claim": "agent-verification-listing",
-    "/agent-health": "api-health-check",
-}
+    # /discover ne doit jamais se promouvoir lui-meme dans ses propres
+    # resultats.
+    return [r for r in rows if not r["url"].endswith("/discover")]
 
 
 def _embed_text_for(row: dict) -> str:
     """Seule la première phrase de la description sert a l'embedding - la
     description publiée (build_route_configs(), /.well-known/x402,
-    /capabilities) reste inchangée et plus détaillée."""
+    /capabilities) reste inchangée et plus détaillée. row['name'] est
+    service_name (build_route_configs()) - déjà un préfixe fonctionnel
+    littéral pour les routes mesurées (voir x402_setup.py), plus besoin
+    de table de substitution ici."""
     desc = row["description"] or ""
     idx = desc.find(".")
     first_sentence = desc[: idx + 1] if idx != -1 else desc
-    prefix = row["name"]
-    for suffix, override in _EMBED_PREFIX_OVERRIDES.items():
-        if row["url"].endswith(suffix):
-            prefix = override
-            break
-    return f"{prefix}: {first_sentence}"
+    return f"{row['name']}: {first_sentence}"
 
 
 async def _load_own_routes() -> tuple[list[dict], np.ndarray]:
