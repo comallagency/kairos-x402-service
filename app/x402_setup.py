@@ -915,7 +915,7 @@ PDF_OUTPUT_SCHEMA = {
     "properties": {
         "markdown": {
             "type": "string",
-            "description": "Extracted text, paragraphs preserved, deterministic (no model).",
+            "description": "Extracted Markdown - headings and tables preserved via layout-aware parsing.",
         },
         "metadata": {
             "type": "object",
