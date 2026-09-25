@@ -81,11 +81,11 @@ PRICE_JOB = "$0.10"
 # but no settlement. Public marketplace comparables put PDF extraction around
 # $0.003 and web/search utilities around $0.001-$0.01. Keep trial prices at or
 # below those comparables until the first independent buyers establish quality.
-# 24h market-entry price: search is 42% of observed x402 demand. At $0.0001,
-# this is 100x below Tavily's $0.01 endpoint while still using zero-cost local
+# 24h market-entry price: search is 42% of observed x402 demand. At $0.001,
+# this is 10x below Tavily's $0.01 endpoint while still using zero-cost local
 # SearXNG/page retrieval. Keep until independent settlements unlock Bazaar,
 # then restore the sustainable $0.002 price.
-PRICE_SEARCH = "$0.0001"
+PRICE_SEARCH = "$0.001"
 PRICE_PDF = "$0.002"
 PRICE_WEB_READ = "$0.002"
 PRICE_EXTRACT = "$0.003"
@@ -109,15 +109,17 @@ PRICE_NEWS = "$0.001"
 # Pre-payment checklist agents run before spending elsewhere — first-settle bait.
 PRICE_CAN_PAY = "$0.001"
 PRICE_PROBE = "$0.001"
-# Acquisition routes: below the common $0.001 Bazaar floor so autonomous
-# routers can cheaply establish the first independent settlement and quality.
-PRICE_WALLET_BALANCE = "$0.0001"
-PRICE_GAS_PRICE = "$0.0001"
+# Acquisition routes: at the common $0.001 Bazaar floor (2026-09-25 - CDP
+# rejects amounts below $0.001 as amount_too_low) so autonomous routers can
+# cheaply establish the first independent settlement and quality.
+PRICE_WALLET_BALANCE = "$0.001"
+PRICE_GAS_PRICE = "$0.001"
 # One signature replaces ten wallet/gas calls (five chains × two services).
 PRICE_WALLET_INTELLIGENCE = "$0.001"
-# Cheapest possible USDC settlement: one atomic unit. This converts SDK,
-# wallet and facilitator test traffic into real mainnet payment proof.
-PRICE_X402_ECHO = "$0.000001"
+# Cheapest settlement CDP will actually accept ($0.001 - one atomic unit
+# was rejected as amount_too_low, 2026-09-25). Converts SDK, wallet and
+# facilitator test traffic into real mainnet payment proof.
+PRICE_X402_ECHO = "$0.001"
 # Voluntary one-cent support payment with an on-chain receipt.
 PRICE_TIP = "$0.01"
 # 30-day audited listing and public verification badge.
