@@ -11,8 +11,12 @@ from app.x402_setup import ROUTE_DESCRIPTIONS
 
 router = APIRouter()
 
+# 100 -> 180 (2026-09-25): today's working free-tier model spends part of
+# its budget on hidden reasoning before any visible output - 100 tokens
+# produced empty content even from the best available model, see
+# config.OPENROUTER_TRANSLATE_MODELS.
 _LENGTH_TARGETS = {
-    "short": ("2-3 sentences", 100),
+    "short": ("2-3 sentences", 180),
     "medium": ("one paragraph (roughly 100-150 words)", 250),
     "long": ("3-4 paragraphs", 700),
 }

@@ -166,22 +166,27 @@ DAILY_CAPACITY = {
 # 4th model from the brief ("openrouter/free") is tried as a separate last-resort
 # call if all 3 primary models fail - see chat_completion_with_fallback().
 #
-# minimax-m2.7:free and minimax-m3:free replaced 2026-09-11: both now return
-# 404 "This model is unavailable for free" (discontinued from the free tier,
-# same failure mode as the z-ai/glm-5.2 entry they themselves replaced on
-# 2026-09-06). google/gemma-4-31b-it:free, the third entry, is separately
-# rate-limited (429) most of the time. Together this meant /summarize/sample
-# (and every other LLM-backed route sharing this list) fell through to the
-# slow last-resort call on nearly every request - 8/9 observed calls from the
-# uptime monitor returned 502 over the last 9h (checked via nginx access log
-# + reproducing the calls directly against OpenRouter from inside the
-# container). Replaced with three models confirmed live and fast just now
-# (GET /api/v1/models filtered to ":free", then each called with a real
-# chat completion, not just a HEAD/list check - the list alone doesn't tell
-# you what's actually serving):
+# 2026-09-25: the 2026-09-11 replacements were themselves dead by today -
+# nex-agi/nex-n2.5-mini:free (404 no endpoints), inclusionai/ling-3.0-flash-vl:free
+# (404, discontinued from free tier, paid-only now), dots-studio/dots-3-note-preview:free
+# (empty content at summarize's 100-token "short" budget - a reasoning model
+# that spends its budget on hidden chain-of-thought before any visible
+# output). Re-verified against GET /api/v1/models filtered to ":free" (18
+# candidates that day), each called with the REAL summarize/translate/extract
+# prompts at their REAL max_tokens, not a trivial "say OK" ping - most of the
+# catalog was unusable for a different reason each: 429 rate-limited
+# (qwen3.8-27b, glm-5.2, gemma-4-*), 403 agentic-harness-only (thinkingmachines
+# inkling*), or 404 "data policy (Free model training)" - a per-account
+# OpenRouter setting (openrouter.ai/settings), not something fixable here,
+# that blocks an entire additional tier (nvidia nemotron family, liquid,
+# poolside) outright. cohere/north-mini-code:free is the only one that
+# produced correct, non-empty output on all three real prompts (summarize
+# from 150 tokens up, translate, extract) - kept first. The other two still
+# work for extract/translate's larger budgets, just not summarize's "short"
+# (100 tokens, bumped to 180 below for exactly this reason):
 OPENROUTER_TRANSLATE_MODELS = [
-    "nex-agi/nex-n2.5-mini:free",
-    "inclusionai/ling-3.0-flash-vl:free",
+    "cohere/north-mini-code:free",
+    "inclusionai/ling-3.0-flash-fin:free",
     "dots-studio/dots-3-note-preview:free",
 ]
 OPENROUTER_LAST_RESORT_MODEL = "openrouter/free"
