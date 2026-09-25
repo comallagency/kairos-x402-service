@@ -111,6 +111,11 @@ class ContactIn(BaseModel):
         if not isinstance(data, dict):
             return data
         brut = dict(data)
+        req = brut.get("request")
+        if isinstance(req, dict):
+            inner = req.get("body")
+            if isinstance(inner, dict):
+                brut = {**inner, **{k: v for k, v in brut.items() if k != "request"}}
         if "sender" not in brut and brut.get("from"):
             brut["sender"] = brut.pop("from")
         if "body" not in brut and brut.get("message"):

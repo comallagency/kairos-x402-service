@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "x402[extensions]==2.22.0",
     "cdp-sdk",
+    "cursor-sdk",
     "fastapi",
     "uvicorn[standard]",
     "httpx",
@@ -15,6 +16,7 @@ dependencies = [
     "pyyaml",
     "trafilatura",
     "pypdf",
+    "pymupdf4llm",
     "jsonschema",
     "py3langid",
     "tiktoken",

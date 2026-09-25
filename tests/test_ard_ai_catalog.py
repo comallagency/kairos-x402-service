@@ -22,4 +22,5 @@ def test_ai_catalog_lists_mcp_and_discover() -> None:
     ids = {e["identifier"] for e in body["entries"]}
     assert "urn:air:x402.agentindex.world:mcp:agentindex-x402" in ids
     assert "urn:air:x402.agentindex.world:mcp:relationship-memory" in ids
+    assert "urn:air:x402.agentindex.world:mcp:coordination-thread" in ids
     assert "urn:air:x402.agentindex.world:discover:free" in ids

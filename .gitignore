@@ -8,3 +8,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 logs/
+.env.*
+*.bak
+*.bak-*
+.ruff_cache/

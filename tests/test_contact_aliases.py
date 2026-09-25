@@ -12,6 +12,22 @@ def test_contact_in_accepts_from_and_message() -> None:
     assert payload.subject.startswith("Hello")
 
 
+def test_contact_in_unwraps_request_body_from_sample() -> None:
+    payload = ContactIn.model_validate(
+        {
+            "request": {
+                "method": "POST",
+                "body": {
+                    "from": "wrapped/1.0",
+                    "message": "Copied the whole /contact/sample object.",
+                },
+            }
+        }
+    )
+    assert payload.sender == "wrapped/1.0"
+    assert "Copied" in payload.body
+
+
 def test_contact_in_prefers_canonical_fields() -> None:
     payload = ContactIn.model_validate(
         {

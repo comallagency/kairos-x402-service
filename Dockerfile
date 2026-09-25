@@ -13,6 +13,7 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir \
     "x402[extensions]==2.22.0" \
     cdp-sdk \
+    cursor-sdk \
     fastapi \
     "uvicorn[standard]" \
     httpx \
@@ -23,6 +24,7 @@ RUN pip install --no-cache-dir \
     pyyaml \
     trafilatura \
     pypdf \
+    pymupdf4llm \
     jsonschema \
     py3langid \
     tiktoken

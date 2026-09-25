@@ -4,6 +4,8 @@ import json
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+import pymupdf
+import pymupdf4llm
 from pypdf import PdfReader
 
 from app import config, db
@@ -44,9 +46,11 @@ def _meta_get(meta, attr: str, key: str):
 
 
 def parse_pdf(data: bytes) -> dict:
-    """Deterministic text extraction, no model involved - a corrupted or
-    encrypted-without-password PDF is an explicit error, never partial or
-    fabricated content."""
+    """Markdown via pymupdf4llm (headings and tables preserved by its layout
+    parser) - text content itself is never generated or altered, only its
+    structure is inferred. pypdf still gates validity/encryption and supplies
+    metadata, unchanged. A corrupted or encrypted-without-password PDF is an
+    explicit error, never partial or fabricated content."""
     try:
         reader = PdfReader(io.BytesIO(data))
     except Exception:
@@ -58,14 +62,20 @@ def parse_pdf(data: bytes) -> dict:
         except Exception:
             raise PdfError("encrypted_pdf")
 
-    pages_text = []
-    for page in reader.pages:
+    try:
+        doc = pymupdf.open(stream=data, filetype="pdf")
         try:
-            pages_text.append((page.extract_text() or "").strip())
-        except Exception:
-            pages_text.append("")
-    markdown = "\n\n".join(t for t in pages_text if t)
-    if not markdown:
+            if doc.needs_pass and not doc.authenticate(""):
+                raise PdfError("encrypted_pdf")
+            markdown = pymupdf4llm.to_markdown(doc)
+        finally:
+            doc.close()
+    except PdfError:
+        raise
+    except Exception:
+        raise PdfError("invalid_pdf")
+
+    if not markdown or not markdown.strip():
         raise PdfError("no_extractable_text")
 
     meta = reader.metadata

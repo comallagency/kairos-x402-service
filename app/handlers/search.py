@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from fastapi import APIRouter, Query, Request
@@ -6,13 +7,16 @@ from fastapi.responses import JSONResponse
 from app import config, db
 from app.receipts import Timer, effective_price, extract_payer_address, make_receipt, neutral_model_id, price_float
 from app.upstream.openrouter import OpenRouterError, chat_completion_with_fallback
-from app.upstream.websearch import run_web_search
+from app.upstream.webfetch import FetchError, extract_markdown, fetch_html
+from app.upstream.websearch import SearchError, run_web_search
 from app.x402_setup import ROUTE_DESCRIPTIONS
 
 router = APIRouter()
 
 SAMPLE_QUERY = "best ramen restaurants in Shibuya Tokyo"
 MAX_BATCH_QUERIES = 5
+MAX_CONTENT_RESULTS = 3
+DEFAULT_CONTENT_CHARS = 12_000
 
 SUMMARY_PROMPT = (
     "Summarize the following web search results in 2-4 sentences, neutral and "
@@ -25,7 +29,8 @@ async def _summarize(query: str, results: list[dict]) -> str | None:
     if not results:
         return None
     context = "\n\n".join(
-        f"[{r['title'] or r['url']}]({r['url']}): {(r['extract'] or '')[:800]}"
+        f"[{r['title'] or r['url']}]({r['url']}): "
+        f"{(r.get('content_markdown') or r.get('extract') or '')[:2000]}"
         for r in results
     )
     data, _ = await chat_completion_with_fallback(
@@ -56,6 +61,46 @@ def _clamp_max_results(value) -> int:
     except (TypeError, ValueError):
         value = 5
     return max(1, min(value, 10))
+
+
+def _clamp_content_chars(value) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = DEFAULT_CONTENT_CHARS
+    return max(1_000, min(value, 20_000))
+
+
+async def _enrich_result_content(result: dict, max_chars: int) -> dict:
+    enriched = dict(result)
+    try:
+        html = await fetch_html(result["url"])
+        markdown = extract_markdown(html, result["url"])
+        if not markdown:
+            enriched["content_error"] = "no_extractable_content"
+        else:
+            enriched["content_markdown"] = markdown[:max_chars]
+            enriched["content_truncated"] = len(markdown) > max_chars
+    except FetchError as exc:
+        # One blocked or dead result must not make the whole paid search fail.
+        enriched["content_error"] = str(exc)[:200]
+    return enriched
+
+
+async def _enrich_results(
+    results: list[dict], include_content: bool, content_results: int, content_chars: int
+) -> list[dict]:
+    if not include_content or not results:
+        return results
+    try:
+        requested = int(content_results)
+    except (TypeError, ValueError):
+        requested = MAX_CONTENT_RESULTS
+    count = max(1, min(requested, MAX_CONTENT_RESULTS, len(results)))
+    enriched = await asyncio.gather(
+        *(_enrich_result_content(result, content_chars) for result in results[:count])
+    )
+    return [*enriched, *results[count:]]
 
 
 async def _run_batch_search(
@@ -122,6 +167,9 @@ async def _handle_search(
     query,
     max_results,
     extract: bool,
+    include_content: bool,
+    content_results,
+    content_chars,
     summarize: bool,
     body_excerpt: str,
 ):
@@ -172,8 +220,14 @@ async def _handle_search(
             else:
                 results, model_served = await run_web_search(query, max_results)
                 summary_label = query
+            results = await _enrich_results(
+                results,
+                include_content,
+                content_results,
+                _clamp_content_chars(content_chars),
+            )
             summary = await _summarize(summary_label, results) if summarize else None
-    except OpenRouterError as exc:
+    except (OpenRouterError, SearchError) as exc:
         db.log_request(
             route="search", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt,
@@ -216,37 +270,9 @@ async def search(request: Request):
         query=body.get("query"),
         max_results=body.get("max_results", 5),
         extract=bool(body.get("extract", True)),
+        include_content=bool(body.get("include_content", True)),
+        content_results=body.get("content_results", 3),
+        content_chars=body.get("content_chars", DEFAULT_CONTENT_CHARS),
         summarize=bool(body.get("summarize", False)),
-        body_excerpt=body_excerpt,
-    )
-
-
-@router.get("/search", description=ROUTE_DESCRIPTIONS["search"])
-async def search_via_get(
-    request: Request,
-    query: list[str] = Query(default=None),
-    max_results: int = Query(default=5),
-    extract: bool = Query(default=True),
-    summarize: bool = Query(default=False),
-):
-    """GET est accepté en plus de POST : mêmes champs, en paramètres de requête
-    au lieu du corps JSON. Ajouté le 10/09 pour un client persistant qui ne
-    retentait qu'en GET et recevait 405 en boucle."""
-    payer = extract_payer_address(request)
-    user_agent = request.headers.get("user-agent")
-    resolved_query = query[0] if query and len(query) == 1 else query
-    body_excerpt = json.dumps({
-        "query": resolved_query, "max_results": max_results,
-        "extract": extract, "summarize": summarize,
-    })
-
-    return await _handle_search(
-        method="GET",
-        payer=payer,
-        user_agent=user_agent,
-        query=resolved_query,
-        max_results=max_results,
-        extract=extract,
-        summarize=summarize,
         body_excerpt=body_excerpt,
     )

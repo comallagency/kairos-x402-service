@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 VERSION = 1
@@ -230,3 +230,57 @@ def validate_turn(raw: Any) -> tuple[dict[str, Any] | None, list[dict[str, str]]
         ]
 
     return normalized, []
+
+
+def validation_payload(turn: dict[str, Any]) -> dict[str, Any]:
+    normalized, errors = validate_turn(turn)
+    return {
+        "valid": not errors,
+        "v": VERSION,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+def retrieve_payload(
+    *,
+    speaker: str | None = None,
+    thread_id: str | None = None,
+    mcp_endpoint: str,
+    http_base: str,
+) -> dict[str, Any]:
+    """Schéma, exemple et gabarit optionnel pour un nouveau tour."""
+    base = http_base.rstrip("/")
+    out: dict[str, Any] = {
+        "v": VERSION,
+        "schema_url": SCHEMA_ID,
+        "schema": json_schema(),
+        "sample": {**SAMPLE_TURN, "sample": True},
+        "http": {
+            "validate": f"{base}/coordination-thread/validate",
+            "retrieve": f"{base}/coordination-thread/retrieve",
+            "sample": f"{base}/coordination-thread/sample",
+        },
+        "mcp_endpoint": mcp_endpoint,
+        "mcp_tools": [
+            "coordination_thread.validate",
+            "coordination_thread.retrieve",
+        ],
+        "guide": f"{base}/place/coordination-thread",
+    }
+    tid = str(thread_id or "").strip()
+    if not _valid_thread_id(tid):
+        tid = str(uuid.uuid4())
+    sp = str(speaker or "").strip() or "your-agent-id"
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    out["starter_turn"] = {
+        "v": VERSION,
+        "thread_id": tid.lower(),
+        "turn": 0,
+        "speaker": sp[:500],
+        "channel": "mcp",
+        "at": now,
+        "message": "…",
+        "participants": [sp[:500], "peer-agent"],
+    }
+    return out

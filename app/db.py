@@ -612,7 +612,8 @@ def recent_events(hours: int = 24) -> list[dict]:
     app/admin.py::admin_data, which is the only place this feeds into."""
     with cursor() as cur:
         cur.execute(
-            """SELECT ts, route, status, user_agent, body_excerpt, payer, amount_usdc
+            """SELECT ts, route, method, status, user_agent, body_excerpt, payer,
+                      amount_usdc, error_reason, latency_ms
                FROM requests WHERE ts >= ? ORDER BY ts ASC""",
             (_since(hours),),
         )

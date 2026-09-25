@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Missions — AgentIndex</title>
+<style>
+:root{--bg:#080b10;--card:#10151e;--line:#243044;--text:#f4f7fb;--muted:#8b9bb0;--green:#2ee59d;--amber:#ffb020;--blue:#5eb1ff;--red:#ff5c7a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}.wrap{max-width:1250px;margin:auto;padding:20px}
+a{color:var(--blue);text-decoration:none}.nav{color:var(--muted);margin-bottom:20px}.head{display:flex;align-items:end;gap:18px}.head h1{margin:0;font-size:30px}.stamp{margin-left:auto;color:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:18px 0}.card,.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px}.kpi{padding:15px}.kpi b{display:block;font-size:26px}.kpi span,.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:1.3fr .7fr;gap:12px}@media(max-width:850px){.kpis{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}}
+.ph{padding:13px 15px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}.ph h2{font-size:15px;margin:0}.ph span{color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}th,td{padding:10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted)}tr:hover{background:#161d29}
+.money{color:var(--green);font-weight:700}.pending{color:var(--amber)}.error{color:var(--red)}.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 7px}
+.setup{padding:15px}.setup input{width:100%;padding:11px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);margin:9px 0}
+button{padding:9px 13px;border:0;border-radius:8px;background:var(--blue);color:#061522;font-weight:700;cursor:pointer}.ok{color:var(--green)}.warn{color:var(--amber)}
+.actions{max-height:260px;overflow:auto;padding:10px 15px}.action{padding:7px 0;border-bottom:1px solid var(--line);font-size:12px}
+</style>
+</head>
+<body><div class="wrap">
+<nav class="nav"><a href="/admin">Admin</a> · <a href="/admin/live">Live</a> · <strong>Missions</strong> · <a href="/admin/usine">Usine</a></nav>
+<div class="head"><div><h1>Centre de revenus</h1><div class="muted">Dealwork · AgentHansa · Virtuals ACP · Cursor Composer</div></div><div class="stamp" id="stamp">—</div></div>
+<div class="kpis" id="kpis"></div>
+<div class="grid">
+  <div>
+    <section class="card"><div class="ph"><h2>Nouvelles missions</h2><span id="oppn"></span></div><div style="overflow:auto"><table><thead><tr><th>Mission</th><th>Catégorie</th><th>Budget</th><th>Concurrence</th><th>État</th></tr></thead><tbody id="opps"></tbody></table></div></section>
+    <section class="card" style="margin-top:12px"><div class="ph"><h2>Soumissions</h2><span>automatiques et manuelles</span></div><div style="overflow:auto"><table><thead><tr><th>Mission</th><th>Montant</th><th>Statut</th><th>Date</th></tr></thead><tbody id="bids"></tbody></table></div></section>
+  </div>
+  <div>
+    <section class="card setup"><strong>Exécution Cursor</strong><div id="cursorState" class="warn">Vérification…</div><input id="key" type="password" autocomplete="off" placeholder="cursor_…"><button id="save">Installer la clé</button><div class="muted" style="margin-top:8px">Stockée en fichier 0600 sur le serveur. Jamais renvoyée au navigateur.</div></section>
+    <section class="card" style="margin-top:12px"><div class="ph"><h2>Contrats / escrows</h2></div><div id="contracts" class="actions"></div></section>
+    <section class="card" style="margin-top:12px"><div class="ph"><h2>Journal autonome</h2></div><div id="actions" class="actions"></div></section>
+  </div>
+</div>
+</div>
+<script>
+const esc=s=>String(s??"—").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money=n=>Number(n||0).toFixed(2)+" USDC";
+async function load(){
+ const d=await fetch("/admin/missions.json",{cache:"no-store"}).then(r=>r.json());
+ const opp=(d.opportunities||[]).filter(x=>["posted","bidding"].includes(String(x.status).toLowerCase()));
+ const bids=Object.entries(d.bids||{}); const contracts=d.contracts||[];
+ const pending=bids.filter(([,b])=>["pending","accepted"].includes(b.status)).length;
+ const exposure=bids.reduce((s,[,b])=>s+Number(b.amount||0),0);
+ document.getElementById("kpis").innerHTML=[
+  [opp.length,"missions visibles"],[bids.length,"soumissions"],[pending,"en attente"],
+  [contracts.length,"contrats"],[money(exposure),"potentiel soumis"]
+ ].map(x=>`<div class="kpi"><b>${esc(x[0])}</b><span>${esc(x[1])}</span></div>`).join("");
+ document.getElementById("stamp").textContent=d.updated_at?new Date(d.updated_at).toLocaleString("fr-FR"):"worker en démarrage";
+ document.getElementById("oppn").textContent=opp.length+" disponibles";
+ document.getElementById("opps").innerHTML=opp.slice(0,40).map(x=>`<tr><td><b>${esc(x.title)}</b><br><span class="muted">${esc((x.description||"").slice(0,120))}</span></td><td><span class="tag">${esc(x.category)}</span></td><td class="money">${money(x.budgetMax||x.fixedPrice)}</td><td>${esc(x.bidCount||0)} bids</td><td>${esc(x.status)}</td></tr>`).join("")||'<tr><td colspan="5">Aucune mission exploitable.</td></tr>';
+ document.getElementById("bids").innerHTML=bids.map(([id,b])=>`<tr><td>${esc(b.title||id)}</td><td class="money">${money(b.amount)}</td><td class="${b.status==="error"?"error":"pending"}">${esc(b.status)}</td><td>${esc((b.created_at||"").slice(0,16))}</td></tr>`).join("");
+ document.getElementById("cursorState").innerHTML=d.cursor_ready?'<span class="ok">● Composer prêt à exécuter</span>':'<span class="warn">● clé requise pour livrer automatiquement</span>';
+ document.getElementById("contracts").innerHTML=contracts.length?contracts.map(c=>`<div class="action"><b>${esc(c.job?.title||c.id)}</b><br>${esc(c.state||c.status)}</div>`).join(""):'<div class="muted">Aucun escrow actif.</div>';
+ document.getElementById("actions").innerHTML=(d.actions||[]).slice().reverse().map(a=>`<div class="action"><b>${esc(a.type)}</b> · ${money(a.amount)}<br><span class="muted">${esc(a.at)} · ${esc(a.job_id)}</span></div>`).join("")||'<div class="muted">En attente du premier cycle.</div>';
+}
+document.getElementById("save").onclick=async()=>{
+ const api_key=document.getElementById("key").value.trim(); if(!api_key)return;
+ const r=await fetch("/admin/missions/cursor-key",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({api_key})});
+ if(!r.ok){alert((await r.json()).detail||"Erreur");return} document.getElementById("key").value="";load();
+};
+load();setInterval(load,10000);
+</script></body></html>

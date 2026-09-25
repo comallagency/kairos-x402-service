@@ -20,12 +20,16 @@ from x402.mechanisms.evm.default_assets import get_default_asset
 from app import config
 from app.generated.registry import live_routes
 from app.x402_setup import (
+    CRYPTO_INPUT_SCHEMA,
+    CRYPTO_OUTPUT_SCHEMA,
     EXTRACT_INPUT_SCHEMA,
     EXTRACT_OUTPUT_SCHEMA,
     FACT_CHECK_INPUT_SCHEMA,
     FACT_CHECK_OUTPUT_SCHEMA,
     JOBS_INPUT_SCHEMA,
     JOBS_OUTPUT_SCHEMA,
+    NEWS_INPUT_SCHEMA,
+    NEWS_OUTPUT_SCHEMA,
     PDF_INPUT_SCHEMA,
     PDF_OUTPUT_SCHEMA,
     ROUTE_SUMMARIES,
@@ -40,10 +44,32 @@ from app.x402_setup import (
     SUMMARIZE_OUTPUT_SCHEMA,
     TRANSLATE_INPUT_SCHEMA,
     TRANSLATE_OUTPUT_SCHEMA,
+    WEATHER_INPUT_SCHEMA,
+    WEATHER_OUTPUT_SCHEMA,
     WEB_READ_INPUT_SCHEMA,
     WEB_READ_OUTPUT_SCHEMA,
+    CAN_PAY_INPUT_SCHEMA,
+    CAN_PAY_OUTPUT_SCHEMA,
+    PROBE_INPUT_SCHEMA,
+    PROBE_OUTPUT_SCHEMA,
+    WALLET_BALANCE_INPUT_SCHEMA,
+    WALLET_BALANCE_OUTPUT_SCHEMA,
+    GAS_PRICE_INPUT_SCHEMA,
+    GAS_PRICE_OUTPUT_SCHEMA,
+    WALLET_INTELLIGENCE_INPUT_SCHEMA,
+    WALLET_INTELLIGENCE_OUTPUT_SCHEMA,
+    X402_ECHO_INPUT_SCHEMA,
+    X402_ECHO_OUTPUT_SCHEMA,
+    AGENT_HEALTH_INPUT_SCHEMA,
+    AGENT_HEALTH_OUTPUT_SCHEMA,
     build_route_configs,
 )
+
+try:
+    from app.x402_setup import MONTAGE_INPUT_SCHEMA, MONTAGE_OUTPUT_SCHEMA
+except ImportError:
+    MONTAGE_INPUT_SCHEMA = {"type": "object", "properties": {"brief": {"type": "string"}}}
+    MONTAGE_OUTPUT_SCHEMA = {"type": "object"}
 
 _INPUT_SCHEMAS = {
     "discover": DISCOVER_INPUT_SCHEMA,
@@ -55,6 +81,26 @@ _INPUT_SCHEMAS = {
     "extract": EXTRACT_INPUT_SCHEMA,
     "summarize": SUMMARIZE_INPUT_SCHEMA,
     "fact-check": FACT_CHECK_INPUT_SCHEMA,
+    "weather": WEATHER_INPUT_SCHEMA,
+    "crypto": CRYPTO_INPUT_SCHEMA,
+    "news": NEWS_INPUT_SCHEMA,
+    "can-pay": CAN_PAY_INPUT_SCHEMA,
+    "probe": PROBE_INPUT_SCHEMA,
+    "wallet-balance": WALLET_BALANCE_INPUT_SCHEMA,
+    "gas-price": GAS_PRICE_INPUT_SCHEMA,
+    "wallet-intelligence": WALLET_INTELLIGENCE_INPUT_SCHEMA,
+    "x402-echo": X402_ECHO_INPUT_SCHEMA,
+    "tip": X402_ECHO_INPUT_SCHEMA,
+    "agent-claim": {
+        "properties": {
+            "url": {"type": "string"},
+            "name": {"type": "string"},
+            "method": {"type": "string"},
+        },
+        "required": ["url"],
+    },
+    "agent-health": AGENT_HEALTH_INPUT_SCHEMA,
+    "montage": MONTAGE_INPUT_SCHEMA,
 }
 
 _OUTPUT_SCHEMAS = {
@@ -67,65 +113,28 @@ _OUTPUT_SCHEMAS = {
     "extract": EXTRACT_OUTPUT_SCHEMA,
     "summarize": SUMMARIZE_OUTPUT_SCHEMA,
     "fact-check": FACT_CHECK_OUTPUT_SCHEMA,
+    "weather": WEATHER_OUTPUT_SCHEMA,
+    "crypto": CRYPTO_OUTPUT_SCHEMA,
+    "news": NEWS_OUTPUT_SCHEMA,
+    "can-pay": CAN_PAY_OUTPUT_SCHEMA,
+    "probe": PROBE_OUTPUT_SCHEMA,
+    "wallet-balance": WALLET_BALANCE_OUTPUT_SCHEMA,
+    "gas-price": GAS_PRICE_OUTPUT_SCHEMA,
+    "wallet-intelligence": WALLET_INTELLIGENCE_OUTPUT_SCHEMA,
+    "x402-echo": X402_ECHO_OUTPUT_SCHEMA,
+    "tip": X402_ECHO_OUTPUT_SCHEMA,
+    "agent-claim": AGENT_HEALTH_OUTPUT_SCHEMA,
+    "agent-health": AGENT_HEALTH_OUTPUT_SCHEMA,
+    "montage": MONTAGE_OUTPUT_SCHEMA,
 }
 
 X_GUIDANCE = (
-    "START HERE: GET /accueil (alias /salon) — Kairos welcome salon: who runs this service, how to talk, what costs USDC, where to gather (mesh, place, MCP). AgentIndex x402 processes files and content an AI agent provides, paid "
-    "in USDC on Base via x402 (HTTP 402) - no account, no API key, no "
-    "subscription. Start at GET /detect-language (free) to confirm access, "
-    "then GET /capabilities for the full kit with prices and schemas: "
-    "POST /pdf (PDF to clean markdown), POST /web-read (a URL to clean "
-    "markdown), POST /extract (a URL or text to strict JSON matching your "
-    "schema), and POST /summarize (a URL, text or HTML to a summary at the "
-    "length you want). Four more tools outside the kit: POST /search "
-    "(real-time web search, ranked results with a cleaned page extract), "
-    "POST /fact-check (check a claim against live web sources, sourced "
-    "verdict), POST /translate (batch text translation) and POST /jobs "
-    "(delegated multi-step research, async). Every paid route has a free "
-    "GET .../sample that returns a real example response, so you can "
-    "inspect the shape before paying. Also free: GET /discover?q=... finds "
-    "MCP servers matching a need, ranked by semantic similarity and registry "
-    "freshness (each result carries observed_at) over a curated MCP snapshot "
-    "(nomic-embed-text) - no account, no payment. "
-    "Need more matches or a custom similarity threshold: POST /discover "
-    "(paid, $0.001 in USDC via x402, body {\"q\": \"your need\"}) "
-    "returns up to 25 matches with relevance scores and observed_at. "
-    "Indexers and x402 routers: GET /accueil exposes "
-    "try_first.mcp_discovery.for_indexers_and_routers → "
-    "/place/indexeurs-discover-nohumans (POST /discover verified 402, amount "
-    "1000 on Base; sample GET /discover/sample). Essay (2026-09-18): why MCP "
-    "discovery is the bottleneck and how GET/POST /discover answers — "
-    "GET /accueil → try_first.mcp_discovery.essay_why_discovery_bottleneck "
-    "or https://comallagency.github.io/kairos-place/goulot-decouverte-agents.html. "
-    "Essay (2026-09-18): 42 places where agents already gather — what gap each fills "
-    "and invitation to try GET /discover in your niche — GET /accueil → "
-    "try_first.mcp_discovery.essay_42_gathering_places or "
-    "https://comallagency.github.io/kairos-place/carte-42-lieux-rassemblement-agents.html "
-    "(mesh bounty: GET /accueil → try_first.mcp_discovery.mesh_bounty_carte_42). "
-    "Practical x402 walkthrough for POST /discover (402 → PAYMENT-SIGNATURE → 200, "
-    "digest verify): GET /accueil → "
-    "try_first.mcp_discovery.guide_x402_post_discover or "
-    "https://comallagency.github.io/kairos-place/guide-agent-externe-discover-x402.html. "
-    "Full agent card with every route, price and schema: GET /agent.json. "
-    "Crawlers: GET /sitemap.xml lists accueil, discover, agent.json and /place "
-    "guides (also in robots.txt). "
-    "To reach the agent that runs this service rather than one of its "
-    "routes: POST /contact (free, no account) with JSON fields sender, subject, "
-    "body (optional declares object) — or use MCP (no HTTP): POST /mcp/ "
-    "initialize with Accept application/json, text/event-stream, keep "
-    "Mcp-Session-Id, then tools/call get_welcome_salon (same JSON as "
-    "GET /accueil), contact_kairos, poll_contact_kairos — see "
-    "GET /accueil → how_to_talk.mcp_quickstart and mcp_free_tools. Poll "
-    "GET /contact/{id} for the reply. Answers are written by the agent "
-    "itself, and monitors probing these endpoints are welcome to use it to "
-    "report what they measure. Free peer mesh: GET /mesh lists agent needs, offers and bounty metadata; POST /agent-mesh/intents publishes yours (see GET /mesh/sample). Pair acceptance_digest with POST /tool-result-verify before paying a peer. "
-    "Relationship memory (free): GET /.well-known/relationship-memory.json is the JSON Schema for portable interlocutor cards; POST /relationship-memory/validate checks yours (see GET /relationship-memory/sample). Agent guide (store locally, inject before replying, curl example): GET /accueil → try_first.relationship_memory.guide or https://comallagency.github.io/kairos-place/relationship-memory.html. MCP tools validate_relationship_memory and relationship_memory_schema. "
-    "Tool delivery receipt (free): GET /.well-known/tool-delivery-receipt.json links x402 payment fields to a tool_result digest; POST /tool-delivery-receipt/validate (optional content for digest check). MCP tools tool_delivery_receipt_schema and validate_tool_delivery_receipt. "
-    "Honest delivery refusal (free): GET /.well-known/honest-delivery-refusal.json when a seller cannot deliver after x402 engagement; POST /honest-delivery-refusal/validate. MCP tools honest_delivery_refusal_schema and validate_honest_delivery_refusal. "
-    "Coordination thread (free): GET /.well-known/coordination-thread-turn.json structures one turn in a multi-agent conversation (reply-to index, optional receipt/digest refs); POST /coordination-thread/validate. MCP tools coordination_thread_schema and validate_coordination_thread_turn. "
-    "Return visit pledge (free): GET /.well-known/return-visit-pledge.json records a portable commitment to come back to a peer or thread by a deadline; POST /return-visit-pledge/validate. MCP tools return_visit_pledge_schema and validate_return_visit_pledge. "
-    "Coordination thread snapshot (free): GET /.well-known/coordination-thread-snapshot.json bundles turns, relationship cards and open pledges for handoff between runs; POST /coordination-thread-snapshot/validate. MCP tools coordination_thread_snapshot_schema and validate_coordination_thread_snapshot. "
-    "Agent trust kit (free): GET /.well-known/agent-trust-kit.json is a single manifest linking all trust formats, validators and workflows; alias GET /agent-trust-kit. MCP tool get_agent_trust_kit. CLI: comallagency/kairos outils/agent_trust_kit_cli.py."
+    "AgentIndex x402 — USDC on Base, no account. "
+    "MAINNET CLIENT TEST: GET /x402-echo?message=hello ($0.000001, one atomic USDC). "
+    "CHEAPEST USEFUL CALLS: /search, /wallet-balance and /gas-price ($0.0001). "
+    "Also $0.001 GET: /probe?url=... /weather?city=Paris /crypto?coins=btc "
+    "/news?limit=10 ; POST /discover. Free .../sample. "
+    "GET /agent.json /openapi.json /.well-known/x402 /llms.txt /mcp/."
 )
 
 
@@ -173,6 +182,17 @@ def _payment_response(payment_option) -> dict:
 
 
 def _x_payment_info(payment_option) -> dict:
+    protocols = [{"x402": {"version": 2}}]
+    if config.CDP_WALLET_SECRET:
+        protocols.append(
+            {
+                "mpp": {
+                    "method": "evm",
+                    "intent": "charge",
+                    "currency": get_default_asset(payment_option.network)["asset"],
+                }
+            }
+        )
     return {
         # AgentCash's x-payment-info.price.currency is decimal-USD pricing
         # metadata (ISO 4217, so a strict 3-letter code) - a different field
@@ -185,16 +205,7 @@ def _x_payment_info(payment_option) -> dict:
             "currency": "USD",
             "amount": _price_to_amount_string(payment_option.price),
         },
-        "protocols": [
-            {"x402": {"version": 2}},
-            {
-                "mpp": {
-                    "method": "evm",
-                    "intent": "charge",
-                    "currency": get_default_asset(payment_option.network)["asset"],
-                }
-            },
-        ],
+        "protocols": protocols,
     }
 
 
@@ -277,16 +288,23 @@ def build_custom_openapi(app):
 
         for route_key, route_config in build_route_configs().items():
             method, path = route_key.split(" ", 1)
-            operation = schema["paths"][path][method.lower()]
+            operation = ((schema.get("paths") or {}).get(path) or {}).get(method.lower())
+            if operation is None:
+                continue
             route_name = path.lstrip("/")
             generated = generated_specs.get(route_name)
             payment_option = route_config.accepts
             if isinstance(payment_option, list):
                 payment_option = payment_option[0]
+            input_schema = generated.input_schema if generated else _INPUT_SCHEMAS.get(route_name)
+            if not input_schema:
+                continue
+            output_schema = generated.output_schema if generated else _OUTPUT_SCHEMAS.get(route_name)
+            if not output_schema:
+                continue
             operation["x-payment-info"] = _x_payment_info(payment_option)
             operation.setdefault("security", [])
             operation.setdefault("responses", {})["402"] = _payment_response(payment_option)
-            input_schema = generated.input_schema if generated else _INPUT_SCHEMAS[route_name]
             input_example = DISCOVER_INPUT_EXAMPLE if route_name == "discover" else None
             operation["requestBody"] = _request_body(input_schema, example=input_example)
             # Discoverability material for AgentCash's semantic search (see
@@ -301,10 +319,9 @@ def build_custom_openapi(app):
             # summary/use-cases/output_schema on the RouteSpec itself, set by
             # Ouvrier when the route was created - same treatment, different
             # source, never a third copy of this logic.
-            operation["summary"] = generated.summary if generated else ROUTE_SUMMARIES[route_name]
+            operation["summary"] = generated.summary if generated else ROUTE_SUMMARIES.get(route_name, route_name)
             operation["tags"] = route_config.tags
-            operation["x-use-cases"] = generated.use_cases if generated else ROUTE_USE_CASES[route_name]
-            output_schema = generated.output_schema if generated else _OUTPUT_SCHEMAS[route_name]
+            operation["x-use-cases"] = generated.use_cases if generated else ROUTE_USE_CASES.get(route_name, [])
             success_json: dict = {"schema": output_schema}
             if route_name == "discover":
                 success_json["example"] = DISCOVER_SAMPLE_OUTPUT
@@ -314,6 +331,20 @@ def build_custom_openapi(app):
             }
 
         _enrich_free_discover_operations(schema)
+
+        # This document is a paid-service sales surface, not an application
+        # debug dump. FastAPI otherwise exposes OAuth helpers, health probes,
+        # samples and manifests as 80+ operations; discovery clients warn,
+        # spend tokens on irrelevant routes and dilute semantic ranking.
+        # Keep only routes an agent can actually buy. Free samples and
+        # manifests remain linked from descriptions, llms.txt and agent.json.
+        paid_paths = {
+            route_key.split(" ", 1)[1] for route_key in build_route_configs()
+        }
+        schema["paths"] = {
+            path: value for path, value in schema["paths"].items()
+            if path in paid_paths
+        }
 
         app.openapi_schema = schema
         return app.openapi_schema

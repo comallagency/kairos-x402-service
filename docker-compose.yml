@@ -10,6 +10,8 @@ services:
       - x402_net
     env_file:
       - .env
+    environment:
+      BASE_URL: https://x402.agentindex.world
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

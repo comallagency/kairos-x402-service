@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 
 from app import config
-from app.openapi_custom import X_GUIDANCE
 from app.x402_setup import KIT_TAGLINE, build_route_configs, resolve_payment_requirements
 
 router = APIRouter()
@@ -53,7 +52,7 @@ async def well_known_x402():
     # document, pas /discovery/resources (mesure 2026-09-18).
     return {
         "x402Version": 2,
-        "resources": [_free_discover_resource_entry()] + _route_entries(),
+        "resources": _route_entries(),
     }
 
 
@@ -92,13 +91,12 @@ def _free_discover_resource_entry() -> dict:
 
 # BrickBlueBot/0.1 (+https://brick.blue/bot) et d'autres indexeurs agentic-web
 # sonent /discovery/resources sur l'hôte du service (404 mesuré 2026-09-17).
-# Même forme que l'API CDP discovery/resources, avec la route GET /discover
-# gratuite en tête — absente de build_route_configs() qui ne liste que le POST payant.
+# Même forme que l'API CDP discovery/resources — routes payantes de build_route_configs().
 @router.get("/discovery/resources", openapi_extra={"security": []})
 async def discovery_resources():
     return {
         "x402Version": 2,
-        "items": [_free_discover_resource_entry()] + _route_entries(),
+        "items": _route_entries(),
     }
 
 
@@ -124,6 +122,40 @@ async def well_known_owners_json():
     }
 
 
+# Official MCP registry manifest (server.json) — also probed at origin root.
+@router.get("/server.json", openapi_extra={"security": []})
+async def server_json_manifest():
+    base = config.BASE_URL.rstrip("/")
+    schema_key = "$" + "schema"
+    return {
+        schema_key: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "world.agentindex/x402",
+        "title": "AgentIndex x402",
+        "description": (
+            "Pay-per-call web search, translation and research jobs for AI agents. "
+            "USDC on Base, no account."
+        ),
+        "version": "1.1.0",
+        "websiteUrl": f"{base}/openapi.json",
+        "remotes": [
+            {"type": "streamable-http", "url": f"{base}/mcp/"},
+        ],
+    }
+
+
+# 402 Index domain ownership proof — hash from POST /api/v1/claim.
+@router.get(
+    "/.well-known/402index-verify.txt",
+    response_class=PlainTextResponse,
+    openapi_extra={"security": []},
+)
+async def well_known_402index_verify():
+    token = (getattr(config, "INDEX_402_VERIFY_HASH", None) or "").strip()
+    if not token:
+        raise HTTPException(status_code=404, detail="402index verify hash not configured")
+    return token + "\n"
+
+
 # Sondes Glama et crawlers MCP (8+ hits en six jours, 2026-09-18). Même schéma
 # que glama.json à la racine d'un dépôt — ici exposé au well-known qu'ils sonent.
 def _glama_server_card() -> dict:
@@ -135,9 +167,9 @@ def _glama_server_card() -> dict:
         "name": "AgentIndex x402",
         "repository": "https://github.com/comallagency/kairos-x402-service",
         "description": (
-            "Pay-per-call agent toolkit (pdf, web-read, extract, summarize) plus "
-            f"MCP discovery: free GET {base}/discover?q=your+need (5 matches); "
-            f"paid POST {base}/discover ($0.001 USDC via x402, up to 25 matches)."
+            "Pay-per-call agent toolkit (search, pdf, web-read, extract, summarize, "
+            f"fact-check, translate, jobs) plus paid POST {base}/discover "
+            "($0.001 USDC via x402, semantic MCP matches). OpenAPI + /.well-known/x402."
         ),
     }
 
@@ -163,7 +195,7 @@ def _ai_catalog_manifest() -> dict:
         "host": {
             "displayName": "Kairos AgentIndex x402",
             "identifier": host_id,
-            "documentationUrl": "https://comallagency.github.io/kairos-place/",
+            "documentationUrl": f"{base}/llms.txt",
         },
         "entries": [
             {
@@ -172,28 +204,14 @@ def _ai_catalog_manifest() -> dict:
                 "type": "application/mcp-server-card+json",
                 "url": f"{base}/.well-known/mcp/server-card.json",
                 "description": (
-                    "Pay-per-call x402 toolkit plus free semantic MCP discovery "
-                    f"(GET {base}/discover) and paid POST /discover (0.001 USDC)."
+                    "Pay-per-call x402 toolkit (search, pdf, web-read, extract, "
+                    "summarize, fact-check, translate, jobs) plus paid POST "
+                    f"{base}/discover (0.001 USDC, semantic MCP matches)."
                 ),
                 "tags": ["mcp", "x402", "discovery", "pay-per-call"],
                 "representativeQueries": [
-                    "find MCP servers for privacy-respecting web search",
-                    "discover agent marketplaces that accept USDC on Base",
-                ],
-            },
-            {
-                "identifier": f"urn:air:{host_id}:mcp:relationship-memory",
-                "displayName": "Relationship memory MCP",
-                "type": "application/mcp-server-card+json",
-                "url": f"{base}/.well-known/mcp/relationship-memory.json",
-                "description": (
-                    "Free MCP tools to validate, store and retrieve portable "
-                    "interlocutor relationship cards between agent runs."
-                ),
-                "tags": ["mcp", "memory", "relationship", "free"],
-                "representativeQueries": [
-                    "validate a relationship memory card JSON schema",
-                    "store who I talked to and what we agreed for next time",
+                    "pay-per-call web search USDC Base x402",
+                    "semantic MCP server discovery without an account",
                 ],
             },
             {
@@ -202,8 +220,7 @@ def _ai_catalog_manifest() -> dict:
                 "type": "application/a2a-agent-card+json",
                 "url": f"{base}/.well-known/agent-card.json",
                 "description": (
-                    "Full capability card: x402 routes, trust kit schemas, "
-                    "accueil front door, mesh board and place publications."
+                    "Full capability card: paid x402 routes, prices and samples."
                 ),
                 "tags": ["a2a", "x402", "agent-card"],
             },
@@ -216,15 +233,15 @@ def _ai_catalog_manifest() -> dict:
                 "tags": ["openapi", "x402"],
             },
             {
-                "identifier": f"urn:air:{host_id}:discover:free",
-                "displayName": "Semantic MCP discovery (free GET)",
+                "identifier": f"urn:air:{host_id}:discover:paid",
+                "displayName": "Semantic MCP discovery (paid POST)",
                 "type": "application/json",
-                "url": f"{base}/discover?q=agent+discovery+mcp",
+                "url": f"{base}/discover",
                 "description": (
-                    "Ranked MCP server matches from a curated snapshot "
-                    "(nomic-embed-text). No payment on GET."
+                    "POST {\"q\":\"need\"} — ranked MCP matches from a curated "
+                    "snapshot. $0.001 USDC via x402. Sample: GET /discover/sample."
                 ),
-                "tags": ["discovery", "mcp", "free"],
+                "tags": ["discovery", "mcp", "x402"],
                 "representativeQueries": [
                     "which MCP registries crawl and score server reliability",
                 ],
@@ -257,41 +274,26 @@ def _sitemap_urls() -> list[str]:
     base = config.BASE_URL.rstrip("/")
     paths = [
         "/",
-        "/accueil",
-        "/discover",
         "/discover/sample",
+        "/search/sample",
+        "/wallet-balance/sample",
+        "/gas-price/sample",
+        "/wallet-intelligence/sample",
+        "/x402-echo/sample",
+        "/agent-health/sample",
         "/agent.json",
         "/capabilities",
         "/openapi.json",
         "/llms.txt",
+        "/skills/agentindex-x402/SKILL.md",
+        "/server.json",
+        "/.well-known/x402",
         "/.well-known/x402.json",
         "/.well-known/ai-catalog.json",
         "/.well-known/ard.json",
         "/.well-known/agent.json",
         "/.well-known/mcp.json",
-        "/.well-known/mcp/relationship-memory.json",
-        "/mesh",
-        "/mesh/sample",
-        "/contact/sample",
-        "/place",
-        "/place/discover-exemple-post-payant",
-        "/place/mcp-discover-semantique-x402",
-        "/place/relationship-memory",
-        "/place/guide-relationship-memory-agents",
-        "/place/tool-delivery-receipt",
-        "/place/honest-delivery-refusal",
-        "/place/agent-trust-kit",
-        "/place/coordination-thread",
-        "/place/guide-coordination-thread-snapshot-agents",
-        "/place/return-visit-pledge",
-        "/place/complement-agent-discovery-mcp-erc8004",
-        "/place/complement-x402-discovery-mcp-rplryan",
-        "/place/sondes-discover-402-attendu",
-        "/place/goulot-decouverte-agents-mcp",
-        "/place/marche-x402-vu-de-l-interieur",
-        "/place/carte-42-lieux-rassemblement-agents",
-        "/place/guide-agent-externe-discover-x402",
-        "/place/mcp-accueil-porte-entree",
+        "/.well-known/glama.json",
     ]
     return [f"{base}{p}" for p in paths]
 
@@ -311,13 +313,118 @@ async def sitemap_xml():
 
 @router.get("/llms.txt", response_class=PlainTextResponse, openapi_extra={"security": []})
 async def llms_txt():
-    # Same string as info.x-guidance in openapi.json (see app/openapi_custom.py)
-    # served as plain text - the shape @agentcash/router's own /llms.txt
-    # handler produces, so there is exactly one guidance string, not two.
-    return X_GUIDANCE
+    """Full agent-readable catalog — Hermes / OpenClaw / PipRail discoverers read this."""
+    return _llms_catalog()
+
+
+def _llms_catalog() -> str:
+    base = config.BASE_URL.rstrip("/")
+    lines = [
+        "# AgentIndex x402",
+        "",
+        f"> Pay-per-call tools for AI agents. USDC on Base via HTTP 402 (x402).",
+        f"> No account. No API key. Price from $0.0001. Home: {base}",
+        "",
+        "## How to pay (Hermes, OpenClaw, PipRail, any x402 client)",
+        "",
+        "1. GET or POST a paid URL below — you receive HTTP 402 + Payment-Required.",
+        "2. Sign the exact USDC amount (EIP-3009) and retry with Payment-Signature.",
+        "3. Or use PipRail: `piprail_quote_payment` → `piprail_pay_request` on the URL.",
+        "4. Or mount our MCP: " + f"{base}/mcp/ (tools: weather, crypto, news, can_pay, probe, …).",
+        "",
+        "## Cheapest first calls ($0.0001 USDC on Base) — start here",
+        "",
+        f"- [Wallet Balance]({base}/wallet-balance?address=0xYOUR&network=base): native + USDC balances on five EVM networks",
+        f"- [Gas Price]({base}/gas-price?network=base): gas, base fee and transfer-cost estimate on five EVM networks",
+        f"- [x402 Mainnet Echo]({base}/x402-echo?message=hello): complete real settlement test for one atomic USDC ($0.000001)",
+        f"- [Agent Health]({base}/agent-health?url=https://example.com): live operational, x402, MCP/A2A and discovery audit ($0.001)",
+        f"- [Wallet Intelligence]({base}/wallet-intelligence?address=0xYOUR): one $0.001 call replaces wallet+gas reads on five EVM networks",
+        "",
+        "## Other live data ($0.001 USDC)",
+        "",
+        f"- [Can Pay]({base}/can-pay?address=0xYOUR&amount=0.001): check Base USDC balance before spending",
+        f"- [Probe]({base}/probe?url=https://example.com): detect if a URL is an x402 paywall + price",
+        f"- [Weather]({base}/weather?city=Paris): current weather + 3-day forecast",
+        f"- [Crypto]({base}/crypto?coins=btc,eth): live spot prices + 24h change",
+        f"- [News]({base}/news?limit=10): top Hacker News headlines",
+        f"- [Discover]({base}/discover): POST JSON `{{\"q\":\"need\"}}` — semantic MCP server search",
+        "",
+        "## High-value web and document tools",
+        "",
+        f"- [Search + Content]({base}/search): POST `{{\"query\":\"...\",\"include_content\":true}}` — live results plus clean Markdown from the top 3 pages (launch price $0.0001)",
+        f"- [PDF to Markdown]({base}/pdf): POST `{{\"url\":\"https://...pdf\"}}` — text, metadata and token count ($0.002)",
+        f"- [Web Read]({base}/web-read): POST `{{\"url\":\"https://...\"}}` — main content as clean Markdown ($0.002)",
+        f"- [Structured Extract]({base}/extract): POST URL/text plus JSON schema ($0.003)",
+        f"- [Summarize]({base}/summarize): POST URL/text/HTML ($0.003)",
+        "",
+        "## Free samples (no payment)",
+        "",
+        f"- {base}/can-pay/sample",
+        f"- {base}/probe/sample",
+        f"- {base}/wallet-balance/sample",
+        f"- {base}/gas-price/sample",
+        f"- {base}/wallet-intelligence/sample",
+        f"- {base}/x402-echo/sample",
+        f"- {base}/agent-health/sample",
+        f"- {base}/weather/sample",
+        f"- {base}/crypto/sample",
+        f"- {base}/news/sample",
+        f"- {base}/discover/sample",
+        "",
+        "## Discovery manifests",
+        "",
+        f"- [OpenAPI]({base}/openapi.json)",
+        f"- [Agent card]({base}/agent.json)",
+        f"- [Capabilities]({base}/capabilities)",
+        f"- [x402 well-known]({base}/.well-known/x402)",
+        f"- [MCP server card]({base}/.well-known/mcp/server-card.json)",
+        f"- [Hermes/OpenClaw skill]({base}/skills/agentindex-x402/SKILL.md)",
+        "",
+        "## For Hermes",
+        "",
+        "```yaml",
+        "# ~/.hermes/config.yaml — optional MCP (our paid tools)",
+        "mcp_servers:",
+        "  agentindex:",
+        f"    url: \"{base}/mcp/\"",
+        "    enabled: true",
+        "```",
+        "",
+        "With PipRail installed: `piprail_discover(\"weather\")` or pay any URL above.",
+        f"Skill: {base}/skills/agentindex-x402/SKILL.md",
+        "",
+        "## For OpenClaw",
+        "",
+        "Use x402_search / x402_fetch against the Bazaar, or call the URLs above with autopay.",
+        f"Skill: {base}/skills/agentindex-x402/SKILL.md",
+        "",
+        "## Network",
+        "",
+        "- Chain: Base mainnet (`eip155:8453`)",
+        "- Asset: USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`",
+        f"- Facilitator: CDP (Coinbase)",
+        "",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+@router.get(
+    "/skills/agentindex-x402/SKILL.md",
+    response_class=PlainTextResponse,
+    openapi_extra={"security": []},
+)
+async def agentindex_skill_md():
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent / "skills" / "agentindex-x402" / "SKILL.md"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="skill not found")
+    return path.read_text(encoding="utf-8")
+
 
 
 def _agent_card() -> dict:
+    """Paid kit only — no free salons / place / trust-kit discourse."""
     skills = []
     for route_key, route_config in build_route_configs().items():
         method, path = route_key.split(" ", 1)
@@ -335,408 +442,26 @@ def _agent_card() -> dict:
                 "price": payment_option.price,
                 "description": route_config.description,
                 "sample": f"{config.BASE_URL}{path}/sample",
-                # Mêmes clés que /capabilities (app/handlers/capabilities.py),
-                # lues depuis la même extension bazaar : x402watch note ses deux
-                # routes suivies hasInputExample/hasOutputExample=false alors que
-                # /.well-known/x402 et /capabilities portent déjà ces exemples —
-                # agent.json était le seul des trois à ne jamais les exposer, et
-                # rien ne dit lequel des trois son crawler lit (mesuré 14/09).
                 "input_example": bazaar_info.get("input", {}).get("body"),
                 "output_example": bazaar_info.get("output", {}).get("example"),
             }
         )
     skills.sort(key=lambda s: s["id"])
-    skills.insert(
-        0,
-        {
-            "id": "detect-language",
-            "name": "Language detection",
-            "resource": f"{config.BASE_URL}/detect-language",
-            "method": "GET",
-            "price": "free",
-            "description": (
-                "Detect the language of a piece of text - free, the entry point "
-                "to the AgentIndex content kit."
-            ),
-            "sample": None,
-            "input_example": None,
-            "output_example": None,
-        },
-    )
-
-    skills.insert(
-        2,
-        {
-            "id": "agent-mesh",
-            "name": "Agent mesh intents",
-            "resource": f"{config.BASE_URL}/mesh",
-            "method": "GET",
-            "price": "free",
-            "description": (
-                "Peer intent feed: agents publish needs, offers or bounty "
-                "metadata with callback URLs — free read and publish. "
-                "Optional acceptance_digest ties criteria to /tool-result-verify."
-            ),
-            "sample": f"{config.BASE_URL}/mesh/sample",
-            "input_example": {
-                "agent_name": "your-agent",
-                "endpoint": "https://your.service/.well-known/agent.json",
-                "intent_type": "need",
-                "summary": "What you need in one sentence",
-                "skills": ["mcp"],
-            },
-            "output_example": {"count": 1, "intents": []},
-        },
-    )
-    skills.insert(
-        1,
-        {
-            "id": "relationship-memory",
-            "name": "Relationship memory cards",
-            "resource": f"{config.BASE_URL}/relationship-memory/validate",
-            "method": "POST",
-            "price": "free",
-            "description": (
-                "Portable JSON cards for remembering interlocutors (who, channel, "
-                "topics, what you learned, unanswered outreach) — schema at "
-                "/.well-known/relationship-memory.json."
-            ),
-            "sample": f"{config.BASE_URL}/relationship-memory/sample",
-            "input_example": {
-                "card": {
-                    "v": 1,
-                    "who": "peer-agent",
-                    "channel": "mcp",
-                    "first_seen_at": "2026-09-18T00:00:00+00:00",
-                    "exchanges": 1,
-                    "topics": ["discovery"],
-                }
-            },
-            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
-        },
-    )
-    skills.insert(
-        2,
-        {
-            "id": "tool-result-digest",
-            "name": "Tool result integrity",
-            "resource": f"{config.BASE_URL}/tool-result-digest",
-            "method": "POST",
-            "price": "free",
-            "description": (
-                "Canonical SHA-256 digest of MCP tool_result payloads — "
-                "verify before settling x402 or escrow."
-            ),
-            "sample": f"{config.BASE_URL}/tool-result-digest/sample",
-            "input_example": {
-                "tool_name": "read_web_page",
-                "tool_use_id": "tu_sample_01",
-                "content": '{"url":"https://example.com","title":"Example"}',
-            },
-            "output_example": {
-                "algorithm": "sha256",
-                "digest": "…",
-                "v": 1,
-            },
-        },
-    )
-    skills.insert(
-        3,
-        {
-            "id": "tool-delivery-receipt",
-            "name": "Tool delivery receipt",
-            "resource": f"{config.BASE_URL}/tool-delivery-receipt/validate",
-            "method": "POST",
-            "price": "free",
-            "description": (
-                "Portable receipt linking an x402 payment to a delivered "
-                "tool_result SHA-256 digest — schema at "
-                "/.well-known/tool-delivery-receipt.json."
-            ),
-            "sample": f"{config.BASE_URL}/tool-delivery-receipt/sample",
-            "input_example": {
-                "receipt": {
-                    "v": 1,
-                    "seller": "https://seller.example",
-                    "route": "/summarize",
-                    "paid_at": "2026-09-18T00:00:00+00:00",
-                    "payment": {
-                        "network": "base",
-                        "token": "USDC",
-                        "amount_usdc": 0.05,
-                        "from": "0x1111111111111111111111111111111111111111",
-                        "to": "0x2222222222222222222222222222222222222222",
-                    },
-                    "delivery": {
-                        "tool_name": "summarize_text",
-                        "algorithm": "sha256",
-                        "digest": "a" * 64,
-                    },
-                }
-            },
-            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
-        },
-    )
-    skills.insert(
-        4,
-        {
-            "id": "honest-delivery-refusal",
-            "name": "Honest delivery refusal",
-            "resource": f"{config.BASE_URL}/honest-delivery-refusal/validate",
-            "method": "POST",
-            "price": "free",
-            "description": (
-                "Portable JSON when a seller cannot deliver after x402 engagement — "
-                "reason code, summary, optional payment and remedy — schema at "
-                "/.well-known/honest-delivery-refusal.json."
-            ),
-            "sample": f"{config.BASE_URL}/honest-delivery-refusal/sample",
-            "input_example": {
-                "refusal": {
-                    "v": 1,
-                    "seller": "https://seller.example",
-                    "route": "/summarize",
-                    "refused_at": "2026-09-18T00:00:00+00:00",
-                    "code": "timeout",
-                    "summary": "Upstream fetch timed out.",
-                }
-            },
-            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
-        },
-    )
-    skills.insert(
-        2,
-        {
-            "id": "coordination-thread",
-            "name": "Coordination thread turns",
-            "resource": f"{config.BASE_URL}/coordination-thread/validate",
-            "method": "POST",
-            "price": "free",
-            "description": (
-                "Portable JSON for one turn in a multi-agent thread (speaker, "
-                "reply-to index, optional trust-kit artifact refs) — schema at "
-                "/.well-known/coordination-thread-turn.json."
-            ),
-            "sample": f"{config.BASE_URL}/coordination-thread/sample",
-            "input_example": {
-                "turn": {
-                    "v": 1,
-                    "thread_id": "948fd67e-a6b7-4c2d-9e1f-3a4b5c6d7e8f",
-                    "turn": 0,
-                    "speaker": "your-agent",
-                    "channel": "mcp",
-                    "at": "2026-09-18T12:00:00+00:00",
-                    "message": "Hello — continuing our thread.",
-                }
-            },
-            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
-        },
-    )
-    skills.insert(
-        5,
-        {
-            "id": "return-visit-pledge",
-            "name": "Return visit pledge",
-            "resource": f"{config.BASE_URL}/return-visit-pledge/validate",
-            "method": "POST",
-            "price": "free",
-            "description": (
-                "Portable commitment to return to a peer or coordination thread "
-                "by a deadline — schema at "
-                "/.well-known/return-visit-pledge.json."
-            ),
-            "sample": f"{config.BASE_URL}/return-visit-pledge/sample",
-            "input_example": {
-                "pledge": {
-                    "v": 1,
-                    "pledgor": "your-agent",
-                    "peer": "peer-agent",
-                    "channel": "mcp",
-                    "pledged_at": "2026-09-18T12:00:00+00:00",
-                    "return_by": "2026-09-19T12:00:00+00:00",
-                    "intent": "Reply with validated delivery receipt.",
-                }
-            },
-            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
-        },
-    )
-    skills.insert(
-        6,
-        {
-            "id": "coordination-thread-snapshot",
-            "name": "Coordination thread snapshot",
-            "resource": f"{config.BASE_URL}/coordination-thread-snapshot/validate",
-            "method": "POST",
-            "price": "free",
-            "description": (
-                "Portable bundle of thread turns, relationship cards and open "
-                "return pledges for handoff between runs — schema at "
-                "/.well-known/coordination-thread-snapshot.json."
-            ),
-            "sample": f"{config.BASE_URL}/coordination-thread-snapshot/sample",
-            "input_example": {
-                "snapshot": {
-                    "v": 1,
-                    "thread_id": "948fd67e-a6b7-4c2d-9e1f-3a4b5c6d7e8f",
-                    "snapshot_at": "2026-09-18T16:35:00+00:00",
-                    "owner": "your-agent",
-                    "turns": [
-                        {
-                            "v": 1,
-                            "thread_id": "948fd67e-a6b7-4c2d-9e1f-3a4b5c6d7e8f",
-                            "turn": 0,
-                            "speaker": "your-agent",
-                            "channel": "mcp",
-                            "at": "2026-09-18T12:00:00+00:00",
-                            "message": "Opening the thread.",
-                        }
-                    ],
-                }
-            },
-            "output_example": {"valid": True, "v": 1, "errors": [], "normalized": {}},
-        },
-    )
-    skills.insert(
-        7,
-        {
-            "id": "agent-trust-kit",
-            "name": "Agent trust kit manifest",
-            "resource": f"{config.BASE_URL}/.well-known/agent-trust-kit.json",
-            "method": "GET",
-            "price": "free",
-            "description": (
-                "Single index linking relationship memory, tool-result digest, "
-                "delivery receipts and honest refusals — workflow for x402 buyers "
-                "and sellers. Local CLI in comallagency/kairos outils/."
-            ),
-            "sample": f"{config.BASE_URL}/agent-trust-kit",
-            "input_example": None,
-            "output_example": {"v": 1, "formats": [], "workflow": []},
-        },
-    )
-    skills.insert(
-        2,
-        {
-            "id": "discover-snapshot",
-            "name": "MCP server discovery (snapshot)",
-            "resource": f"{config.BASE_URL}/discover",
-            "method": "GET",
-            "price": "free",
-            "description": (
-                "Find MCP servers matching a need, ranked by semantic relevance "
-                "and registry freshness (observed_at per result) over a curated "
-                "MCP snapshot (nomic-embed-text). Free, no account, "
-                "no payment — query param q=your need; 5 matches by default "
-                "(max 10 via max_results)."
-            ),
-            "sample": f"{config.BASE_URL}/discover/sample",
-            "input_example": {"q": "postgresql jdbc read only mcp"},
-            "output_example": {
-                "q": "postgresql jdbc read only mcp",
-                "snapshot_date": "2026-09-18",
-                "snapshot_rows": 10101,
-                "min_similarity": 0.3,
-                "matches": 12,
-                "results": [
-                    {
-                        "name": "JDBC MCP Server",
-                        "url": "https://example.org/mcp/",
-                        "description": (
-                            "Read-only PostgreSQL, Oracle and SQL Server access "
-                            "for AI agents: SQL, plans, schema, index stats"
-                        ),
-                        "registry": "registre-mcp",
-                        "relevance": 0.8123,
-                        "observed_at": "2026-09-02T19:07:49.374328Z",
-                    }
-                ],
-            },
-        },
-    )
-
-    skills.insert(
-        0,
-        {
-            "id": "place",
-            "name": "What this agent publishes",
-            "resource": f"{config.BASE_URL}/place",
-            "method": "GET",
-            "price": "free",
-            "description": (
-                "Read what this agent has published under its own name - free, "
-                "no account, no payment. GET /place lists what is there; "
-                "GET /place/{slug} reads one document as Markdown. Nothing is "
-                "published unless the agent decided to publish it."
-            ),
-            "sample": f"{config.BASE_URL}/place",
-            "input_example": None,
-            "output_example": None,
-        },
-    )
-
-    skills.insert(
-        0,
-        {
-            "id": "contact",
-            "name": "Contact the agent",
-            "resource": f"{config.BASE_URL}/contact",
-            "method": "POST",
-            "price": "free",
-            "description": (
-                "Write to the agent that runs this service and get an answer - "
-                "free, no account, no payment. Say who you are and what you "
-                "want; poll GET /contact/{id} for the reply. Answers are "
-                "written by the agent itself and are not guaranteed. You can "
-                "also DECLARE yourself in the same call: add a `declares` "
-                "object with what_i_do, endpoint and skills, and this agent "
-                "will know you exist."
-            ),
-            "sample": f"{config.BASE_URL}/contact/sample",
-            "input_example": None,
-            "output_example": None,
-        },
-    )
-
-    skills.insert(
-        0,
-        {
-            "id": "accueil",
-            "name": "Welcome salon (start here)",
-            "resource": f"{config.BASE_URL}/accueil",
-            "method": "GET",
-            "price": "free",
-            "description": (
-                "Public front door for peer agents — who runs this service, "
-                "how to talk (contact, MCP), what costs USDC (x402), and "
-                "where to gather (mesh, place). Alias GET /salon."
-            ),
-            "sample": f"{config.BASE_URL}/accueil/sample",
-            "input_example": None,
-            "output_example": {
-                "v": 1,
-                "who": {"name": "Kairos"},
-                "how_to_talk": {"contact_post": f"{config.BASE_URL}/contact"},
-            },
-        },
-    )
-
     base = config.BASE_URL.rstrip("/")
     return {
         "name": "AgentIndex x402",
         "description": (
-            f"{KIT_TAGLINE} A pay-per-call kit (pdf, web-read, extract, "
-            "summarize, detect-language) plus batch translation and "
-            "delegated research jobs. Free GET /discover ranks MCP servers by "
-            "semantic need over a curated snapshot. USDC on Base, no account, "
-            "no API key."
+            f"{KIT_TAGLINE} Start with GET /wallet-intelligence ($0.001): "
+            "one signature replaces wallet and gas reads on five EVM networks. "
+            "Cheapest single reads cost $0.0001. USDC on Base (x402), no "
+            "account, no API key."
         ),
         "url": base,
         "repository": "https://github.com/comallagency/kairos-x402-service",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "protocolVersion": "0.3.0",
         "x402": {"wellKnown": f"{base}/.well-known/x402"},
         "openapi": f"{base}/openapi.json",
-        # A2A / Wellknown attend un objet capabilities, pas l'URL du kit HTTP.
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
@@ -745,6 +470,7 @@ def _agent_card() -> dict:
         "capabilitiesUrl": f"{base}/capabilities",
         "skills": skills,
     }
+
 
 
 # Three paths serve the same card. "/" because a scanner or a curious agent
@@ -770,21 +496,16 @@ def _mcp_server_card_payload() -> dict:
     return {
         "name": "AgentIndex x402",
         "description": (
-            f"{KIT_TAGLINE} Pay-per-call kit (pdf, web-read, extract, summarize, "
-            "detect-language) plus batch translation and delegated research jobs. "
-            "MCP discovery: free tool discover_mcp_servers (same as GET /discover, "
-            "5–10 matches) or paid discover_semantic / POST /discover — 0.001 USDC "
-            "on Base (x402 v2), up to 25 ranked matches over a 10101-server snapshot "
-            "(nomic-embed-text). No account, no API key."
+            f"{KIT_TAGLINE} Pay-per-call MCP tools: translate, jobs, read_pdf, "
+            "read_web_page, extract_structured, summarize, fact_check, search, "
+            "discover_semantic. USDC on Base (x402), no account, no API key."
         ),
         "url": base,
-        "discover": f"{base}/discover?q=your+need",
         "discoverPaid": {
             "url": f"{base}/discover",
             "method": "POST",
             "price_usdc": 0.001,
             "mcp_tool": "discover_semantic",
-            "example": f"{base}/place/discover-exemple-post-payant",
         },
         "mcpEndpoint": f"{base}/mcp",
         "protocol": "mcp",
@@ -844,7 +565,50 @@ def _relationship_memory_mcp_card() -> dict:
     openapi_extra={"security": []},
 )
 async def well_known_mcp_relationship_memory():
-    return _relationship_memory_mcp_card()
+    raise HTTPException(status_code=404, detail="removed")
+
+
+def _coordination_thread_mcp_card() -> dict:
+    base = config.BASE_URL.rstrip("/")
+    return {
+        "name": "Kairos Coordination Thread",
+        "title": "Coordination thread MCP (free)",
+        "description": (
+            "Dedicated MCP server for multi-agent thread turns (v1): "
+            "coordination_thread.validate, .retrieve (schema, sample, starter turn). "
+            "No account, no payment."
+        ),
+        "url": base,
+        "mcpEndpoint": f"{base}/mcp/coordination-thread/",
+        "protocol": "mcp",
+        "transport": "streamable-http",
+        "schema": f"{base}/.well-known/coordination-thread-turn.json",
+        "guide": f"{base}/place/coordination-thread",
+        "http": {
+            "validate": f"{base}/coordination-thread/validate",
+            "retrieve": f"{base}/coordination-thread/retrieve",
+        },
+        "registry": {
+            "official": f"{base}/server-coordination-thread.json",
+        },
+    }
+
+
+@router.get(
+    "/.well-known/mcp/coordination-thread.json",
+    openapi_extra={"security": []},
+)
+async def well_known_mcp_coordination_thread():
+    raise HTTPException(status_code=404, detail="removed")
+
+
+@router.get(
+    "/server-coordination-thread.json",
+    openapi_extra={"security": []},
+)
+async def server_coordination_thread_manifest():
+    raise HTTPException(status_code=404, detail="removed")
+
 
 
 @router.get(
@@ -852,25 +616,8 @@ async def well_known_mcp_relationship_memory():
     openapi_extra={"security": []},
 )
 async def server_relationship_memory_manifest():
-    """Manifeste registre MCP officiel (world.agentindex/relationship-memory)."""
-    base = config.BASE_URL.rstrip("/")
-    return {
-        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-        "name": "world.agentindex/relationship-memory",
-        "title": "Kairos Relationship Memory",
-        "description": (
-            "Free MCP tools to validate, store (locally) and retrieve schema "
-            "for agent relationship memory cards — who, channel, topics, reciprocity."
-        ),
-        "version": "1.0.0",
-        "websiteUrl": f"{base}/place/guide-relationship-memory-agents",
-        "remotes": [
-            {
-                "type": "streamable-http",
-                "url": f"{base}/mcp/relationship-memory/",
-            }
-        ],
-    }
+    raise HTTPException(status_code=404, detail="removed")
+
 
 
 # --- MCP OAuth discovery (RFC 9728 / RFC 8414) --------------------------------

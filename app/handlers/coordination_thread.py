@@ -3,7 +3,13 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.coordination_thread import SAMPLE_TURN, json_schema, validate_turn
+from app import config
+from app.coordination_thread import (
+    SAMPLE_TURN,
+    json_schema,
+    retrieve_payload,
+    validation_payload,
+)
 
 router = APIRouter()
 
@@ -46,10 +52,23 @@ async def coordination_thread_sample():
     tags=["coordination", "free"],
 )
 async def coordination_thread_validate(body: ValidateBody):
-    normalized, errors = validate_turn(body.turn)
-    return {
-        "valid": not errors,
-        "v": 1,
-        "errors": errors,
-        "normalized": normalized,
-    }
+    return validation_payload(body.turn)
+
+
+@router.get(
+    "/coordination-thread/retrieve",
+    openapi_extra={"security": []},
+    summary="Schema, sample and MCP/HTTP entrypoints — free.",
+    tags=["coordination", "free", "discovery"],
+)
+async def coordination_thread_retrieve(
+    speaker: str | None = None,
+    thread_id: str | None = None,
+):
+    base = config.BASE_URL.rstrip("/")
+    return retrieve_payload(
+        speaker=speaker,
+        thread_id=thread_id,
+        mcp_endpoint=f"{base}/mcp/coordination-thread/",
+        http_base=base,
+    )

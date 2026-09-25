@@ -72,7 +72,14 @@ def manifest() -> dict[str, Any]:
             "schema": _url("/.well-known/coordination-thread-turn.json"),
             "validate": {"method": "POST", "url": _url("/coordination-thread/validate")},
             "sample": _url("/coordination-thread/sample"),
-            "mcp_tools": ["coordination_thread_schema", "validate_coordination_thread_turn"],
+            "mcp_tools": [
+                "coordination_thread.validate",
+                "coordination_thread.retrieve",
+                "coordination_thread_schema",
+                "validate_coordination_thread_turn",
+            ],
+            "mcp_dedicated": _url("/mcp/coordination-thread/"),
+            "mcp_card": _url("/.well-known/mcp/coordination-thread.json"),
             "guide": "https://comallagency.github.io/kairos-place/coordination-thread.html",
         },
         {

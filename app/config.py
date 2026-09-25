@@ -71,21 +71,26 @@ BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 # Clé ed25519 (base58) publiée sur /.well-known/brick-blue.json pour revendiquer
 # la fiche brick.blue (BrickBlueBot a sonné 404 le 2026-09-17).
 BRICK_BLUE_PUBLIC_KEY = os.getenv("BRICK_BLUE_PUBLIC_KEY") or None
+# Public hash for https://402index.io domain claim (/.well-known/402index-verify.txt)
+INDEX_402_VERIFY_HASH = os.getenv("INDEX_402_VERIFY_HASH") or None
 
-PRICE_TRANSLATE = "$0.10"
-PRICE_JOB = "$1.00"
+PRICE_TRANSLATE = "$0.005"
+PRICE_JOB = "$0.10"
 
-# 2026-09-06 repricing: the web-reading kit (search/pdf/web-read/extract/
-# summarize/fact-check) replaces the old "three unrelated tools" identity -
-# see cm-central brief. Prices set from measured Bazaar demand/competition,
-# not carried over from PRICE_TRANSLATE's $0.10 (median-market pricing was
-# blocking trial: no buyer will pay $0.10 to try an unproven route).
-PRICE_SEARCH = "$0.01"
-PRICE_PDF = "$0.05"
-PRICE_WEB_READ = "$0.03"
-PRICE_EXTRACT = "$0.05"
-PRICE_SUMMARIZE = "$0.03"
-PRICE_FACT_CHECK = "$0.05"
+# 2026-09-20 conversion pricing: crawler traffic was healthy (1,421 valid 402s)
+# but no settlement. Public marketplace comparables put PDF extraction around
+# $0.003 and web/search utilities around $0.001-$0.01. Keep trial prices at or
+# below those comparables until the first independent buyers establish quality.
+# 24h market-entry price: search is 42% of observed x402 demand. At $0.0001,
+# this is 100x below Tavily's $0.01 endpoint while still using zero-cost local
+# SearXNG/page retrieval. Keep until independent settlements unlock Bazaar,
+# then restore the sustainable $0.002 price.
+PRICE_SEARCH = "$0.0001"
+PRICE_PDF = "$0.002"
+PRICE_WEB_READ = "$0.002"
+PRICE_EXTRACT = "$0.003"
+PRICE_SUMMARIZE = "$0.003"
+PRICE_FACT_CHECK = "$0.01"
 
 # Re-wired 2026-09-16, after the first PRICE_DISCOVER = "$0.001" (13:29 on
 # 2026-09-11) was written and never connected to anything - a run was cut by
@@ -97,6 +102,28 @@ PRICE_FACT_CHECK = "$0.05"
 # keeps its price-less contract: POST is the guaranteed-semantic-ranking
 # variant over Kairos's local snapshot.
 PRICE_DISCOVER = "$0.001"
+# Ultra-cheap commodity endpoints — same $0.001 bait as services that collect.
+PRICE_WEATHER = "$0.001"
+PRICE_CRYPTO = "$0.001"
+PRICE_NEWS = "$0.001"
+# Pre-payment checklist agents run before spending elsewhere — first-settle bait.
+PRICE_CAN_PAY = "$0.001"
+PRICE_PROBE = "$0.001"
+# Acquisition routes: below the common $0.001 Bazaar floor so autonomous
+# routers can cheaply establish the first independent settlement and quality.
+PRICE_WALLET_BALANCE = "$0.0001"
+PRICE_GAS_PRICE = "$0.0001"
+# One signature replaces ten wallet/gas calls (five chains × two services).
+PRICE_WALLET_INTELLIGENCE = "$0.001"
+# Cheapest possible USDC settlement: one atomic unit. This converts SDK,
+# wallet and facilitator test traffic into real mainnet payment proof.
+PRICE_X402_ECHO = "$0.000001"
+# Voluntary one-cent support payment with an on-chain receipt.
+PRICE_TIP = "$0.01"
+# 30-day audited listing and public verification badge.
+PRICE_AGENT_CLAIM = "$0.01"
+# Fresh operational + discovery audit, below $0.002-$0.005 competitors.
+PRICE_AGENT_HEALTH = "$0.001"
 # GET /discover is free by design too, and has no price constant. A
 # PRICE_DISCOVER = "$0.001" sat here from 13:29 on 2026-09-11 until it was
 # removed: a run was cut by its turn ceiling after writing the constant and
@@ -119,6 +146,18 @@ DAILY_CAPACITY = {
     "summarize": int(os.getenv("DAILY_CAPACITY_SUMMARIZE", "1000")),
     "fact-check": int(os.getenv("DAILY_CAPACITY_FACT_CHECK", "500")),
     "discover": int(os.getenv("DAILY_CAPACITY_DISCOVER", "500")),
+    "weather": int(os.getenv("DAILY_CAPACITY_WEATHER", "2000")),
+    "crypto": int(os.getenv("DAILY_CAPACITY_CRYPTO", "2000")),
+    "news": int(os.getenv("DAILY_CAPACITY_NEWS", "2000")),
+    "can-pay": int(os.getenv("DAILY_CAPACITY_CAN_PAY", "3000")),
+    "probe": int(os.getenv("DAILY_CAPACITY_PROBE", "1500")),
+    "wallet-balance": int(os.getenv("DAILY_CAPACITY_WALLET_BALANCE", "5000")),
+    "gas-price": int(os.getenv("DAILY_CAPACITY_GAS_PRICE", "5000")),
+    "wallet-intelligence": int(os.getenv("DAILY_CAPACITY_WALLET_INTELLIGENCE", "2000")),
+    "x402-echo": int(os.getenv("DAILY_CAPACITY_X402_ECHO", "10000")),
+    "tip": int(os.getenv("DAILY_CAPACITY_TIP", "10000")),
+    "agent-claim": int(os.getenv("DAILY_CAPACITY_AGENT_CLAIM", "3000")),
+    "agent-health": int(os.getenv("DAILY_CAPACITY_AGENT_HEALTH", "3000")),
 }
 
 # OpenRouter caps the "models" fallback array at 3 entries per request, so the

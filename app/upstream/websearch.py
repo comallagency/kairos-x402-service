@@ -20,6 +20,10 @@ from app import config
 
 _MAX_EXTRACT_CHARS = 500
 _BOILERPLATE_LINE_MAX_WORDS = 4
+_QUERY_STOP_WORDS = {
+    "and", "are", "best", "for", "from", "how", "in", "of", "the", "to",
+    "what", "with",
+}
 
 SEARXNG_TIMEOUT_SECONDS = 15.0
 
@@ -67,6 +71,37 @@ def _clean_extract(raw: str | None) -> str | None:
     return text or None
 
 
+def _shape_result(title, url, extract, date=None) -> dict[str, Any]:
+    return {
+        "title": (title or "").strip() or None,
+        "url": url,
+        "extract": _clean_extract(extract),
+        "date": date,
+    }
+
+
+def _relevance_score(query: str, result: dict[str, Any]) -> int:
+    """Small deterministic re-ranker for noisy public-engine blends."""
+    tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", query.lower())
+        if len(token) >= 3 and token not in _QUERY_STOP_WORDS
+    }
+    title = (result.get("title") or "").lower()
+    url = (result.get("url") or "").lower()
+    extract = (result.get("extract") or "").lower()
+    score = sum(
+        (5 if token in title else 0)
+        + (3 if token in url else 0)
+        + (1 if token in extract else 0)
+        for token in tokens
+    )
+    phrase = " ".join(re.findall(r"[a-z0-9]+", query.lower()))
+    if phrase and phrase in f"{title} {extract}":
+        score += 8
+    return score
+
+
 async def run_web_search(query: str, max_results: int = 5) -> tuple[list[dict[str, Any]], str | None]:
     """Returns (results, model_served) - model_served is always None here (no
     LLM is involved, see app/handlers/search.py's neutral_model_id() call),
@@ -76,30 +111,28 @@ async def run_web_search(query: str, max_results: int = 5) -> tuple[list[dict[st
         async with httpx.AsyncClient(timeout=SEARXNG_TIMEOUT_SECONDS) as client:
             resp = await client.get(
                 f"{config.SEARXNG_URL}/search",
-                params={"q": query, "format": "json"},
+                # The instance defaults (Brave/DDG/Google CSE/Startpage) became
+                # CAPTCHA/rate-limit bound. These two native engines are tested
+                # live and currently return relevant results from the VPS.
+                params={"q": query, "format": "json", "engines": "bing,google"},
             )
             if resp.status_code >= 400:
                 raise SearchError(f"upstream_status_{resp.status_code}")
             data = resp.json()
-    except httpx.TimeoutException:
-        raise SearchError("search_timeout")
+    except httpx.TimeoutException as exc:
+        raise SearchError("search_timeout") from exc
     except httpx.RequestError as exc:
-        raise SearchError(f"search_failed: {exc}"[:200])
+        raise SearchError(f"search_failed: {exc}"[:200]) from exc
+    except ValueError as exc:
+        raise SearchError("search_invalid_json") from exc
 
     results = []
     for r in data.get("results") or []:
         url = r.get("url")
         if not url:
             continue
-        title = (r.get("title") or "").strip() or None
-        results.append(
-            {
-                "title": title,
-                "url": url,
-                "extract": _clean_extract(r.get("content")),
-                "date": r.get("publishedDate"),
-            }
-        )
-        if len(results) >= max_results:
-            break
-    return results, None
+        if re.match(r"https?://translate\.google\.", url):
+            continue
+        results.append(_shape_result(r.get("title"), url, r.get("content"), r.get("publishedDate")))
+    results.sort(key=lambda result: _relevance_score(query, result), reverse=True)
+    return results[:max_results], None

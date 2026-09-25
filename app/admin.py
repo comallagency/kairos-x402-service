@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import secrets
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,9 +21,17 @@ logger = logging.getLogger("x402.admin")
 router = APIRouter()
 security = HTTPBasic()
 
-ADMIN_HTML = (Path(__file__).parent / "templates" / "admin.html").read_text(encoding="utf-8")
-LIVE_HTML = (Path(__file__).parent / "templates" / "live.html").read_text(encoding="utf-8")
-USINE_HTML = (Path(__file__).parent / "templates" / "usine.html").read_text(encoding="utf-8")
+_TEMPLATES = Path(__file__).parent / "templates"
+ADMIN_HTML = (_TEMPLATES / "admin.html").read_text(encoding="utf-8")
+USINE_HTML = (_TEMPLATES / "usine.html").read_text(encoding="utf-8")
+
+
+def _live_html() -> str:
+    """Lu à chaque requête pour pouvoir hot-patcher le template sans rebuild."""
+    return (_TEMPLATES / "live.html").read_text(encoding="utf-8")
+
+def _missions_html() -> str:
+    return (_TEMPLATES / "missions.html").read_text(encoding="utf-8")
 
 # The only other network this deployment has ever run on. Payments settled
 # there must never be counted as mainnet revenue - see BRIEF-CORRECTIONS.md
@@ -64,12 +73,53 @@ async def admin_page(_: None = Depends(check_auth)):
 
 @router.get("/admin/live", response_class=HTMLResponse, include_in_schema=False)
 async def admin_live_page(_: None = Depends(check_auth)):
-    return LIVE_HTML
+    return _live_html()
 
 
 @router.get("/admin/usine", response_class=HTMLResponse, include_in_schema=False)
 async def admin_usine_page(_: None = Depends(check_auth)):
     return USINE_HTML
+
+
+@router.get("/admin/missions", response_class=HTMLResponse, include_in_schema=False)
+async def admin_missions_page(_: None = Depends(check_auth)):
+    return _missions_html()
+
+
+@router.get("/admin/missions.json", include_in_schema=False)
+async def admin_missions_data(_: None = Depends(check_auth)):
+    path = config.DATA_DIR / "marketplace_state.json"
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return {
+            "updated_at": None,
+            "cursor_ready": (config.DATA_DIR / "cursor_api_key").exists(),
+            "opportunities": [],
+            "bids": {},
+            "contracts": [],
+            "agenthansa_work": [],
+            "actions": [],
+            "errors": ["marketplace_worker_not_ready"],
+        }
+
+
+class CursorKeyPayload(BaseModel):
+    api_key: str = Field(min_length=20, max_length=500)
+
+
+@router.post("/admin/missions/cursor-key", include_in_schema=False)
+async def admin_save_cursor_key(
+    payload: CursorKeyPayload,
+    _: None = Depends(check_auth),
+):
+    key = payload.api_key.strip()
+    if len(key) < 20 or any(ch.isspace() for ch in key):
+        raise HTTPException(status_code=400, detail="Clé Cursor invalide")
+    path = config.DATA_DIR / "cursor_api_key"
+    path.write_text(key)
+    path.chmod(0o600)
+    return {"ok": True, "cursor_ready": True}
 
 
 def _network_block(network: str) -> dict:
@@ -87,13 +137,48 @@ def _network_block(network: str) -> dict:
     }
 
 
-async def collect_dashboard_data() -> dict:
-    try:
-        from chain_payments import sync as chain_sync
+def _activity_stats(events: list[dict]) -> dict:
+    by_status: dict[str, int] = {}
+    by_route: dict[str, int] = {}
+    paid_usdc = 0.0
+    for row in events:
+        st = row.get("status") or "unknown"
+        by_status[st] = by_status.get(st, 0) + 1
+        rt = row.get("route") or "?"
+        by_route[rt] = by_route.get(rt, 0) + 1
+        if st == "paid" and row.get("amount_usdc") is not None:
+            try:
+                paid_usdc += float(row["amount_usdc"])
+            except (TypeError, ValueError):
+                pass
+    return {
+        "total": len(events),
+        "by_status": by_status,
+        "by_route": by_route,
+        "paid_usdc": round(paid_usdc, 6),
+    }
 
-        await chain_sync()
-    except Exception:
-        logger.exception("live chain_payments sync failed, serving last known chain data")
+
+_last_chain_sync_at: float = 0.0
+_CHAIN_SYNC_MIN_INTERVAL_S = 300.0  # live page polls every 3s — don't hammer RPC
+
+
+async def collect_dashboard_data() -> dict:
+    global _last_chain_sync_at
+    now = time.monotonic()
+    if now - _last_chain_sync_at >= _CHAIN_SYNC_MIN_INTERVAL_S:
+        try:
+            from chain_payments import sync as chain_sync
+
+            await chain_sync()
+            _last_chain_sync_at = time.monotonic()
+        except Exception:
+            # Keep serving last known chain rows; avoid traceback spam every poll.
+            logger.warning(
+                "live chain_payments sync failed, serving last known chain data",
+                exc_info=True,
+            )
+            _last_chain_sync_at = time.monotonic()  # back off even on failure
 
     try:
         key_info = (await get_key_info())["data"]
@@ -114,6 +199,50 @@ async def collect_dashboard_data() -> dict:
     main = _network_block(network)
     generated_at = db.now_iso()
 
+    from app.x402_setup import build_route_configs
+
+    route_configs = build_route_configs()
+    routes_map: dict[str, dict] = {}
+    prices: list[float] = []
+    for route_key, route_config in route_configs.items():
+        method, path = route_key.split(" ", 1)
+        slug = path.lstrip("/")
+        payment = route_config.accepts
+        if isinstance(payment, list):
+            payment = payment[0]
+        route = routes_map.setdefault(
+            slug,
+            {
+                "price": payment.price,
+                "methods": [],
+                "service_name": route_config.service_name,
+            },
+        )
+        route["methods"].append(method)
+        try:
+            prices.append(float(str(payment.price).lstrip("$")))
+        except (TypeError, ValueError):
+            pass
+
+    recent = db.recent_events(24)
+    events_payload = [
+        {
+            "ts": row["ts"],
+            "route": row["route"],
+            "method": row.get("method"),
+            "status": row["status"],
+            "user_agent": row["user_agent"],
+            "body": row["body_excerpt"],
+            "error_reason": row.get("error_reason"),
+            "latency_ms": row.get("latency_ms"),
+            "paid": row["status"] == "paid",
+            "settlement_failed": row["status"] == "payment_failed",
+            "payer": row["payer"],
+            "amount": row["amount_usdc"],
+        }
+        for row in recent
+    ]
+
     data = {
         "generated_at": generated_at,
         "updated_at": generated_at,
@@ -129,30 +258,21 @@ async def collect_dashboard_data() -> dict:
         "unconverted_recent": db.recent_unconverted(20),
         "mpp_attempts_24h": db.count_mpp_attempts_since(24),
         "payment_failures_recent": db.recent_payment_failures(limit=10, hours=24),
-        "routes": {
-            "search": {"price": config.PRICE_SEARCH},
-            "translate": {"price": config.PRICE_TRANSLATE},
-            "jobs": {"price": config.PRICE_JOB},
-            "pdf": {"price": config.PRICE_PDF},
-            "web-read": {"price": config.PRICE_WEB_READ},
-            "extract": {"price": config.PRICE_EXTRACT},
-            "summarize": {"price": config.PRICE_SUMMARIZE},
-            "fact-check": {"price": config.PRICE_FACT_CHECK},
-            "detect-language": {"price": "free"},
+        "routes": routes_map,
+        "events": events_payload,
+        "stats_24h": _activity_stats(recent),
+        "commercial": {
+            "unique_services": len(routes_map),
+            "paid_http_routes": len(route_configs),
+            "minimum_price_usdc": min(prices) if prices else None,
+            "bazaar_unlock": "first_successful_mainnet_settlement",
+            "launch_offer": {
+                "route": "search",
+                "price_usdc": float(config.PRICE_SEARCH.lstrip("$")),
+                "positioning": "full-page search at 1/100 of Tavily x402 price",
+                "goal": "first independent mainnet settlement",
+            },
         },
-        "events": [
-            {
-                "ts": row["ts"],
-                "route": row["route"],
-                "user_agent": row["user_agent"],
-                "body": row["body_excerpt"],
-                "paid": row["status"] == "paid",
-                "settlement_failed": row["status"] == "payment_failed",
-                "payer": row["payer"],
-                "amount": row["amount_usdc"],
-            }
-            for row in db.recent_events(24)
-        ],
     }
 
     if network != TESTNET_NETWORK:
@@ -237,6 +357,19 @@ async def collect_usine_data() -> dict:
         {"slug": "extract", "intention": "extraction JSON structuree", "born_at": None, "price": config.PRICE_EXTRACT},
         {"slug": "summarize", "intention": "resume d'URL/texte/HTML", "born_at": None, "price": config.PRICE_SUMMARIZE},
         {"slug": "fact-check", "intention": "verification de claim", "born_at": None, "price": config.PRICE_FACT_CHECK},
+        {"slug": "discover", "intention": "decouverte MCP semantique", "born_at": None, "price": config.PRICE_DISCOVER},
+        {"slug": "weather", "intention": "meteo ville ou coordonnees", "born_at": None, "price": config.PRICE_WEATHER},
+        {"slug": "crypto", "intention": "prix spot crypto", "born_at": None, "price": config.PRICE_CRYPTO},
+        {"slug": "news", "intention": "titres Hacker News", "born_at": None, "price": config.PRICE_NEWS},
+        {"slug": "can-pay", "intention": "solde USDC Base vs montant", "born_at": None, "price": config.PRICE_CAN_PAY},
+        {"slug": "probe", "intention": "detecter paywall x402 d une URL", "born_at": None, "price": config.PRICE_PROBE},
+        {"slug": "wallet-balance", "intention": "soldes natif et USDC multi-chaines", "born_at": None, "price": config.PRICE_WALLET_BALANCE},
+        {"slug": "gas-price", "intention": "gas et cout transfert multi-chaines", "born_at": None, "price": config.PRICE_GAS_PRICE},
+        {"slug": "wallet-intelligence", "intention": "wallet et gas sur cinq chaines en un appel", "born_at": None, "price": config.PRICE_WALLET_INTELLIGENCE},
+        {"slug": "x402-echo", "intention": "test mainnet x402 a une unite atomique USDC", "born_at": None, "price": config.PRICE_X402_ECHO},
+        {"slug": "tip", "intention": "pourboire volontaire pour soutenir AgentIndex", "born_at": None, "price": config.PRICE_TIP},
+        {"slug": "agent-claim", "intention": "badge verifie et visibilite agent pendant 30 jours", "born_at": None, "price": config.PRICE_AGENT_CLAIM},
+        {"slug": "agent-health", "intention": "verifier disponibilite et decouverte d un agent", "born_at": None, "price": config.PRICE_AGENT_HEALTH},
     ]
     generated = [r for r in load_registry() if r.status == "live"]
     generated_rows = [

@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "x402.agentindex.world",
+    "quality_profile": "showcase",
+    "output": "x402-architecture.html",
+    "views": [
+      {
+        "id": "chemin-requete",
+        "label": "Request path",
+        "focus": ["agents", "nginx", "app", "sqlite"],
+        "note": "HTTPS to SQLite through nginx and the FastAPI container."
+      },
+      {
+        "id": "paiement",
+        "label": "Payments",
+        "focus": ["agents", "app", "cdp", "sqlite"],
+        "note": "x402 / MPP via CDP facilitator; journal in requests.db."
+      },
+      {
+        "id": "upstream",
+        "label": "Upstreams",
+        "focus": ["app", "upstream", "snapshot"],
+        "note": "OpenRouter, Ollama, SearXNG and the MCP snapshot."
+      }
+    ]
+  },
+  "components": [
+    { "id": "agents", "type": "external", "label": "Agents", "sublabel": "HTTP / MCP", "pos": [60, 300], "size": [120, 60] },
+    { "id": "nginx", "type": "cloud", "label": "nginx TLS", "sublabel": "public :443", "pos": [260, 300], "size": [140, 60] },
+    { "id": "app", "type": "backend", "label": "x402-app", "sublabel": "FastAPI :8000", "pos": [480, 300], "size": [150, 64], "tag": "middleware ×5" },
+    { "id": "mcp", "type": "backend", "label": "MCP ×3", "sublabel": "/mcp + RM + CT", "pos": [480, 140], "size": [150, 60] },
+    { "id": "sqlite", "type": "database", "label": "SQLite", "sublabel": "requests.db", "pos": [740, 300], "size": [140, 60] },
+    { "id": "snapshot", "type": "database", "label": "Snapshot", "sublabel": "acteurs_mcp.json.z", "pos": [740, 460], "size": [170, 60] },
+    { "id": "cdp", "type": "security", "label": "CDP x402", "sublabel": "verify / settle", "pos": [480, 480], "size": [150, 60] },
+    { "id": "upstream", "type": "external", "label": "Upstreams", "sublabel": "OR · Ollama · SearXNG", "pos": [740, 140], "size": [180, 60] }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "VPS — /opt/x402/app",
+      "wraps": ["nginx", "app", "mcp", "sqlite", "snapshot", "cdp"]
+    }
+  ],
+  "connections": [
+    { "id": "agents-nginx", "from": "agents", "to": "nginx", "label": "HTTPS", "variant": "emphasis" },
+    { "id": "nginx-app", "from": "nginx", "to": "app", "label": ":18402" },
+    { "id": "app-mcp", "from": "app", "to": "mcp", "fromSide": "top", "toSide": "bottom" },
+    { "id": "app-sqlite", "from": "app", "to": "sqlite", "label": "SQL" },
+    { "id": "sqlite-snapshot", "from": "sqlite", "to": "snapshot", "fromSide": "bottom", "toSide": "top" },
+    { "id": "app-cdp", "from": "app", "to": "cdp", "label": "pay", "variant": "security", "fromSide": "bottom", "toSide": "top", "labelDy": 48 },
+    { "id": "app-upstream", "from": "app", "to": "upstream", "variant": "dashed", "fromSide": "top", "toSide": "left" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Surface",
+      "items": [
+        "9 paid POST routes (USDC)",
+        "3 MCP mounts + free salons",
+        "Discovery /.well-known/* + place"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Prod (19/09)",
+      "items": [
+        "x402-app healthy + SearXNG",
+        "973 logged requests",
+        "0 chain_payments rows"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Risks",
+      "items": [
+        "GET /search bypasses x402",
+        "MCP search/fact_check commented",
+        "guide-relationship-memory 404"
+      ]
+    }
+  ]
+}

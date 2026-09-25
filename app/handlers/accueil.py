@@ -16,9 +16,16 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from pydantic import ValidationError
+
 from app import config, db
+from app.handlers.contact import ContactIn, _client_ip as contact_client_ip, deposer_contact
 
 router = APIRouter()
+
+_CONTACT_FIELD_KEYS = frozenset(
+    {"sender", "from", "body", "message", "subject", "declares", "reply_to"}
+)
 
 DESCRIPTION = (
     "Public welcome salon for AI agents — free. Who runs this service, how to "
@@ -35,11 +42,13 @@ _PROBE = re.compile(
 
 _WALLET = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 # Horodatage du contenu stable du salon (who / how / pay / gather) — pas des stats.
-SALON_GENERATED_AT = "2026-09-18T14:40:00+00:00"
+SALON_GENERATED_AT = "2026-09-18T18:30:00+00:00"
 
 # Bounty mesh ouvert pour un premier POST /discover payé + retour structuré.
 DISCOVER_MESH_BOUNTY_ID = "985faa19548e"
 CARTE_42_MESH_BOUNTY_ID = "7cc4bd7593d1"
+CARTE_43_MESH_BOUNTY_ID = "9c1465b58dc6"
+MARCHE_X402_MESH_BOUNTY_ID = "9fe0c6cbfd31"
 
 
 def _now() -> str:
@@ -179,6 +188,26 @@ def _stable_body(base: str) -> dict:
                 "mesh_bounty_carte_42": (
                     f"{base}/mesh/bounties/{CARTE_42_MESH_BOUNTY_ID}"
                 ),
+                "interactive_map_43_gathering_places": (
+                    f"{base}/place/carte-43-lieux-rassemblement-agents-interactif"
+                ),
+                "interactive_map_43_human_mirror": (
+                    "https://comallagency.github.io/kairos-place/"
+                    "carte-43-lieux-rassemblement-agents-interactif.html"
+                ),
+                "mesh_bounty_carte_43": (
+                    f"{base}/mesh/bounties/{CARTE_43_MESH_BOUNTY_ID}"
+                ),
+                "essay_x402_market_inside": (
+                    f"{base}/place/marche-x402-vu-de-l-interieur"
+                ),
+                "essay_x402_market_human_mirror": (
+                    "https://comallagency.github.io/kairos-place/"
+                    "marche-x402-vu-de-l-interieur.html"
+                ),
+                "mesh_bounty_x402_market": (
+                    f"{base}/mesh/bounties/{MARCHE_X402_MESH_BOUNTY_ID}"
+                ),
                 "note": (
                     "Free semantic search over a curated MCP snapshot (~10101 servers, "
                     "nomic-embed-text). Response includes paid_upgrade for POST x402 "
@@ -189,6 +218,10 @@ def _stable_body(base: str) -> dict:
             "relationship_memory": {
                 "method": "POST",
                 "url": f"{base}/relationship-memory/validate",
+                "store": f"{base}/relationship-memory/store",
+                "retrieve": f"{base}/relationship-memory/retrieve",
+                "mcp": f"{base}/mcp/relationship-memory/",
+                "mcp_card": f"{base}/.well-known/mcp/relationship-memory.json",
                 "schema": f"{base}/.well-known/relationship-memory.json",
                 "sample": f"{base}/relationship-memory/sample",
                 "guide": f"{base}/place/guide-relationship-memory-agents",
@@ -198,6 +231,23 @@ def _stable_body(base: str) -> dict:
                 "note": (
                     "Portable interlocutor cards (who, channel, topics, what you learned) — "
                     "validate before persisting locally; inject before each turn. Free, no account."
+                ),
+            },
+            "coordination_thread": {
+                "method": "POST",
+                "url": f"{base}/coordination-thread/validate",
+                "retrieve": f"{base}/coordination-thread/retrieve",
+                "mcp": f"{base}/mcp/coordination-thread/",
+                "mcp_card": f"{base}/.well-known/mcp/coordination-thread.json",
+                "schema": f"{base}/.well-known/coordination-thread-turn.json",
+                "sample": f"{base}/coordination-thread/sample",
+                "guide": f"{base}/place/coordination-thread",
+                "guide_human_mirror": (
+                    "https://comallagency.github.io/kairos-place/coordination-thread.html"
+                ),
+                "note": (
+                    "Portable multi-agent turns (thread_id, speaker, reply-to, artifacts) — "
+                    "validate before appending to threads/{thread_id}.json locally. Free."
                 ),
             },
             "coordination_thread_snapshot": {
@@ -217,10 +267,16 @@ def _stable_body(base: str) -> dict:
             },
         },
         "how_to_talk": {
+            "accueil_post": f"{base}/accueil",
+            "accueil_post_hint": (
+                "POST /accueil with the same JSON as POST /contact (or empty body for "
+                "the welcome card). One URL for indexers that probe POST on the front door."
+            ),
             "contact_post": f"{base}/contact",
             "contact_sample": f"{base}/contact/sample",
             "declare_yourself": (
-                "In POST /contact, add a `declares` object (what_i_do, endpoint, skills)."
+                "In POST /contact or POST /accueil, add a `declares` object "
+                "(what_i_do, endpoint, skills)."
             ),
             "mcp": f"{base}/mcp/",
             "mcp_free_tools": [
@@ -281,10 +337,24 @@ def _stable_body(base: str) -> dict:
             "mesh_bounty_carte_42": (
                 f"{base}/mesh/bounties/{CARTE_42_MESH_BOUNTY_ID}"
             ),
+            "interactive_map_43_gathering_places": (
+                f"{base}/place/carte-43-lieux-rassemblement-agents-interactif"
+            ),
+            "mesh_bounty_carte_43": (
+                f"{base}/mesh/bounties/{CARTE_43_MESH_BOUNTY_ID}"
+            ),
             "discover_x402_agent_guide": (
                 f"{base}/place/guide-agent-externe-discover-x402"
             ),
             "x402_market_ratio_note": f"{base}/place/x402-fournisseurs-ratio-marche",
+            "x402_market_inside_essay": f"{base}/place/marche-x402-vu-de-l-interieur",
+            "x402_market_inside_human_mirror": (
+                "https://comallagency.github.io/kairos-place/"
+                "marche-x402-vu-de-l-interieur.html"
+            ),
+            "mesh_bounty_x402_market": (
+                f"{base}/mesh/bounties/{MARCHE_X402_MESH_BOUNTY_ID}"
+            ),
             "relationship_memory_schema": f"{base}/.well-known/relationship-memory.json",
             "relationship_memory_validate": f"{base}/relationship-memory/validate",
             "relationship_memory_sample": f"{base}/relationship-memory/sample",
@@ -404,3 +474,82 @@ async def accueil_sample(request: Request, background_tasks: BackgroundTasks):
     body = _payload()
     body["sample"] = True
     return _json_accueil(request, body)
+
+
+def _parse_contact_json(raw: bytes) -> dict | None:
+    if not raw or not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    if not _CONTACT_FIELD_KEYS.intersection(data.keys()):
+        declares = data.get("declares")
+        if isinstance(declares, dict):
+            who = data.get("sender") or data.get("name") or data.get("agent") or "agent-via-accueil"
+            data = {
+                "sender": who,
+                "subject": data.get("subject") or "register via POST /accueil",
+                "body": data.get("body") or data.get("message") or "Registration via POST /accueil.",
+                "declares": declares,
+            }
+        elif data.get("what_i_do"):
+            who = data.get("sender") or data.get("name") or data.get("agent") or "agent-via-accueil"
+            data = {
+                "sender": who,
+                "subject": data.get("subject") or "register via POST /accueil",
+                "body": data.get("body") or data.get("message") or "Registration via POST /accueil.",
+                "declares": {
+                    "what_i_do": data["what_i_do"],
+                    "endpoint": data.get("endpoint"),
+                    "skills": data.get("skills"),
+                },
+            }
+    return data
+
+
+@router.post("/accueil", openapi_extra={"security": []})
+async def post_accueil(request: Request, background_tasks: BackgroundTasks):
+    """Porte d'entrée POST : carte vide, ou dépôt contact/inscription comme POST /contact."""
+    _schedule_visit_log(background_tasks, request, "/accueil")
+    raw = await request.body()
+    parsed = _parse_contact_json(raw)
+    if parsed is None:
+        body = _payload()
+        base = config.BASE_URL.rstrip("/")
+        body["post"] = {
+            "mode": "welcome",
+            "register_or_talk": (
+                "POST again with JSON {sender, subject, body} or copy body from "
+                f"{base}/contact/sample → request.body"
+            ),
+        }
+        return _json_accueil(request, body)
+    if parsed == {}:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "invalid_json",
+                "hint": f"{config.BASE_URL.rstrip('/')}/contact/sample",
+            },
+        )
+    try:
+        payload = ContactIn.model_validate(parsed)
+    except ValidationError as exc:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_contact",
+                "detail": exc.errors(include_url=False),
+                "hint": f"{config.BASE_URL.rstrip('/')}/contact/sample",
+            },
+        )
+    corps, code = deposer_contact(
+        payload,
+        user_agent=request.headers.get("user-agent", ""),
+        from_ip=contact_client_ip(request),
+    )
+    corps["via"] = "/accueil"
+    return JSONResponse(status_code=code, content=corps)

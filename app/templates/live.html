@@ -1,366 +1,765 @@
 <!DOCTYPE html>
-<html lang="fr" data-theme="dark">
+<html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Poste d'écoute — AgentIndex x402</title>
+<title>Live — AgentIndex x402</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
-  --ground:#0A1417; --panel:#0E1D21; --panel2:#132A2F; --line:#1D383E;
-  --ink:#EDE7DC; --ink-dim:#8CA3A7; --ink-faint:#5B7276;
-  --probe:#E8A33D; --paid:#4FD1A5; --err:#E8697D; --stranger:#7FA9F0;
-  --glow:0 0 0 1px rgba(79,209,165,.25);
-}
-:root:not([data-theme="light"]) { color-scheme: dark; }
-@media (prefers-color-scheme: light){
-  :root:not([data-theme="dark"]){
-    --ground:#F2EFE8; --panel:#FFFFFF; --panel2:#EAE5DB; --line:#D6CFC2;
-    --ink:#15252A; --ink-dim:#4E6469; --ink-faint:#8A9A9D;
-    --probe:#B87516; --paid:#0F7F5F; --err:#B3384C; --stranger:#2C5FAE;
-    color-scheme: light;
-  }
-}
-:root[data-theme="light"]{
-  --ground:#F2EFE8; --panel:#FFFFFF; --panel2:#EAE5DB; --line:#D6CFC2;
-  --ink:#15252A; --ink-dim:#4E6469; --ink-faint:#8A9A9D;
-  --probe:#B87516; --paid:#0F7F5F; --err:#B3384C; --stranger:#2C5FAE;
-  color-scheme: light;
+  --bg:#080B10;
+  --card:#10151E;
+  --card2:#161D29;
+  --line:#243044;
+  --text:#F4F7FB;
+  --muted:#8B9BB0;
+  --faint:#5A6A82;
+  --green:#2EE59D;
+  --green-dim:rgba(46,229,157,.12);
+  --amber:#FFB020;
+  --amber-dim:rgba(255,176,32,.12);
+  --blue:#5EB1FF;
+  --blue-dim:rgba(94,177,255,.12);
+  --slate:#7B8BA3;
+  --slate-dim:rgba(123,139,163,.12);
+  --red:#FF5C7A;
+  --red-dim:rgba(255,92,122,.12);
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--ground);color:var(--ink);
-  font-family:Archivo,system-ui,-apple-system,"Segoe UI",sans-serif;
-  font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
-.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:.82em;letter-spacing:-.01em}
-.wrap{max-width:1240px;margin:0 auto;padding:28px 20px 64px}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:"Instrument Sans",system-ui,sans-serif;font-size:15px;line-height:1.4}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1180px;margin:0 auto;padding:18px 16px 48px}
 
-header{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 20px;
-  padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:26px}
-h1{font-size:24px;font-weight:600;letter-spacing:-.02em;margin:0}
-.pulse{width:8px;height:8px;border-radius:50%;background:var(--paid);
-  display:inline-block;margin-right:9px;vertical-align:middle;
-  box-shadow:0 0 0 0 color-mix(in srgb,var(--paid) 60%,transparent);
-  animation:beat 2.4s ease-out infinite}
-@keyframes beat{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--paid) 55%,transparent)}
-  70%{box-shadow:0 0 0 9px transparent}100%{box-shadow:0 0 0 0 transparent}}
-@media (prefers-reduced-motion:reduce){.pulse{animation:none}}
-.meta{color:var(--ink-dim);font-size:13px;margin-left:auto;text-align:right}
-.net{color:var(--paid)}
+.nav{display:flex;gap:10px;align-items:center;font-size:13px;color:var(--muted);margin-bottom:16px}
+.nav .here{color:var(--text);font-weight:600}
 
-.lead{max-width:62ch;color:var(--ink-dim);font-size:14.5px;margin:0 0 26px}
+.head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 20px;margin-bottom:16px}
+.head h1{margin:0;font-size:28px;font-weight:700;letter-spacing:-.03em}
+.pill{display:inline-flex;align-items:center;gap:7px;margin-left:8px;
+  font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:5px 10px;border-radius:999px;background:var(--green-dim);color:var(--green);
+  vertical-align:middle}
+.pill.off{background:var(--red-dim);color:var(--red)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;
+  animation:pulse 1.5s ease-out infinite}
+@keyframes pulse{0%{opacity:1;transform:scale(1)}70%{opacity:.45;transform:scale(.85)}100%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.dot{animation:none}}
+.meta{margin-left:auto;text-align:right;color:var(--muted);font-size:12.5px}
+.meta b{color:var(--green);font-weight:600}
 
-h2{font-size:13px;font-weight:600;color:var(--ink-dim);margin:0 0 12px;letter-spacing:.01em}
+/* HERO — one glance */
+.hero{display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:10px;margin-bottom:12px}
+@media (max-width:800px){.hero{grid-template-columns:1fr}}
+.hero > *{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 18px 16px}
+.hero .big{font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1.15;margin:6px 0 8px}
+.hero .lbl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.hero .hint{font-size:13px;color:var(--muted);max-width:42ch}
+.hero.wait{border-color:rgba(255,176,32,.35);background:linear-gradient(145deg,#1a1408,#10151E 60%)}
+.hero.wait .big{color:var(--amber)}
+.hero.ok{border-color:rgba(46,229,157,.35);background:linear-gradient(145deg,#0c1a14,#10151E 60%)}
+.hero.ok .big{color:var(--green)}
+.hero .num{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:4px}
+.hero .num.zero{color:var(--faint)}
 
-/* --- bandes 24h : la pièce maîtresse --- */
-.bands{background:var(--panel);border:1px solid var(--line);border-radius:3px;
-  padding:20px 22px 14px;margin-bottom:8px}
-.band{margin-bottom:18px}
-.band:last-child{margin-bottom:6px}
-.band-head{display:flex;align-items:baseline;gap:10px;margin-bottom:7px}
-.band-name{font-weight:600;font-size:14px}
-.band-price{color:var(--ink-faint);font-size:12px}
-.band-count{margin-left:auto;color:var(--ink-dim);font-size:12px}
-.track{position:relative;height:44px;background:var(--panel2);border-radius:2px;
-  overflow:hidden;cursor:crosshair}
-.tick{position:absolute;bottom:0;width:2px;border-radius:1px 1px 0 0;
-  transition:opacity .18s,transform .18s;transform-origin:bottom}
-.tick.dim{opacity:.14}
-.track:hover .tick{opacity:.55}
-.track .tick:hover,.tick.hit{opacity:1!important;transform:scaleX(2.2)}
-.hours{display:flex;justify-content:space-between;margin-top:5px;
-  color:var(--ink-faint);font-size:11px}
+/* KPI strip */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+@media (max-width:700px){.kpis{grid-template-columns:1fr 1fr}}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi .n{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.kpi .l{font-size:12.5px;color:var(--muted);margin-top:2px}
+.kpi.g .n{color:var(--green)}
+.kpi.a .n{color:var(--amber)}
 
-.legend{display:flex;flex-wrap:wrap;gap:16px;margin:14px 0 30px;
-  color:var(--ink-dim);font-size:12.5px;align-items:center}
-.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+/* Commercial funnel + next decision */
+.decision-grid{display:grid;grid-template-columns:1.35fr .65fr;gap:12px;margin-bottom:14px}
+@media (max-width:900px){.decision-grid{grid-template-columns:1fr}}
+.funnel{display:grid;grid-template-columns:repeat(5,1fr);gap:0;padding:14px}
+@media (max-width:700px){.funnel{grid-template-columns:1fr 1fr}.fstep{border-bottom:1px solid var(--line)}}
+.fstep{position:relative;padding:8px 14px;border-right:1px solid var(--line)}
+.fstep:last-child{border-right:0}
+.fstep .v{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
+.fstep .k{font-size:11.5px;color:var(--muted);margin-top:2px}
+.fstep .rate{font-size:11px;color:var(--faint);margin-top:5px}
+.fstep.good .v{color:var(--green)}.fstep.warn .v{color:var(--amber)}
+.action{padding:16px;background:linear-gradient(145deg,var(--blue-dim),transparent 70%)}
+.action .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--blue);font-weight:700}
+.action .title{font-size:17px;font-weight:700;margin:7px 0 5px}
+.action .copy{color:var(--muted);font-size:13px}
+.action .signal{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:12px;color:var(--muted)}
 
-.cols{display:grid;grid-template-columns:1.15fr .85fr;gap:22px}
-@media (max-width:860px){.cols{grid-template-columns:1fr}}
+/* Latest event ticker */
+.ticker{background:var(--card2);border:1px solid var(--line);border-radius:12px;
+  padding:12px 16px;margin-bottom:14px;display:flex;gap:14px;align-items:center;min-height:54px}
+.ticker .tag{flex:none}
+.ticker .msg{flex:1;min-width:0}
+.ticker .msg .line1{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ticker .msg .line2{font-size:12.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ticker .when{flex:none;color:var(--faint);font-size:12px;text-align:right}
 
-.card{background:var(--panel);border:1px solid var(--line);border-radius:3px;overflow:hidden}
-.card-h{padding:14px 18px;border-bottom:1px solid var(--line);
-  display:flex;align-items:baseline;gap:10px}
-.card-h strong{font-size:14px;font-weight:600}
-.card-h span{color:var(--ink-faint);font-size:12px;margin-left:auto}
+.badge{display:inline-flex;align-items:center;font-size:11px;font-weight:700;
+  padding:4px 9px;border-radius:999px;letter-spacing:.01em;white-space:nowrap}
+.b-paid{background:var(--green-dim);color:var(--green)}
+.b-wait{background:var(--amber-dim);color:var(--amber)}
+.b-scan{background:var(--slate-dim);color:var(--slate)}
+.b-visit{background:var(--blue-dim);color:var(--blue)}
+.b-err{background:var(--red-dim);color:var(--red)}
 
-/* flux */
-.feed{max-height:520px;overflow-y:auto}
-.row{display:grid;grid-template-columns:62px 1fr auto;gap:12px;align-items:center;
-  padding:9px 18px;border-bottom:1px solid var(--line);cursor:default}
-.row:last-child{border-bottom:0}
-.row.new{animation:slip .5s ease-out}
-@keyframes slip{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-@media (prefers-reduced-motion:reduce){.row.new{animation:none}}
-.row.dim{opacity:.28}
-.t{color:var(--ink-faint)}
-.who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dotmark{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:8px;vertical-align:1px}
-.route{color:var(--ink-dim);font-size:12px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:0 0 12px;font-size:12.5px;color:var(--muted)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 
-/* revenants */
-.agent{padding:13px 18px;border-bottom:1px solid var(--line);cursor:pointer;
-  transition:background .15s}
-.agent:last-child{border-bottom:0}
-.agent:hover,.agent.sel{background:var(--panel2)}
-.agent:focus-visible{outline:2px solid var(--stranger);outline-offset:-2px}
-.agent-top{display:flex;align-items:baseline;gap:10px}
-.agent-name{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.n{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums}
-.agent-sub{color:var(--ink-faint);font-size:12px;margin-top:3px}
-.tag{font-size:10.5px;padding:1px 6px;border-radius:2px;border:1px solid currentColor;
-  white-space:nowrap}
+.grid{display:grid;grid-template-columns:1.4fr .6fr;gap:12px}
+@media (max-width:960px){.grid{grid-template-columns:1fr}}
 
-/* entonnoir */
-.funnel{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);
-  border:1px solid var(--line);border-radius:3px;margin-top:22px;overflow:hidden}
-.step{background:var(--panel);padding:16px 18px}
-.step .v{font-size:26px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.step .k{color:var(--ink-dim);font-size:12.5px;margin-top:2px}
-.step .s{color:var(--ink-faint);font-size:11.5px;margin-top:6px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.ph{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.ph h2{margin:0;font-size:15px;font-weight:650}
+.ph .sub{color:var(--faint);font-size:12.5px}
+.ph .sp{margin-left:auto}
 
-.empty{padding:34px 18px;color:var(--ink-faint);font-size:13.5px}
-.banner{background:color-mix(in srgb,var(--probe) 14%,transparent);
-  border:1px solid color-mix(in srgb,var(--probe) 45%,transparent);
-  color:var(--ink);padding:10px 14px;border-radius:3px;font-size:13px;margin-bottom:22px}
-.tip{position:fixed;pointer-events:none;background:var(--panel);border:1px solid var(--line);
-  border-radius:3px;padding:8px 11px;font-size:12px;z-index:9;opacity:0;transition:opacity .12s;
-  max-width:340px;box-shadow:0 6px 24px rgba(0,0,0,.35)}
+.filters{display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.chip{background:transparent;border:1px solid var(--line);color:var(--muted);
+  border-radius:999px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
+.chip:hover{color:var(--text);border-color:var(--faint)}
+.chip.on{background:var(--card2);color:var(--text);border-color:var(--faint);font-weight:650}
+
+.feed{max-height:560px;overflow-y:auto}
+.row{display:grid;grid-template-columns:52px 108px minmax(0,1fr) auto;gap:10px;
+  align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.row:hover,.row.sel{background:var(--card2)}
+.row.new{animation:slide .4s ease-out;background:rgba(46,229,157,.08)}
+@keyframes slide{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.row.dim{opacity:.25}
+.t{color:var(--faint);font-size:12.5px}
+.who{min-width:0}
+.who .ua{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.who .sub{font-size:12px;color:var(--faint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rt{text-align:right;font-size:12.5px;color:var(--muted)}
+.rt .amt{display:block;color:var(--green);font-weight:650;margin-top:1px}
+
+.detail{padding:14px;border-top:1px solid var(--line);background:var(--card2);font-size:13px}
+.detail dl{display:grid;grid-template-columns:96px 1fr;gap:6px 12px;margin:0}
+.detail dt{color:var(--faint)}
+.detail dd{margin:0;word-break:break-word}
+.detail pre{margin:10px 0 0;padding:10px;background:var(--bg);border:1px solid var(--line);
+  border-radius:8px;overflow:auto;max-height:160px;white-space:pre-wrap;word-break:break-word;font-size:12px}
+
+.agents{max-height:420px;overflow-y:auto}
+.agent{padding:11px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.agent:hover,.agent.sel{background:var(--card2)}
+.agent-top{display:flex;gap:8px;align-items:baseline}
+.agent-name{font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent .cnt{margin-left:auto;font-weight:700;font-variant-numeric:tabular-nums}
+.agent-sub{font-size:12px;color:var(--faint);margin-top:3px}
+
+.split{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px 14px;border-top:1px solid var(--line)}
+.split .b .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.split .b .k{font-size:11.5px;color:var(--muted)}
+
+.lanes{padding:8px 14px 12px}
+.lane{display:grid;grid-template-columns:110px 1fr 40px;gap:10px;align-items:center;
+  padding:8px 0;border-bottom:1px solid var(--line)}
+.lane:last-child{border-bottom:0}
+.lane .name{font-weight:600;font-size:13px}
+.lane .price{font-size:11px;color:var(--faint)}
+.track{position:relative;height:28px;background:var(--bg);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.tick{position:absolute;bottom:0;width:2px;border-radius:1px 1px 0 0;opacity:.9}
+.lane .n{text-align:right;font-weight:650;font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted)}
+
+.performance{margin-top:12px}
+.table-wrap{overflow:auto}
+.perf{width:100%;border-collapse:collapse;font-size:12.5px}
+.perf th,.perf td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+.perf th{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.perf th:first-child,.perf td:first-child{text-align:left}
+.perf tbody tr:hover{background:var(--card2)}
+.perf .route-name{font-weight:650;color:var(--text)}
+.perf .hot{color:var(--amber);font-weight:700}
+.perf .won{color:var(--green);font-weight:700}
+.perf .bad{color:var(--red)}
+.healthline{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.healthline b{color:var(--text)}
+
+.empty{padding:28px 14px;color:var(--faint);font-size:13.5px;text-align:center}
+.banner{background:var(--amber-dim);border:1px solid rgba(255,176,32,.35);
+  color:var(--text);padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:12px}
+.tip{position:fixed;pointer-events:none;background:var(--card);border:1px solid var(--line);
+  border-radius:8px;padding:8px 11px;font-size:12px;z-index:9;opacity:0;max-width:320px;
+  box-shadow:0 12px 32px rgba(0,0,0,.5)}
 .tip.on{opacity:1}
-button.clear{background:none;border:1px solid var(--line);color:var(--ink-dim);
-  border-radius:2px;padding:3px 9px;font:inherit;font-size:12px;cursor:pointer;margin-left:auto}
-button.clear:hover{color:var(--ink);border-color:var(--ink-faint)}
-.crumbs{font-size:.85em;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--line)}
-.crumbs a{color:var(--paid);text-decoration:none}
-.crumbs a:hover{text-decoration:underline}
-.crumbs .current{color:var(--ink);font-weight:600}
+button.ghost{background:none;border:1px solid var(--line);color:var(--muted);
+  border-radius:999px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer}
+button.ghost:hover{color:var(--text)}
+.toast{position:fixed;right:16px;bottom:16px;background:var(--green);color:#042015;
+  font-weight:700;padding:12px 16px;border-radius:12px;z-index:30;display:none;
+  box-shadow:0 10px 36px rgba(46,229,157,.4)}
+.toast.on{display:block}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-<nav class="crumbs"><a href="/admin">Admin</a> · <span class="current">Poste d'écoute</span> · <a href="/admin/usine">Usine</a></nav>
-<header>
-  <h1><span class="pulse" id="pulse"></span>Poste d'écoute</h1>
+<nav class="nav">
+  <a href="/admin">Admin</a> · <span class="here">Live</span> · <a href="/admin/missions">Missions</a> · <a href="/admin/usine">Usine</a>
+</nav>
+
+<div class="head">
+  <h1>Trafic live
+    <span class="pill" id="pill"><span class="dot"></span><span id="pillTxt">EN DIRECT</span></span>
+  </h1>
   <div class="meta">
-    <div>réseau <span class="net mono" id="net">eip155:8453</span></div>
+    <div>Base <b class="mono" id="net">eip155:8453</b></div>
     <div id="stamp">—</div>
   </div>
-</header>
-
-<div id="banner"></div>
-
-<p class="lead" id="lead">Chaque trait est une requête reçue sur les dernières 24 heures. Les scanners d'annuaire arrivent à intervalle régulier — un agent réel arrive en grappes irrégulières. C'est la différence qu'on cherche.</p>
-
-<div class="bands" id="bands"></div>
-<div class="legend">
-  <span><i class="sw" style="background:var(--probe)"></i>scanner d'annuaire</span>
-  <span><i class="sw" style="background:var(--stranger)"></i>visiteur inconnu</span>
-  <span><i class="sw" style="background:var(--paid)"></i>appel payé</span>
-  <span><i class="sw" style="background:var(--err)"></i>règlement échoué</span>
-  <span style="color:var(--ink-faint)">gauche = il y a 24 h · droite = maintenant</span>
 </div>
 
-<div class="cols">
-  <div class="card">
-    <div class="card-h"><strong>Arrivées</strong><span id="feedn"></span></div>
+<div id="banner"></div>
+<div class="hero" id="hero"></div>
+<div class="kpis" id="kpis"></div>
+<div class="decision-grid">
+  <div class="panel">
+    <div class="ph"><h2>Entonnoir commercial</h2><span class="sub">24 h · scanners exclus après l’entrée</span></div>
+    <div class="funnel" id="funnel"></div>
+  </div>
+  <div class="panel action" id="action"></div>
+</div>
+<div class="ticker" id="ticker">
+  <span class="badge b-scan">…</span>
+  <div class="msg"><div class="line1">En attente d’événements…</div><div class="line2">rafraîchi toutes les 3 s</div></div>
+  <div class="when mono"></div>
+</div>
+
+<div class="legend">
+  <span><i style="background:var(--green)"></i>payé — argent reçu</span>
+  <span><i style="background:var(--amber)"></i>intéressé — a vu le 402, n’a pas payé</span>
+  <span><i style="background:var(--slate)"></i>scanner — bruit auto (masqué par défaut)</span>
+  <span><i style="background:var(--blue)"></i>visiteur nouveau</span>
+  <span><i style="background:var(--red)"></i>erreur</span>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <div class="ph">
+      <h2>Flux</h2>
+      <span class="sub" id="feedn"></span>
+      <span class="sp"></span>
+      <button class="ghost" id="clear" hidden>tout afficher</button>
+    </div>
+    <div class="filters" id="kindFilters"></div>
+    <div class="filters" id="routeFilters"></div>
     <div class="feed" id="feed"></div>
+    <div class="detail" id="detail" hidden></div>
   </div>
 
   <div>
-    <div class="card">
-      <div class="card-h"><strong>Qui revient</strong>
-        <button class="clear" id="clear" hidden>tout afficher</button></div>
-      <div id="agents"></div>
+    <div class="panel" style="margin-bottom:12px">
+      <div class="ph"><h2>Qui frappe</h2><span class="sub">24 h</span></div>
+      <div class="agents" id="agents"></div>
+      <div class="split">
+        <div class="b"><div class="v" id="f1">0</div><div class="k">identités</div></div>
+        <div class="b"><div class="v" id="f2">0</div><div class="k">hors scanners</div></div>
+        <div class="b"><div class="v" id="f3">0</div><div class="k">payeurs</div></div>
+      </div>
     </div>
-    <div class="funnel">
-      <div class="step"><div class="v" id="f1">0</div><div class="k">visiteurs</div>
-        <div class="s">identités distinctes vues</div></div>
-      <div class="step"><div class="v" id="f2">0</div><div class="k">revenus</div>
-        <div class="s">passés plus d'une fois</div></div>
-      <div class="step"><div class="v" id="f3">0</div><div class="k">payeurs</div>
-        <div class="s">ont réglé au moins un appel</div></div>
+    <div class="panel">
+      <div class="ph"><h2>Routes actives</h2><span class="sub">uniquement avec trafic</span></div>
+      <div class="lanes" id="lanes"></div>
     </div>
+  </div>
+</div>
+
+<div class="panel performance">
+  <div class="ph">
+    <h2>Performance commerciale par service</h2>
+    <span class="sub">24 h · ce qui attire, convertit ou échoue</span>
+    <span class="sp"></span>
+    <span class="healthline" id="healthline"></span>
+  </div>
+  <div class="table-wrap">
+    <table class="perf">
+      <thead><tr><th>Service</th><th>Prix</th><th>Trafic</th><th>Qualifié</th><th>402 utiles</th><th>Payés</th><th>Erreurs</th><th>Conversion</th><th>Latence</th></tr></thead>
+      <tbody id="routePerf"></tbody>
+    </table>
   </div>
 </div>
 
 </div>
 <div class="tip" id="tip"></div>
+<div class="toast" id="toast">Paiement reçu !</div>
 
 <script>
-const KNOWN=[
- [/x402-list/i,'x402-list'],[/forgemesh/i,'ForgeMesh'],[/x402scan|poncho/i,'x402scan'],
- [/circle/i,'Circle'],[/coinbase|cdp/i,'Coinbase'],[/ampersend/i,'ampersend'],
- [/uptime|monitor|pingdom/i,'surveillance']
+/* ——— helpers ——— */
+const money = n => {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return '0';
+  const digits = Math.abs(x) > 0 && Math.abs(x) < 0.001 ? 6 : 4;
+  return x.toFixed(digits).replace(/0+$/,'').replace(/\.$/,'') || '0';
+};
+const pct = (n,d) => d ? ((100*n/d).toFixed(n ? 1 : 0)+'%') : '—';
+const fmtT = d => d.toISOString().slice(11,16);
+const fmtTs = d => d.toISOString().replace('T',' ').slice(0,19)+' UTC';
+const esc = s => String(s??'').replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+const short = a => a&&a.length>12 ? a.slice(0,6)+'…'+a.slice(-4) : (a||'—');
+const ago = ms => {
+  const s = Math.max(0, Math.round(ms/1000));
+  if (s < 4) return 'à l’instant';
+  if (s < 60) return 'il y a '+s+' s';
+  return 'il y a '+Math.round(s/60)+' min';
+};
+const pretty = b => { if(!b) return ''; try{return JSON.stringify(JSON.parse(b),null,2)}catch(_){return String(b)} };
+
+const SCAN_RE = [
+  /x402-list/i, /forgemesh/i, /x402scan|poncho/i, /402index/i,
+  /autonomous-directory/i, /directory.?probe/i, /ampersend/i,
+  /nohumans/i, /uptime|pingdom|healthcheck|monitor/i,
+  /\bprobe\b/i, /\bscanner\b/i, /\bcrawler\b/i, /\bbot\b/i,
+  /AgentIndex-probe/i, /circle.*scan/i, /coinbase.*crawl/i,
+  /^node$/i, /^conform\//i, /^ops-check\//i, /^post-cut\//i,
+  /^live-dashboard-smoke\//i, /^discover-post-probe\//i,
+  /^hermes-contact-discovery\//i, /^x402watch\//i
 ];
-const GENERIC=/^(go-http-client|python-httpx|python-requests|curl|node|axios|okhttp|got|undici)/i;
+const GENERIC = /^(go-http-client|python-httpx|python-requests|curl\/|node-fetch|axios|okhttp|got\/|undici)/i;
 
-function classify(ua,paid,failed){
-  if(failed) return {k:'err',label:'règlement échoué',col:'var(--err)'};
-  if(paid)   return {k:'paid',label:'a payé',col:'var(--paid)'};
-  for(const [re,name] of KNOWN) if(re.test(ua)) return {k:'probe',label:name,col:'var(--probe)'};
-  if(GENERIC.test(ua)) return {k:'stranger',label:'client anonyme',col:'var(--stranger)'};
-  return {k:'stranger',label:'inconnu',col:'var(--stranger)'};
+function isScanner(ua){
+  return SCAN_RE.some(re => re.test(ua||''));
 }
-const fmtT=d=>d.toISOString().slice(11,16);
-const esc=s=>String(s??'').replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
-const shortAddr=a=>a&&a.length>10?a.slice(0,6)+'…'+a.slice(-4):a;
 
-/* ---- normalisation : accepte plusieurs formes de /admin/data.json ---- */
+function classify(e){
+  if (e.failed || e.status==='payment_failed')
+    return {k:'err', badge:'b-err', label:'erreur paiement'};
+  if (isScanner(e.ua))
+    return {k:'scan', badge:'b-scan', label:'scanner'};
+  if (e.status==='error' || e.status==='capacity_reached')
+    return {k:'err', badge:'b-err', label: e.status==='capacity_reached'?'capacité':'erreur'};
+  if (e.paid || e.status==='paid')
+    return {k:'paid', badge:'b-paid', label:'payé'};
+  if (e.status==='unpaid')
+    return {k:'wait', badge:'b-wait', label:'pas payé'};
+  if (GENERIC.test(e.ua||''))
+    return {k:'visit', badge:'b-visit', label:'client'};
+  return {k:'visit', badge:'b-visit', label:'visiteur'};
+}
+
 function normalise(j){
-  const out={network:j.network||j.net||'eip155:8453',
-             updated:j.updated_at||j.as_of||j.updated||null,
-             routes:{}, events:[]};
-  const rt=j.routes||j.calls_by_route||j.appels||{};
-  if(Array.isArray(rt)) rt.forEach(r=>out.routes[r.route||r.name]={price:r.price});
-  else Object.keys(rt).forEach(k=>out.routes[k]={price:(rt[k]||{}).price});
-  const src=j.events||j.requests||j.intents||j.unconverted||j.recent||[];
-  src.forEach(e=>{
-    const ts=e.ts||e.time||e.timestamp||e.created_at;
-    const payer=e.payer||e.frm||null;
-    // Le client x402 officiel n'envoie pas de User-Agent - un payeur se
-    // reconnait par son wallet, pas par un en-tete HTTP absent.
-    const rawUa=(e.user_agent||e.ua||'').trim();
+  const revenues = (j.revenue_usdc && typeof j.revenue_usdc === 'object')
+    ? j.revenue_usdc : {'24h': Number(j.revenue_usdc)||0, '7d':0, '30d':Number(j.revenue_usdc)||0};
+  const buyerData = (j.buyers && typeof j.buyers === 'object')
+    ? j.buyers : {distinct:Number(j.buyers)||0,returning:0,return_rate:0};
+  const out = {
+    network: j.network || 'eip155:8453',
+    updated: j.updated_at || j.generated_at || null,
+    lastPayment: j.last_payment_at || null,
+    revenue: Number(revenues['30d']) || 0,
+    revenues: {
+      d1:Number(revenues['24h'])||0,
+      d7:Number(revenues['7d'])||0,
+      d30:Number(revenues['30d'])||0
+    },
+    buyers: Number(buyerData.distinct)||0,
+    returning: Number(buyerData.returning)||0,
+    returnRate: Number(buyerData.return_rate)||0,
+    availability: j.availability_7d_pct,
+    commercial: j.commercial || {},
+    chain: j.chain || {},
+    routeStats: j.calls_by_route || {},
+    paymentFailures: j.payment_failures_recent || [],
+    routes: {}, events: [], stats: j.stats_24h || null
+  };
+  const rt = j.routes || j.calls_by_route || {};
+  if (Array.isArray(rt)) rt.forEach(r => out.routes[r.route||r.name] = {price:r.price,methods:r.methods||[]});
+  else Object.keys(rt).forEach(k => out.routes[k] = {
+    price:(rt[k]||{}).price, methods:(rt[k]||{}).methods||[],
+    serviceName:(rt[k]||{}).service_name
+  });
+
+  (j.events || []).forEach(e => {
+    const ts = e.ts || e.time || e.timestamp;
+    const payer = e.payer || null;
+    const ua = (e.user_agent || e.ua || '').trim() || (payer ? short(payer) : '—');
+    const status = e.status || (e.paid ? 'paid' : 'unpaid');
     out.events.push({
-      t:new Date(ts), route:(e.route||e.path||'').replace(/^\//,''),
-      ua: rawUa || (payer ? shortAddr(payer) : '—'), body:e.body||e.corps||'',
-      paid:!!(e.paid||e.status==='paid'), failed:!!(e.settlement_failed||e.status==='settlement_failed'),
-      payer, amount:e.amount||null
+      t: new Date(ts),
+      route: (e.route||'').replace(/^\//,''),
+      method: e.method || 'POST',
+      status,
+      ua,
+      body: e.body || '',
+      error: e.error_reason || e.error || null,
+      latency: e.latency_ms ?? null,
+      paid: !!(e.paid || status==='paid'),
+      failed: !!(e.settlement_failed || status==='payment_failed'),
+      payer,
+      amount: e.amount ?? e.amount_usdc ?? null,
+      key: `${ts}|${e.route}|${status}|${ua}|${e.amount??''}`
     });
   });
-  out.events=out.events.filter(e=>!isNaN(+e.t)).sort((a,b)=>a.t-b.t);
-  if(!Object.keys(out.routes).length)
-    out.events.forEach(e=>out.routes[e.route]=out.routes[e.route]||{});
+  out.events = out.events.filter(e => !isNaN(+e.t)).sort((a,b) => a.t - b.t);
   return out;
 }
 
-/* ---- démonstration, calquée sur le trafic réellement observé ---- */
-function demo(){
-  const now=Date.now(), ev=[], R=['search','translate','jobs'];
-  const cron=(ua,everyMin,jit)=>{for(let t=now-24*36e5;t<now;t+=everyMin*6e4)
-    R.forEach((r,i)=>ev.push({ts:new Date(t+i*900+Math.random()*jit).toISOString(),route:r,user_agent:ua}));};
-  cron('x402-list-monitor/1.0 (+https://x402-list.com)',95,4000);
-  cron('forgemesh-scan-mcp/0.1',150,6000);
-  cron('Go-http-client/1.1',70,9000);
-  for(let i=0;i<9;i++){const t=now-Math.random()*8*36e5;
-    ev.push({ts:new Date(t).toISOString(),route:R[i%3],user_agent:'python-httpx/0.28.1'});}
-  [40,38,37,14,13].forEach(m=>ev.push({ts:new Date(now-m*6e4).toISOString(),
-    route:R[Math.floor(Math.random()*3)],user_agent:'node',body:'{"query":"..."}'}));
-  return {network:'eip155:8453',updated:new Date().toISOString(),
-          routes:{search:{price:'$0.10'},translate:{price:'$0.10'},jobs:{price:'$1.00'}},events:ev};
-}
-
-let DATA=null, SEL=null;
-
-function render(d,isDemo){
-  document.getElementById('net').textContent=d.network;
-  document.getElementById('stamp').textContent=
-    'mis à jour '+(d.updated?new Date(d.updated).toISOString().slice(11,19)+' UTC':'—');
-  document.getElementById('banner').innerHTML = isDemo
-    ? '<div class="banner">Mode démonstration — cette page n\'a pas trouvé <span class="mono">/admin/data.json</span>. Les arrivées affichées reproduisent le trafic réellement observé, elles ne sont pas en direct.</div>' : '';
-
-  const cutoff=Date.now()-24*36e5;
-  const ev=d.events.filter(e=>+e.t>=cutoff);
-
-  // bandes
-  const bands=document.getElementById('bands');
-  bands.innerHTML='';
-  const names=Object.keys(d.routes).length?Object.keys(d.routes):['search','translate','jobs'];
-  names.forEach(name=>{
-    const mine=ev.filter(e=>e.route===name);
-    const el=document.createElement('div'); el.className='band';
-    el.innerHTML=`<div class="band-head"><span class="band-name">/${esc(name)}</span>
-      <span class="band-price mono">${esc((d.routes[name]||{}).price||'')}</span>
-      <span class="band-count">${mine.length} requête${mine.length>1?'s':''}</span></div>
-      <div class="track" data-route="${esc(name)}"></div>
-      <div class="hours"><span>−24 h</span><span>−12 h</span><span>maintenant</span></div>`;
-    const tr=el.querySelector('.track');
-    mine.forEach(e=>{
-      const c=classify(e.ua,e.paid,e.failed);
-      const x=((+e.t-cutoff)/(24*36e5))*100;
-      const h=e.paid?100:(c.k==='stranger'?66:40);
-      const t=document.createElement('i');
-      t.className='tick'; t.dataset.ua=e.ua;
-      t.style.cssText=`left:${x.toFixed(3)}%;height:${h}%;background:${c.col}`;
-      t.addEventListener('mouseenter',ev2=>tip(ev2,
-        `<b>${esc(c.label)}</b><br><span class="mono">${esc(e.ua)}</span><br>
-         ${fmtT(e.t)} UTC · /${esc(e.route)}${e.body?'<br><span class="mono">'+esc(String(e.body).slice(0,80))+'</span>':''}`));
-      t.addEventListener('mouseleave',hideTip);
-      tr.appendChild(t);
+const PREF = ['x402-echo','search','wallet-intelligence','wallet-balance','gas-price','can-pay','probe','weather','crypto','news','discover',
+  'fact-check','web-read','summarize','extract','pdf','translate','jobs'];
+function routeOrder(routes, withTraffic){
+  return Object.keys(routes).filter(r => !withTraffic || withTraffic.has(r))
+    .sort((a,b) => {
+      const ia = PREF.indexOf(a), ib = PREF.indexOf(b);
+      if (ia>=0 || ib>=0) return (ia<0?999:ia) - (ib<0?999:ib);
+      return a.localeCompare(b);
     });
-    bands.appendChild(el);
+}
+
+let DATA=null, SEL=null, ROUTE=null, KIND='interesting', SEL_EV=null;
+let SEEN=new Set(), LAST_FETCH=0, OK=true;
+
+function render(d, demo){
+  document.getElementById('net').textContent = d.network;
+  LAST_FETCH = Date.now();
+  tickClock();
+
+  document.getElementById('banner').innerHTML = demo
+    ? '<div class="banner">Mode démo — données fictives (API admin inaccessible).</div>' : '';
+
+  const cutoff = Date.now() - 24*36e5;
+  const all = d.events.filter(e => +e.t >= cutoff);
+  const st = d.stats || {};
+  const bySt = st.by_status || {};
+  const paidN = bySt.paid || 0;
+  const unpaidN = bySt.unpaid || 0;
+  const usdc24 = Number.isFinite(Number(st.paid_usdc)) ? Number(st.paid_usdc) : 0;
+  const hasPay = paidN > 0 || d.revenue > 0;
+
+  const scanN = all.filter(e => classify(e).k==='scan').length;
+  const interestN = all.filter(e => classify(e).k==='wait').length;
+  const visitN = all.filter(e => classify(e).k==='visit').length;
+  const failedN = all.filter(e => classify(e).k==='err').length;
+  const qualifiedN = interestN + visitN + paidN + failedN;
+  const attemptedN = paidN + all.filter(e => e.status==='payment_failed').length;
+  const conversion = pct(paidN, interestN + attemptedN);
+  const scanShare = pct(scanN, all.length);
+
+  // hero
+  document.getElementById('hero').innerHTML = `
+    <div class="hero ${hasPay?'ok':'wait'}">
+      <div class="lbl">État commercial</div>
+      <div class="big">${hasPay ? 'Revenu réel encaissé' : '0 paiement réel — conversion bloquée'}</div>
+      <div class="hint">${hasPay
+        ? 'Le Bazaar CDP peut maintenant indexer les routes réglées.'
+        : `${interestN} intention${interestN===1?'':'s'} non-scanner ont vu un 402. L’offre d’entrée commence à $${money(d.commercial.minimum_price_usdc||.0001)}.`}</div>
+    </div>
+    <div>
+      <div class="lbl">Revenu 30 jours</div>
+      <div class="num ${d.revenues.d30>0?'':'zero'} mono">$${money(d.revenues.d30)}</div>
+      <div class="hint" style="margin-top:8px">24 h $${money(d.revenues.d1)} · 7 j $${money(d.revenues.d7)}</div>
+    </div>
+    <div>
+      <div class="lbl">Acheteurs on-chain</div>
+      <div class="num ${d.buyers>0?'':'zero'} mono">${d.buyers}</div>
+      <div class="hint" style="margin-top:8px">${d.returning} récurrent${d.returning===1?'':'s'} · dernier ${d.lastPayment?ago(Date.now()-new Date(d.lastPayment)):'jamais'}</div>
+    </div>`;
+
+  document.getElementById('kpis').innerHTML = `
+    <div class="kpi"><div class="n">${st.total ?? all.length}</div><div class="l">requêtes · 24 h</div></div>
+    <div class="kpi a"><div class="n">${interestN}</div><div class="l">402 qualifiés · hors scanners</div></div>
+    <div class="kpi g"><div class="n">${conversion}</div><div class="l">conversion 402 → payé</div></div>
+    <div class="kpi"><div class="n">${scanShare}</div><div class="l">bruit scanners</div></div>`;
+
+  document.getElementById('funnel').innerHTML = `
+    <div class="fstep"><div class="v">${all.length}</div><div class="k">requêtes reçues</div><div class="rate">100% entrée</div></div>
+    <div class="fstep"><div class="v">${scanN}</div><div class="k">scanners écartés</div><div class="rate">${scanShare} du trafic</div></div>
+    <div class="fstep ${qualifiedN?'warn':''}"><div class="v">${qualifiedN}</div><div class="k">signaux qualifiés</div><div class="rate">${pct(qualifiedN,all.length)} de l’entrée</div></div>
+    <div class="fstep ${attemptedN?'warn':''}"><div class="v">${attemptedN}</div><div class="k">paiements tentés</div><div class="rate">${pct(attemptedN,qualifiedN)} des qualifiés</div></div>
+    <div class="fstep ${paidN?'good':'warn'}"><div class="v">${paidN}</div><div class="k">paiements réussis</div><div class="rate">${conversion} des 402 utiles</div></div>`;
+
+  let actionTitle, actionCopy;
+  if (d.paymentFailures.length) {
+    actionTitle = 'Réparer le règlement tenté';
+    actionCopy = `${d.paymentFailures.length} paiement(s) ont atteint le serveur puis échoué. C’est la priorité absolue.`;
+  } else if (!hasPay && interestN) {
+    actionTitle = 'Campagne 24 h : Search à $0.0001';
+    actionCopy = `Il existe ${interestN} demande(s) hors scanners mais aucune signature. /search livre les pages Markdown à 1/100 du prix Tavily x402 pour provoquer le premier règlement.`;
+  } else if (!hasPay) {
+    actionTitle = 'Campagne 24 h : Search à $0.0001';
+    actionCopy = 'Diffuser la recherche avec contenu complet auprès des wallets x402 financés. Le premier règlement débloque Bazaar ; davantage de crawlers ne suffit pas.';
+  } else {
+    actionTitle = 'Doubler la route gagnante';
+    actionCopy = 'Identifier le service payé, améliorer sa rétention et concentrer la distribution dessus avant d’élargir encore le catalogue.';
+  }
+  document.getElementById('action').innerHTML = `
+    <div class="eyebrow">Action prioritaire</div>
+    <div class="title">${esc(actionTitle)}</div>
+    <div class="copy">${esc(actionCopy)}</div>
+    <div class="signal"><span class="dot" style="color:${hasPay?'var(--green)':'var(--amber)'}"></span>
+      ${d.commercial.unique_services||Object.keys(d.routes).length} services · ${d.commercial.paid_http_routes||'—'} routes HTTP · disponibilité ${d.availability==null?'—':pct(d.availability,1)}
+    </div>`;
+
+  // ticker = latest interesting, else latest any
+  const prefer = [...all].reverse().find(e => classify(e).k !== 'scan') || all[all.length-1];
+  const tk = document.getElementById('ticker');
+  if (prefer) {
+    const c = classify(prefer);
+    tk.innerHTML = `
+      <span class="badge ${c.badge}">${esc(c.label)}</span>
+      <div class="msg">
+        <div class="line1 mono">/${esc(prefer.route)} · ${esc(prefer.ua)}</div>
+        <div class="line2">${prefer.paid ? 'Paiement reçu $'+money(prefer.amount||0) :
+          (c.k==='scan' ? 'Bruit automatique — ignoré pour l’objectif' :
+           c.k==='wait' ? 'A vu le prix, n’a pas encore payé' :
+           c.k==='err' ? (prefer.error||'erreur') : 'Passage enregistré')}</div>
+      </div>
+      <div class="when mono">${fmtT(prefer.t)} UTC<br>${ago(Date.now()-prefer.t)}</div>`;
+  }
+
+  // filter events
+  let ev = all.slice();
+  if (KIND === 'interesting') ev = ev.filter(e => classify(e).k !== 'scan');
+  else if (KIND === 'paid') ev = ev.filter(e => e.paid);
+  else if (KIND === 'wait') ev = ev.filter(e => classify(e).k === 'wait');
+  else if (KIND === 'scan') ev = ev.filter(e => classify(e).k === 'scan');
+  else if (KIND === 'err') ev = ev.filter(e => classify(e).k === 'err');
+  if (ROUTE) ev = ev.filter(e => e.route === ROUTE);
+
+  const traffic = new Set(all.map(e => e.route));
+  const names = routeOrder(d.routes, traffic);
+
+  // kind filters
+  const kf = document.getElementById('kindFilters');
+  const kinds = [
+    ['interesting', `utiles (${interestN+visitN+paidN})`],
+    ['', `tout (${all.length})`],
+    ['wait', `pas payé (${interestN})`],
+    ['paid', `payé (${paidN})`],
+    ['scan', `scanners (${scanN})`],
+    ['err', 'erreurs']
+  ];
+  kf.innerHTML = kinds.map(([k,lab]) =>
+    `<button class="chip${(KIND||'')===k?' on':''}" data-k="${k}">${lab}</button>`
+  ).join('');
+  kf.querySelectorAll('.chip').forEach(btn => btn.onclick = () => {
+    KIND = btn.dataset.k; SEL_EV = null; render(DATA, demo);
   });
 
-  // flux
-  const feed=document.getElementById('feed'), last=ev.slice(-60).reverse();
-  document.getElementById('feedn').textContent=ev.length+' sur 24 h';
-  feed.innerHTML = last.length? last.map(e=>{
-    const c=classify(e.ua,e.paid,e.failed);
-    return `<div class="row" data-ua="${esc(e.ua)}">
+  const rf = document.getElementById('routeFilters');
+  const rChips = [['','toutes'], ...names.map(n => [n,'/'+n])];
+  rf.innerHTML = rChips.map(([k,lab]) =>
+    `<button class="chip${(ROUTE||'')===k?' on':''}" data-r="${k}">${lab}</button>`
+  ).join('');
+  rf.querySelectorAll('.chip').forEach(btn => btn.onclick = () => {
+    ROUTE = btn.dataset.r || null; SEL_EV = null; render(DATA, demo);
+  });
+
+  const last = ev.slice(-140).reverse();
+  const fresh = [];
+  last.forEach(e => { if (SEEN.size && !SEEN.has(e.key)) fresh.push(e.key); });
+  const newPaid = last.filter(e => e.paid && !SEEN.has(e.key));
+  last.forEach(e => SEEN.add(e.key));
+  if (newPaid.length) {
+    const t = document.getElementById('toast');
+    t.textContent = newPaid.length > 1
+      ? newPaid.length + ' paiements !'
+      : 'Paiement reçu — $' + money(newPaid[0].amount || 0.001);
+    t.classList.add('on');
+    setTimeout(() => t.classList.remove('on'), 5000);
+  }
+
+  document.getElementById('feedn').textContent =
+    last.length + ' · filtre « ' + (kinds.find(x=>x[0]===(KIND||''))||['','tout'])[1] + ' »';
+
+  const feed = document.getElementById('feed');
+  feed.innerHTML = last.length ? last.map((e,i) => {
+    const c = classify(e);
+    const body = e.body ? esc(String(e.body).replace(/\s+/g,' ').slice(0,64)) : '';
+    const amt = e.amount != null ? '$'+money(e.amount) : '';
+    return `<div class="row${fresh.includes(e.key)?' new':''}" data-i="${i}" data-ua="${esc(e.ua)}">
       <span class="t mono">${fmtT(e.t)}</span>
-      <span class="who"><i class="dotmark" style="background:${c.col}"></i><span class="mono">${esc(e.ua)}</span></span>
-      <span class="route">/${esc(e.route)}</span></div>`;}).join('')
-    : `<div class="empty">Rien reçu sur 24 heures. Dès qu'un agent appelle une route, il apparaît ici.</div>`;
+      <span><span class="badge ${c.badge}">${esc(c.label)}</span></span>
+      <span class="who">
+        <div class="ua mono">${esc(e.ua)}</div>
+        <div class="sub">${e.payer?('payeur '+esc(short(e.payer))):''}${e.payer&&body?' · ':''}${body}</div>
+      </span>
+      <span class="rt mono">/${esc(e.route)}${amt?`<span class="amt">${amt}</span>`:''}</span>
+    </div>`;
+  }).join('') : `<div class="empty">${KIND==='interesting'
+    ? 'Aucun passage « utile » — que des scanners. Clique « tout » pour les voir.'
+    : 'Rien sur 24 h pour ce filtre.'}</div>`;
 
-  // revenants
-  const by={};
-  ev.forEach(e=>{(by[e.ua]=by[e.ua]||{n:0,first:e.t,last:e.t,routes:new Set(),paid:0,failed:0,ua:e.ua});
-    const a=by[e.ua]; a.n++; a.last=e.t; if(+e.t<+a.first)a.first=e.t;
-    a.routes.add(e.route); if(e.paid)a.paid++; if(e.failed)a.failed++;});
-  const list=Object.values(by).sort((a,b)=>(b.paid-a.paid)||(b.n-a.n));
-  const box=document.getElementById('agents');
-  box.innerHTML = list.length? list.map(a=>{
-    const c=classify(a.ua,a.paid,a.failed);
-    const span=Math.round((+a.last-+a.first)/6e4);
-    return `<div class="agent" tabindex="0" data-ua="${esc(a.ua)}">
-      <div class="agent-top"><span class="agent-name mono">${esc(a.ua)}</span>
-        <span class="n">${a.n}</span></div>
-      <div class="agent-sub"><span class="tag" style="color:${c.col}">${esc(c.label)}</span>
-        &nbsp;${a.routes.size} route${a.routes.size>1?'s':''} · vu sur ${span>90?Math.round(span/60)+' h':span+' min'}
-        · dernier ${fmtT(a.last)}</div></div>`;}).join('')
-    : `<div class="empty">Personne encore. Les scanners d'annuaire arrivent en général dans l'heure qui suit une inscription.</div>`;
-
-  document.getElementById('f1').textContent=list.length;
-  document.getElementById('f2').textContent=list.filter(a=>a.n>1).length;
-  document.getElementById('f3').textContent=list.filter(a=>a.paid>0).length;
-
-  box.querySelectorAll('.agent').forEach(el=>{
-    const go=()=>select(el.dataset.ua===SEL?null:el.dataset.ua);
-    el.addEventListener('click',go);
-    el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go();}});
+  feed.querySelectorAll('.row').forEach(el => {
+    el.onclick = () => {
+      const e = last[+el.dataset.i];
+      SEL_EV = e; showDetail(e);
+      feed.querySelectorAll('.row').forEach(r => r.classList.toggle('sel', r===el));
+    };
   });
-  select(SEL,true);
+  if (SEL_EV) {
+    const still = last.find(e => e.key === SEL_EV.key);
+    if (still) showDetail(still);
+    else { SEL_EV=null; document.getElementById('detail').hidden=true; }
+  } else document.getElementById('detail').hidden = true;
+
+  // agents — prefer non-scanners on top
+  const by = {};
+  all.forEach(e => {
+    const a = (by[e.ua] = by[e.ua] || {n:0, first:e.t, last:e.t, routes:new Set(), paid:0, unpaid:0, ua:e.ua, failed:0});
+    a.n++; a.last = e.t; if (+e.t < +a.first) a.first = e.t;
+    a.routes.add(e.route);
+    if (e.paid) a.paid++;
+    if (e.failed) a.failed++;
+    if (e.status==='unpaid') a.unpaid++;
+  });
+  const list = Object.values(by).sort((a,b) => {
+    const as = isScanner(a.ua)?0:1, bs = isScanner(b.ua)?0:1;
+    if (as !== bs) return bs - as;
+    return (b.paid-a.paid) || (b.n-a.n);
+  });
+  const box = document.getElementById('agents');
+  box.innerHTML = list.length ? list.slice(0,40).map(a => {
+    const c = classify({ua:a.ua, paid:a.paid, failed:a.failed, status:a.paid?'paid':'unpaid'});
+    const routes = [...a.routes].slice(0,3).map(r=>'/'+r).join(' ');
+    return `<div class="agent" data-ua="${esc(a.ua)}">
+      <div class="agent-top"><span class="agent-name mono">${esc(a.ua)}</span><span class="cnt">${a.n}</span></div>
+      <div class="agent-sub"><span class="badge ${c.badge}">${esc(c.label)}</span>
+        &nbsp;${a.paid?a.paid+' payé · ':''}${esc(routes)} · ${fmtT(a.last)}</div>
+    </div>`;
+  }).join('') : '<div class="empty">Personne.</div>';
+
+  document.getElementById('f1').textContent = list.length;
+  document.getElementById('f2').textContent = list.filter(a => !isScanner(a.ua)).length;
+  document.getElementById('f3').textContent = list.filter(a => a.paid>0).length;
+
+  box.querySelectorAll('.agent').forEach(el => {
+    el.onclick = () => select(el.dataset.ua === SEL ? null : el.dataset.ua);
+  });
+  select(SEL);
+
+  // lanes — only with traffic
+  const lanes = document.getElementById('lanes');
+  if (!names.length) {
+    lanes.innerHTML = '<div class="empty">Aucune route touchée.</div>';
+  } else {
+    lanes.innerHTML = names.map(name => {
+      const mine = all.filter(e => e.route === name);
+      const ticks = mine.map(e => {
+        const c = classify(e);
+        const x = ((+e.t - cutoff) / (24*36e5)) * 100;
+        const h = e.paid ? 100 : (c.k==='wait' ? 70 : (c.k==='visit' ? 55 : 32));
+        const col = c.k==='paid'?'var(--green)':c.k==='wait'?'var(--amber)':c.k==='visit'?'var(--blue)':c.k==='err'?'var(--red)':'var(--slate)';
+        return `<i class="tick" data-ua="${esc(e.ua)}" style="left:${x.toFixed(2)}%;height:${h}%;background:${col}"></i>`;
+      }).join('');
+      return `<div class="lane">
+        <div><div class="name mono">/${esc(name)}</div>
+          <div class="price mono">${esc((d.routes[name]||{}).price||'')}</div></div>
+        <div class="track">${ticks}</div>
+        <div class="n">${mine.length}</div>
+      </div>`;
+    }).join('');
+    lanes.querySelectorAll('.tick').forEach(t => {
+      t.onmouseenter = ev => tip(ev, `<b class="mono">${esc(t.dataset.ua)}</b>`);
+      t.onmouseleave = hideTip;
+    });
+  }
+
+  // Commercial performance table — all services, not only noisy routes.
+  const perfRows = routeOrder(d.routes).map(name => {
+    const mine = all.filter(e => e.route === name);
+    const scans = mine.filter(e => classify(e).k === 'scan').length;
+    const qualified = mine.length - scans;
+    const waits = mine.filter(e => classify(e).k === 'wait').length;
+    const paid = mine.filter(e => e.paid).length;
+    const errors = mine.filter(e => classify(e).k === 'err').length;
+    const latencies = mine.map(e => Number(e.latency)).filter(Number.isFinite);
+    const avg = latencies.length ? Math.round(latencies.reduce((a,b)=>a+b,0)/latencies.length) : null;
+    return {name,mine:mine.length,qualified,waits,paid,errors,avg,conv:pct(paid,waits+paid)};
+  }).sort((a,b) => (b.paid-a.paid) || (b.qualified-a.qualified) || (b.mine-a.mine));
+  document.getElementById('routePerf').innerHTML = perfRows.map(r => `
+    <tr>
+      <td><span class="route-name mono">/${esc(r.name)}</span><br><span style="color:var(--faint)">${esc((d.routes[r.name].methods||[]).join(' + '))}</span></td>
+      <td class="mono">${esc(d.routes[r.name].price||'—')}</td>
+      <td>${r.mine}</td>
+      <td class="${r.qualified?'hot':''}">${r.qualified}</td>
+      <td class="${r.waits?'hot':''}">${r.waits}</td>
+      <td class="${r.paid?'won':''}">${r.paid}</td>
+      <td class="${r.errors?'bad':''}">${r.errors}</td>
+      <td class="${r.paid?'won':''}">${r.conv}</td>
+      <td class="mono">${r.avg==null?'—':r.avg+' ms'}</td>
+    </tr>`).join('');
+  const routeErrors = perfRows.reduce((n,r)=>n+r.errors,0);
+  document.getElementById('healthline').innerHTML = `
+    <span><b>${d.commercial.unique_services||perfRows.length}</b> services</span>
+    <span><b>${d.commercial.paid_http_routes||'—'}</b> méthodes payantes</span>
+    <span><b>${routeErrors}</b> erreurs utiles</span>
+    <span><b>${d.availability==null?'—':pct(d.availability,1)}</b> disponibilité 7 j</span>`;
 }
 
-function select(ua,keep){
-  SEL=ua||null;
-  document.getElementById('clear').hidden=!SEL;
-  document.querySelectorAll('.tick').forEach(t=>
-    t.classList.toggle('dim', !!SEL && t.dataset.ua!==SEL));
-  document.querySelectorAll('.row').forEach(r=>
-    r.classList.toggle('dim', !!SEL && r.dataset.ua!==SEL));
-  document.querySelectorAll('.agent').forEach(a=>
-    a.classList.toggle('sel', a.dataset.ua===SEL));
+function showDetail(e){
+  const c = classify(e);
+  const box = document.getElementById('detail');
+  box.hidden = false;
+  box.innerHTML = `<dl>
+    <dt>quand</dt><dd class="mono">${esc(fmtTs(e.t))}</dd>
+    <dt>statut</dt><dd><span class="badge ${c.badge}">${esc(c.label)}</span></dd>
+    <dt>route</dt><dd class="mono">${esc(e.method)} /${esc(e.route)}</dd>
+    <dt>qui</dt><dd class="mono">${esc(e.ua)}</dd>
+    <dt>payeur</dt><dd class="mono">${e.payer?esc(e.payer):'—'}</dd>
+    <dt>montant</dt><dd class="mono">${e.amount!=null?'$'+money(e.amount):'—'}</dd>
+    <dt>latence</dt><dd class="mono">${e.latency!=null?e.latency+' ms':'—'}</dd>
+    <dt>erreur</dt><dd class="mono">${e.error?esc(e.error):'—'}</dd>
+  </dl>${e.body?`<pre class="mono">${esc(pretty(e.body))}</pre>`:''}`;
 }
-document.getElementById('clear').addEventListener('click',()=>select(null));
 
-const tipEl=document.getElementById('tip');
-function tip(e,html){tipEl.innerHTML=html;tipEl.classList.add('on');
-  const x=Math.min(e.clientX+14,innerWidth-352);
-  tipEl.style.left=x+'px';tipEl.style.top=(e.clientY+16)+'px';}
-function hideTip(){tipEl.classList.remove('on');}
+function select(ua){
+  SEL = ua || null;
+  document.getElementById('clear').hidden = !SEL;
+  document.querySelectorAll('.tick').forEach(t => t.classList.toggle('dim', !!SEL && t.dataset.ua !== SEL));
+  document.querySelectorAll('.row').forEach(r => r.classList.toggle('dim', !!SEL && r.dataset.ua !== SEL));
+  document.querySelectorAll('.agent').forEach(a => a.classList.toggle('sel', a.dataset.ua === SEL));
+}
+document.getElementById('clear').onclick = () => select(null);
+
+const tipEl = document.getElementById('tip');
+function tip(e, html){
+  tipEl.innerHTML = html; tipEl.classList.add('on');
+  tipEl.style.left = Math.min(e.clientX+12, innerWidth-340)+'px';
+  tipEl.style.top = (e.clientY+14)+'px';
+}
+function hideTip(){ tipEl.classList.remove('on'); }
+
+function tickClock(){
+  const pill = document.getElementById('pill');
+  const txt = document.getElementById('pillTxt');
+  if (OK) { pill.classList.remove('off'); txt.textContent = 'EN DIRECT'; }
+  else { pill.classList.add('off'); txt.textContent = 'HORS LIGNE'; }
+  document.getElementById('stamp').textContent =
+    LAST_FETCH ? ('mis à jour '+ago(Date.now()-LAST_FETCH)) : '—';
+}
+setInterval(tickClock, 1000);
 
 async function load(){
-  try{
-    const r=await fetch('/admin/data.json',{credentials:'same-origin'});
-    if(!r.ok) throw 0;
-    DATA=normalise(await r.json());
-    if(!DATA.events.length && !Object.keys(DATA.routes).length) throw 0;
-    render(DATA,false);
-  }catch(e){ render(normalise(demo()),true); }
+  if (document.hidden) return;
+  try {
+    const r = await fetch('/admin/data.json', {credentials:'same-origin', cache:'no-store'});
+    if (!r.ok) throw 0;
+    const next = normalise(await r.json());
+    DATA = next; OK = true;
+    render(DATA, false);
+  } catch (_) {
+    OK = false; tickClock();
+    if (!DATA) {
+      DATA = normalise({
+        network:'eip155:8453', updated_at:new Date().toISOString(), revenue_usdc:0, buyers:0,
+        routes:{'can-pay':{price:'$0.001'},weather:{price:'$0.001'}},
+        events:[{ts:new Date().toISOString(),route:'weather',user_agent:'autonomous-directory probe/1.0',status:'unpaid'}],
+        stats_24h:{total:1,by_status:{unpaid:1},paid_usdc:0}
+      });
+      render(DATA, true);
+    }
+  }
 }
-load(); setInterval(load,60000);
+load();
+setInterval(load, 3000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 </script>
 </body>
 </html>

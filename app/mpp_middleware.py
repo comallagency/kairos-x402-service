@@ -56,8 +56,16 @@ class MPPMiddleware:
     def __init__(self, app, inner_app):
         self.app = app
         self.inner_app = inner_app
+        # MPP settlement signs/sends through a CDP managed server wallet.
+        # Without its wallet secret, advertising this rail creates a challenge
+        # that can verify but can never settle. Fail closed and expose only the
+        # fully configured x402 rail.
+        self.enabled = bool(config.CDP_WALLET_SECRET)
 
     async def __call__(self, scope, receive, send):
+        if not self.enabled:
+            await self.app(scope, receive, send)
+            return
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
