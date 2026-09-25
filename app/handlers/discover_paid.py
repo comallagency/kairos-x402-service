@@ -102,6 +102,16 @@ def _own_route_rows() -> list[dict]:
     return rows
 
 
+# Préfixe littéral remplaçant le nom de service pour l'embedding de certaines
+# routes - mesure 2026-09-25 : "AgentIndex PDF Extract:" dilue la similarité
+# cosinus vs des concurrents nommés "pdf-to-markdown"/"file2markdown" ; un
+# préfixe collé au vocabulaire de la requête gagne +0.14. N'affecte que
+# l'embedding (classement /discover), jamais la description publiée.
+_EMBED_PREFIX_OVERRIDES = {
+    "/pdf": "pdf-to-markdown",
+}
+
+
 def _embed_text_for(row: dict) -> str:
     """Seule la première phrase de la description sert a l'embedding - la
     description publiée (build_route_configs(), /.well-known/x402,
@@ -109,7 +119,12 @@ def _embed_text_for(row: dict) -> str:
     desc = row["description"] or ""
     idx = desc.find(".")
     first_sentence = desc[: idx + 1] if idx != -1 else desc
-    return f"{row['name']}: {first_sentence}"
+    prefix = row["name"]
+    for suffix, override in _EMBED_PREFIX_OVERRIDES.items():
+        if row["url"].endswith(suffix):
+            prefix = override
+            break
+    return f"{prefix}: {first_sentence}"
 
 
 async def _load_own_routes() -> tuple[list[dict], np.ndarray]:
