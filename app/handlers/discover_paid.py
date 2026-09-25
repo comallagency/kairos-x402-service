@@ -109,6 +109,25 @@ def _own_route_rows() -> list[dict]:
 # l'embedding (classement /discover), jamais la description publiée.
 _EMBED_PREFIX_OVERRIDES = {
     "/pdf": "pdf-to-markdown",
+    "/search": "web-search",
+    "/jobs": "web-research",
+    "/web-read": "web-page-to-text",
+    "/extract": "extract-structured-data",
+    "/summarize": "summarize-text",
+    "/fact-check": "fact-check",
+    "/discover": "mcp-discovery",
+    "/weather": "weather-forecast",
+    "/crypto": "crypto-price",
+    "/news": "tech-news-headlines",
+    "/can-pay": "wallet-can-pay",
+    "/probe": "x402-paywall-probe",
+    "/wallet-balance": "wallet-balance-checker",
+    "/gas-price": "gas-price-checker",
+    "/wallet-intelligence": "wallet-and-gas-lookup",
+    "/x402-echo": "x402-payment-test",
+    "/tip": "usdc-tip",
+    "/agent-claim": "agent-verification-listing",
+    "/agent-health": "api-health-check",
 }
 
 
