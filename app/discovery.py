@@ -26,6 +26,7 @@ def _route_entries() -> list[dict]:
                 "mimeType": route_config.mime_type,
                 "serviceName": route_config.service_name,
                 "tags": route_config.tags,
+                "iconUrl": route_config.icon_url,
                 "accepts": [
                     {
                         "scheme": r.scheme,

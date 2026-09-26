@@ -9,6 +9,9 @@ load_dotenv()
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 X402_PAY_TO = os.getenv("X402_PAY_TO", "0x0000000000000000000000000000000000000000")
+# /x402-echo only: fixed payTo=B (bootstrap funding target for the ping-pong
+# script), never toggled - every other route stays on X402_PAY_TO (A).
+X402_ECHO_PAY_TO = os.getenv("X402_ECHO_PAY_TO", "0x3cedc3Cba49c3809EE46B9bf60da75d6607b45Ec")
 # Excluded from history_7d()'s distinct-identity count: our own curl/verification
 # traffic against the public domain would otherwise count as a visitor.
 VPS_PUBLIC_IP = os.getenv("VPS_PUBLIC_IP", "")
