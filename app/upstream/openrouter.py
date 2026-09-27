@@ -10,6 +10,7 @@ from app import config
 
 CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 KEY_URL = "https://openrouter.ai/api/v1/key"
+CREDITS_URL = "https://openrouter.ai/api/v1/credits"
 
 
 class OpenRouterError(Exception):
@@ -113,6 +114,64 @@ async def chat_completion_with_fallback(
     except OpenRouterError:
         data = await chat_completion(messages, [last_resort_model], **kwargs)
         return data, True
+
+
+# --- shared balance check, for routes that pay OpenRouter before delivering ---
+#
+# Only app/jobs_worker.py's flow needs this today: POST /jobs settles x402
+# payment at creation time (app/handlers/jobs.py::create_job), before the
+# actual OpenRouter calls happen later, asynchronously - unlike every
+# synchronous route (search/translate/summarize/extract/...), which settles
+# only after a successful upstream response and so fails closed on its own.
+# Any future route with the same "settle before calling OpenRouter" shape
+# should reuse this rather than re-implement its own balance check.
+
+_BALANCE_CACHE_TTL_SECONDS = 60.0
+_balance_cache: dict[str, float] = {}
+_balance_lock = asyncio.Lock()
+
+
+async def get_balance_usd() -> float:
+    """Real OpenRouter balance (total_credits - total_usage), cached for
+    _BALANCE_CACHE_TTL_SECONDS to avoid hammering /api/v1/credits on every
+    request to a gated route."""
+    now = time.monotonic()
+    cached = _balance_cache.get("value")
+    cached_at = _balance_cache.get("at")
+    if cached is not None and cached_at is not None and now - cached_at < _BALANCE_CACHE_TTL_SECONDS:
+        return cached
+
+    async with _balance_lock:
+        now = time.monotonic()
+        cached = _balance_cache.get("value")
+        cached_at = _balance_cache.get("at")
+        if cached is not None and cached_at is not None and now - cached_at < _BALANCE_CACHE_TTL_SECONDS:
+            return cached
+
+        if not config.OPENROUTER_API_KEY:
+            raise OpenRouterError("OPENROUTER_API_KEY is not set")
+        headers = {"Authorization": f"Bearer {config.OPENROUTER_API_KEY}"}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(CREDITS_URL, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()["data"]
+
+        balance = float(data["total_credits"]) - float(data["total_usage"])
+        _balance_cache["value"] = balance
+        _balance_cache["at"] = now
+        return balance
+
+
+async def has_sufficient_balance(min_usd: float) -> bool:
+    """True only if the (cached) balance is confirmed >= min_usd. Fails
+    closed - any error reading the balance (network, missing key, OpenRouter
+    down) returns False, since the whole point is to avoid charging a buyer
+    for a call we can't confirm we can afford."""
+    try:
+        balance = await get_balance_usd()
+    except Exception:
+        return False
+    return balance >= min_usd
 
 
 async def get_key_info() -> dict[str, Any]:
