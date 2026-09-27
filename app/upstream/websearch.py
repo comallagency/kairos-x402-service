@@ -1,3 +1,4 @@
+import asyncio
 import re
 from typing import Any
 
@@ -102,19 +103,26 @@ def _relevance_score(query: str, result: dict[str, Any]) -> int:
     return score
 
 
-async def run_web_search(query: str, max_results: int = 5) -> tuple[list[dict[str, Any]], str | None]:
-    """Returns (results, model_served) - model_served is always None here (no
-    LLM is involved, see app/handlers/search.py's neutral_model_id() call),
-    kept only so this function's signature matches its pre-SearXNG version."""
-    max_results = max(1, min(max_results, 10))
+SEARCH_RETRY_DELAY_SECONDS = 1.0
+
+
+async def _search_once(query: str, max_results: int) -> list[dict[str, Any]]:
     try:
         async with httpx.AsyncClient(timeout=SEARXNG_TIMEOUT_SECONDS) as client:
             resp = await client.get(
                 f"{config.SEARXNG_URL}/search",
-                # The instance defaults (Brave/DDG/Google CSE/Startpage) became
-                # CAPTCHA/rate-limit bound. These two native engines are tested
-                # live and currently return relevant results from the VPS.
-                params={"q": query, "format": "json", "engines": "bing,google"},
+                # google is CAPTCHA-suspended on this instance (confirmed
+                # 2026-09-28, "Suspended: CAPTCHA" on every query) - dead
+                # weight, contributes nothing. brave (re-tested the same day
+                # despite this file's older "CAPTCHA/rate-limit bound" note -
+                # that block has lifted) returns clean, real results on every
+                # query tried; bing,brave is the pair actually verified live
+                # right now. mojeek and qwant are both CAPTCHA/access-denied
+                # blocked on this instance too; wikipedia responds without
+                # error but never returns a hit even for an exact-title query
+                # ("Bitcoin") - it's a title-match engine, not general search,
+                # not a fit here.
+                params={"q": query, "format": "json", "engines": "bing,brave"},
             )
             if resp.status_code >= 400:
                 raise SearchError(f"upstream_status_{resp.status_code}")
@@ -135,4 +143,22 @@ async def run_web_search(query: str, max_results: int = 5) -> tuple[list[dict[st
             continue
         results.append(_shape_result(r.get("title"), url, r.get("content"), r.get("publishedDate")))
     results.sort(key=lambda result: _relevance_score(query, result), reverse=True)
-    return results[:max_results], None
+    return results[:max_results]
+
+
+async def run_web_search(query: str, max_results: int = 5) -> tuple[list[dict[str, Any]], str | None]:
+    """Returns (results, model_served) - model_served is always None here (no
+    LLM is involved, see app/handlers/search.py's neutral_model_id() call),
+    kept only so this function's signature matches its pre-SearXNG version.
+
+    A zero-hit response is retried once, after a short pause, before giving
+    up - both configured engines transiently missing a query at the same
+    instant is rare but real (this is exactly what tripped a live 502 on
+    2026-09-27), and a 1s gap is enough for that kind of blip to clear
+    without meaningfully slowing down a genuine no-result query."""
+    max_results = max(1, min(max_results, 10))
+    results = await _search_once(query, max_results)
+    if not results:
+        await asyncio.sleep(SEARCH_RETRY_DELAY_SECONDS)
+        results = await _search_once(query, max_results)
+    return results, None

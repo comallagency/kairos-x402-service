@@ -14,6 +14,51 @@ from app.x402_setup import ROUTE_DESCRIPTIONS
 router = APIRouter()
 
 SAMPLE_QUERY = "best ramen restaurants in Shibuya Tokyo"
+
+# Captured from a real call (2026-09-27) - static, no live call for /sample.
+# "best ramen restaurants in Shibuya Tokyo" (SAMPLE_QUERY above, used as the
+# default query for other internal tooling) is a genuinely hard query for the
+# bing+brave engine pair right now - it returns dictionary-definition noise
+# for "best" rather than restaurant results, and brave rate-limits itself
+# ("too many requests") after a handful of calls in a short span. "bitcoin
+# price" is used for the captured sample instead, since it reliably reflects
+# what a good /search response actually looks like.
+SAMPLE_SEARCH_OUTPUT = {
+    "query": "bitcoin price",
+    "results": [
+        {
+            "title": "Bitcoin Price (BTC/USD) Today | Live Price, Market Cap & Chart",
+            "url": "https://www.binance.com/en/price/bitcoin",
+            "date": None,
+            "extract": "19 hours ago · 1 Bitcoin currently costs $84.7K, up 0.76% in the last 24 hours. View the live Bitcoin price in USD (BTC/USD), chart, …",
+        },
+        {
+            "title": "Bitcoin price today, BTC to USD live price, marketcap and chart",
+            "url": "https://www.coindesk.com/price/bitcoin",
+            "date": None,
+            "extract": "The price of Bitcoin (BTC) is $84,667.49 today as of Sep 27, 2026, 2:33 pm EDT, with a 24-hour trading volume of $8.91B.",
+        },
+        {
+            "title": "Bitcoin price today, BTC to USD live price, marketcap and chart ...",
+            "url": "https://coinmarketcap.com/currencies/bitcoin/",
+            "date": None,
+            "extract": "The live Bitcoin price today is $84,013.50 USD with a 24-hour trading volume of $14,633,965,323.81 USD. We update our BTC to …",
+        },
+        {
+            "title": "Bitcoin Price: BTC/USD Live Price Chart, Market Cap & News Today ...",
+            "url": "https://www.coingecko.com/en/coins/bitcoin",
+            "date": None,
+            "extract": "Price of Bitcoin (BTC) today is $84,675.37 with a 24-hour trading volume of $21,847,507,423. Track Bitcoin's live price, market cap, …",
+        },
+        {
+            "title": "BTC USD — Bitcoin Price and Chart — TradingView",
+            "url": "https://www.tradingview.com/symbols/BTCUSD/",
+            "date": None,
+            "extract": "Watch live Bitcoin to Dollar chart, follow BTCUSD prices in real-time and get bitcoin price history. Check the Bitcoin technical …",
+        },
+    ],
+    "x402_receipt": make_receipt(neutral_model_id(None), "web_search", 281, 0.0, searches_run=1, sources_read=5),
+}
 MAX_BATCH_QUERIES = 5
 MAX_CONTENT_RESULTS = 3
 DEFAULT_CONTENT_CHARS = 12_000
@@ -133,30 +178,7 @@ async def _run_batch_search(
 
 @router.get("/search/sample", openapi_extra={"security": []})
 async def search_sample():
-    if not config.OPENROUTER_API_KEY:
-        return JSONResponse(
-            {
-                "error": {"reason": "upstream_not_configured"},
-                "note": "OPENROUTER_API_KEY is not set in this environment",
-            },
-            status_code=503,
-        )
-    try:
-        with Timer() as t:
-            results, model_served = await run_web_search(SAMPLE_QUERY, max_results=5)
-    except OpenRouterError as exc:
-        return JSONResponse(
-            {"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, status_code=502
-        )
-    receipt = make_receipt(
-        neutral_model_id(model_served), "web_search", t.elapsed_ms, 0.0,
-        searches_run=1, sources_read=len(results),
-    )
-    return {
-        "query": SAMPLE_QUERY,
-        "results": _shape_results(results, True),
-        "x402_receipt": receipt,
-    }
+    return SAMPLE_SEARCH_OUTPUT
 
 
 async def _handle_search(
