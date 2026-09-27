@@ -1,36 +1,58 @@
 #!/usr/bin/env python3
-"""Single Bazaar bootstrap for all 20 indexable routes.
+"""Single Bazaar bootstrap for all 20 indexable routes - alternating flow.
 
-Consolidates scripts/bootstrap_bazaar_settle.py and
-scripts/bootstrap_jev_bazaar.py into one run, now that every route's
-metadata has been audited (2026-09-27): 14 previously-settled routes
-(search, news, can-pay, probe, wallet-balance, gas-price,
-wallet-intelligence, agent-health, pdf, web-read, discover, weather,
-crypto, x402-echo) + the 4 Jev routes (decide, guard, verify, rank) + the
-2 repriced content routes (extract, summarize) = 19 routes B pays toward
-A, plus x402-echo itself.
+Why alternating, not "fund B for everything up front"
+-------------------------------------------------------
+The first version of this script funded B once for the full sum of all 19
+target routes (~$0.023) before paying any of them. That assumes A holds
+that much - it doesn't (A has ~$0.004). The money doesn't need to: it can
+circulate. For each route, A only ever fronts exactly that route's price
+(1 funding payment for $0.001, 2 for $0.002), B immediately pays it back
+to A via the route itself, and the total held across A+B never moves -
+only its split does, one route at a time. So the actual working capital
+needed is just the price of the single most expensive route in flight at
+once (currently $0.002), not the sum of all of them.
 
-Flow
-----
-1. Check B's real balance. If it doesn't cover the sum of all 19 target
-   prices, A pays /x402-echo ($0.001, fixed payTo=B) as many times as
-   needed to top B up - each of these payments is itself a real
-   settlement on /x402-echo, so x402-echo's own Bazaar listing refreshes
-   as a side effect of funding B. No separate "B pays x402-echo" step:
-   x402-echo's payTo is hardcoded to B, so B could never pay it toward A
-   without a self-send.
-2. Once funded, B pays each of the 19 target routes once, toward A
-   (fixed payTo=A on all of them, unchanged) - 5s pause between every
-   payment (funding or target), to stay gentle on the facilitator/RPC.
+Flow, per route (ascending by price)
+-------------------------------------
+1. A pays /x402-echo (fixed payTo=B, $0.001 each) exactly as many times
+   as this route's price requires, topping B up to exactly what it needs
+   - no more. Each of these payments is itself a real settlement on
+   /x402-echo, refreshing its own Bazaar listing as a side effect (its
+   payTo is hardcoded to B, so B could never pay it toward A directly).
+2. B pays the route once, toward A (fixed payTo=A, unchanged).
+3. Repeat for the next route. The two balances return close to where they
+   started after every route; only in-flight for the few seconds between
+   steps 1 and 2.
+
+Balance tracking - local, not re-read from chain mid-run
+-----------------------------------------------------------
+The very first run failed because the chain was queried for a live
+balance between payments and returned stale data (settlement lag) -
+the script decided a wallet couldn't afford a payment it actually could.
+This version reads each wallet's balance from chain exactly ONCE, before
+the loop starts, then tracks both locally in Python floats, updated
+optimistically after every payment this script itself made. It never
+calls usdc_balance() again after that first read.
+
+--dry-run
+---------
+Skips every real payment (each "settles" instantly, tx="SIMULATED") and
+prints the same balance trace and final table, so the loop's arithmetic
+can be checked without touching a wallet or the network beyond the one
+free GET to /.well-known/x402 for real route prices. Starting balances
+default to a real one-time chain read, or can be overridden for a
+what-if test with DRY_RUN_BAL_A / DRY_RUN_BAL_B (USDC, e.g. "0.004").
 
 Per-payment outcome
 --------------------
 - 200 -> settled, tx noted.
 - invalidReason "amount_too_low" -> noted (not expected at these prices,
-  handled defensively), route dropped, run continues.
+  handled defensively); route dropped, run continues - the money B
+  already received for it is simply not spent back to A.
 - "execution reverted" (exception or response body) -> transient RPC
-  balance-read lag - retry the same payment up to MAX_RETRIES times, 5s
-  apart. Exhausting retries stops the whole run immediately.
+  balance-read lag - retry the same payment up to MAX_RETRIES times,
+  RETRY_DELAY_S apart. Exhausting retries stops the whole run immediately.
 - anything else -> the whole run stops immediately.
 
 Usage
@@ -40,9 +62,13 @@ Usage
     .venv/bin/python scripts/bootstrap_bazaar_full.py && \\
     unset KEY_A KEY_B
 
+  # dry run, no keys needed, no payment sent:
+  .venv/bin/python scripts/bootstrap_bazaar_full.py --dry-run
+
 Safety
 ------
-- Refuses to run unless KEY_A derives to ADDRESS_A and KEY_B to ADDRESS_B.
+- Refuses to run unless KEY_A derives to ADDRESS_A and KEY_B to ADDRESS_B
+  (skipped in --dry-run, which never signs anything).
 - Never prints, logs or otherwise surfaces KEY_A or KEY_B.
 - No SSH, no .env edit, no docker rebuild/recreate - payments only.
 """
@@ -60,6 +86,7 @@ from eth_account import Account
 ADDRESS_A = "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d"
 ADDRESS_B = "0x3cedc3Cba49c3809EE46B9bf60da75d6607b45Ec"
 FUNDING_SLUG = "x402-echo"
+FUNDING_PRICE = 0.001  # config.PRICE_X402_ECHO
 TARGET_SLUGS = [
     "search", "news", "can-pay", "probe", "wallet-balance", "gas-price",
     "wallet-intelligence", "agent-health", "pdf", "web-read", "discover",
@@ -72,13 +99,16 @@ NETWORK = "eip155:8453"
 AMOUNT_TOO_LOW_MARKER = "amount_too_low"
 EXECUTION_REVERTED_MARKER = "execution reverted"
 MAX_RETRIES = 3
-PAUSE_SECONDS = 5
+RETRY_DELAY_S = 10
+EPSILON = 1e-9
 
 USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 BASE_RPC = "https://mainnet.base.org"
 
+DRY_RUN = "--dry-run" in sys.argv
 
-# --- Base mainnet USDC balance ---------------------------------------------
+
+# --- Base mainnet USDC balance (read once, at startup, only) ----------------
 
 async def usdc_balance(address: str) -> float:
     data = "0x70a08231000000000000000000000000" + address[2:].lower()
@@ -184,7 +214,10 @@ def _print_table(results: list[tuple[str, str, str | None, str, str | None]]) ->
         print(f"{slug:26s} {payer:44s} {label}")
 
 
-async def _pay_with_retry(signer: Account, route: dict) -> tuple[str, str | None, str | None]:
+async def _pay_with_retry(signer, route: dict) -> tuple[str, str | None, str | None]:
+    if DRY_RUN:
+        return "reglee", "SIMULATED", None
+
     from x402 import x402Client
     from x402.http.clients.httpx import x402HttpxClient
     from x402.mechanisms.evm.exact.register import register_exact_evm_client
@@ -198,15 +231,15 @@ async def _pay_with_retry(signer: Account, route: dict) -> tuple[str, str | None
                 status, tx, body_text = await pay_once(http, route)
         except Exception as exc:
             if EXECUTION_REVERTED_MARKER in str(exc).lower() and attempt < MAX_RETRIES:
-                print(f"  {route['slug']}: execution reverted (essai {attempt}/{MAX_RETRIES}), nouvel essai dans {PAUSE_SECONDS}s")
-                await asyncio.sleep(PAUSE_SECONDS)
+                print(f"  {route['slug']}: execution reverted (essai {attempt}/{MAX_RETRIES}), nouvel essai dans {RETRY_DELAY_S}s")
+                await asyncio.sleep(RETRY_DELAY_S)
                 continue
             return "autre_erreur", None, str(exc)[:300]
 
         outcome = _outcome(status, body_text)
         if outcome == "execution_reverted" and attempt < MAX_RETRIES:
-            print(f"  {route['slug']}: execution reverted (essai {attempt}/{MAX_RETRIES}), nouvel essai dans {PAUSE_SECONDS}s")
-            await asyncio.sleep(PAUSE_SECONDS)
+            print(f"  {route['slug']}: execution reverted (essai {attempt}/{MAX_RETRIES}), nouvel essai dans {RETRY_DELAY_S}s")
+            await asyncio.sleep(RETRY_DELAY_S)
             continue
         detail = None if outcome == "reglee" else body_text[:300]
         return outcome, tx, detail
@@ -214,73 +247,105 @@ async def _pay_with_retry(signer: Account, route: dict) -> tuple[str, str | None
     return "execution_reverted", None, None
 
 
-async def ensure_b_funded(account_a: Account, funding_route: dict, needed_usdc: float, results: list) -> None:
-    while True:
-        bal_b = await usdc_balance(ADDRESS_B)
-        print(f"solde B: {bal_b:.6f} USDC (besoin: {needed_usdc:.6f} USDC pour les {len(TARGET_SLUGS)} routes)")
-        if bal_b >= needed_usdc:
-            return
-        print(f"  insuffisant - A finance B via {FUNDING_SLUG} (${funding_route['price']})")
-        outcome, tx, detail = await _pay_with_retry(account_a, funding_route)
-        results.append((FUNDING_SLUG, ADDRESS_A, tx, outcome, detail))
-        if outcome != "reglee":
-            raise RuntimeError(f"echec du financement de B via {FUNDING_SLUG}: {detail}")
-        print(f"  financement reglee, tx={tx}")
-        await asyncio.sleep(PAUSE_SECONDS)
+def _fundings_needed(price: float) -> int:
+    n = round(price / FUNDING_PRICE)
+    if abs(n * FUNDING_PRICE - price) > EPSILON:
+        raise RuntimeError(f"prix {price} n'est pas un multiple exact de {FUNDING_PRICE} - financement impossible")
+    return n
 
 
-async def run(account_a: Account, account_b: Account, results: list) -> None:
-    funding_route = (await fetch_routes([FUNDING_SLUG]))[FUNDING_SLUG]
-    routes = await fetch_routes(TARGET_SLUGS)
-    needed = sum(r["price"] for r in routes.values())
+async def run(account_a, account_b, funding_route: dict, routes: dict[str, dict], bal_a: float, bal_b: float, results: list) -> tuple[float, float]:
+    ordered = sorted(routes.values(), key=lambda r: r["price"])
+    print(f"ordre (prix croissant): {[r['slug'] for r in ordered]}")
+    print(f"solde local de depart: A={bal_a:.6f} B={bal_b:.6f}\n")
 
-    await ensure_b_funded(account_a, funding_route, needed, results)
+    for route in ordered:
+        price = route["price"]
+        n_fundings = _fundings_needed(price)
+        print(f"--- {route['slug']} (${price:.3f}, {n_fundings} financement(s)) ---")
 
-    for slug in TARGET_SLUGS:
-        route = routes[slug]
-        print(f"\n--- {slug} (${route['price']}): B paie -> A ---")
+        for i in range(1, n_fundings + 1):
+            if bal_a + EPSILON < FUNDING_PRICE:
+                raise RuntimeError(
+                    f"solde local A insuffisant ({bal_a:.6f}) pour financer {route['slug']} "
+                    f"(financement {i}/{n_fundings})"
+                )
+            outcome, tx, detail = await _pay_with_retry(account_a, funding_route)
+            results.append((FUNDING_SLUG, ADDRESS_A, tx, outcome, detail))
+            if outcome != "reglee":
+                raise RuntimeError(f"echec financement ({i}/{n_fundings}) pour {route['slug']}: {detail}")
+            bal_a -= FUNDING_PRICE
+            bal_b += FUNDING_PRICE
+            print(f"  financement {i}/{n_fundings} regle, tx={tx} | solde local A={bal_a:.6f} B={bal_b:.6f}")
+
+        if bal_b + EPSILON < price:
+            raise RuntimeError(f"solde local B insuffisant ({bal_b:.6f}) pour payer {route['slug']} (${price:.3f})")
+
         outcome, tx, detail = await _pay_with_retry(account_b, route)
-        results.append((slug, ADDRESS_B, tx, outcome, detail))
+        results.append((route["slug"], ADDRESS_B, tx, outcome, detail))
         if outcome == "reglee":
-            print(f"  {slug:22s} status=200 tx={tx}")
+            bal_b -= price
+            bal_a += price
+            print(f"  {route['slug']:22s} regle, tx={tx} | solde local A={bal_a:.6f} B={bal_b:.6f}\n")
         elif outcome == "amount_too_low":
-            print(f"  {slug:22s} amount_too_low - notee, route abandonnee")
+            print(f"  {route['slug']:22s} amount_too_low - notee, route abandonnee (le financement deja verse reste sur B)\n")
         else:
-            raise RuntimeError(f"erreur sur {slug}: {detail}")
-        await asyncio.sleep(PAUSE_SECONDS)
+            raise RuntimeError(f"erreur sur {route['slug']}: {detail}")
+
+    return bal_a, bal_b
 
 
 async def main() -> int:
-    key_a = (os.getenv("KEY_A") or "").strip()
-    key_b = (os.getenv("KEY_B") or "").strip()
-    if not key_a or not key_b:
-        print(
-            "KEY_A et/ou KEY_B manquant(e).\n"
-            "  read -s KEY_A && export KEY_A && \\\n"
-            "    read -s KEY_B && export KEY_B && \\\n"
-            "    .venv/bin/python scripts/bootstrap_bazaar_full.py && \\\n"
-            "    unset KEY_A KEY_B",
-            file=sys.stderr,
-        )
-        return 2
+    if DRY_RUN:
+        print("=== DRY RUN - aucun paiement reel, aucune cle requise ===\n")
+        override_a = os.getenv("DRY_RUN_BAL_A")
+        override_b = os.getenv("DRY_RUN_BAL_B")
+        if override_a is not None and override_b is not None:
+            bal_a, bal_b = float(override_a), float(override_b)
+            print(f"soldes de depart (surcharge DRY_RUN_BAL_A/B): A={bal_a:.6f} B={bal_b:.6f}")
+        else:
+            bal_a = await usdc_balance(ADDRESS_A)
+            bal_b = await usdc_balance(ADDRESS_B)
+            print(f"soldes de depart (lecture on-chain reelle): A={bal_a:.6f} B={bal_b:.6f}")
+        account_a = account_b = None
+    else:
+        key_a = (os.getenv("KEY_A") or "").strip()
+        key_b = (os.getenv("KEY_B") or "").strip()
+        if not key_a or not key_b:
+            print(
+                "KEY_A et/ou KEY_B manquant(e).\n"
+                "  read -s KEY_A && export KEY_A && \\\n"
+                "    read -s KEY_B && export KEY_B && \\\n"
+                "    .venv/bin/python scripts/bootstrap_bazaar_full.py && \\\n"
+                "    unset KEY_A KEY_B",
+                file=sys.stderr,
+            )
+            return 2
 
-    account_a = Account.from_key(key_a)
-    account_b = Account.from_key(key_b)
-    del key_a, key_b  # never referenced again; not logged, not printed
+        account_a = Account.from_key(key_a)
+        account_b = Account.from_key(key_b)
+        del key_a, key_b  # never referenced again; not logged, not printed
 
-    if account_a.address.lower() != ADDRESS_A.lower():
-        print(f"KEY_A ne correspond pas a A ({account_a.address} != {ADDRESS_A}) - arret.", file=sys.stderr)
-        return 1
-    if account_b.address.lower() != ADDRESS_B.lower():
-        print(f"KEY_B ne correspond pas a B ({account_b.address} != {ADDRESS_B}) - arret.", file=sys.stderr)
-        return 1
-    print(f"A confirme: {account_a.address}")
-    print(f"B confirme: {account_b.address}")
+        if account_a.address.lower() != ADDRESS_A.lower():
+            print(f"KEY_A ne correspond pas a A ({account_a.address} != {ADDRESS_A}) - arret.", file=sys.stderr)
+            return 1
+        if account_b.address.lower() != ADDRESS_B.lower():
+            print(f"KEY_B ne correspond pas a B ({account_b.address} != {ADDRESS_B}) - arret.", file=sys.stderr)
+            return 1
+        print(f"A confirme: {account_a.address}")
+        print(f"B confirme: {account_b.address}")
+
+        bal_a = await usdc_balance(ADDRESS_A)
+        bal_b = await usdc_balance(ADDRESS_B)
+        print(f"soldes de depart (lecture on-chain, unique): A={bal_a:.6f} B={bal_b:.6f}")
 
     results: list[tuple[str, str, str | None, str, str | None]] = []
     exit_code = 0
     try:
-        await run(account_a, account_b, results)
+        funding_route = (await fetch_routes([FUNDING_SLUG]))[FUNDING_SLUG]
+        routes = await fetch_routes(TARGET_SLUGS)
+        bal_a, bal_b = await run(account_a, account_b, funding_route, routes, bal_a, bal_b, results)
+        print(f"solde local final: A={bal_a:.6f} B={bal_b:.6f}")
     except Exception as exc:
         print(f"\nARRET: {exc}", file=sys.stderr)
         exit_code = 1
