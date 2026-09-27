@@ -62,7 +62,10 @@ WEB_READ_SAMPLE_OUTPUT = {
     "token_count": 154,
 }
 
-EXTRACT_SAMPLE_OUTPUT = {"data": {"product_name": "Widget Pro", "price": 29.99, "in_stock": True}}
+EXTRACT_SAMPLE_OUTPUT = {
+    "data": {"product_name": "Widget Pro", "price": 29.99, "in_stock": True},
+    "missing_fields": [],
+}
 
 SUMMARIZE_SAMPLE_OUTPUT = {
     "summary": "The article explains how photosynthesis converts light energy into chemical energy in plants.",
@@ -980,10 +983,22 @@ WEB_READ_OUTPUT_SCHEMA = {
 EXTRACT_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "data": {"type": "object", "description": "Extracted data, strictly conforming to the requested schema."},
+        "data": {
+            "type": "object",
+            "description": (
+                "Extracted data, matching the requested schema's shape - fields "
+                "the content doesn't support come back null rather than an "
+                "invented value (see missing_fields)."
+            ),
+        },
+        "missing_fields": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Top-level keys in data the model could not find in the content and returned as null.",
+        },
         "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
     },
-    "required": ["data"],
+    "required": ["data", "missing_fields"],
 }
 
 SUMMARIZE_OUTPUT_SCHEMA = {
@@ -1793,7 +1808,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             tags=["extract", "structured data", "json schema"],
             extensions=declare_discovery_extension(
                 input={
-                    "url": "https://en.wikipedia.org/wiki/Widget_(economics)",
+                    "text": "Widget Pro is our flagship gadget, priced at $29.99 and currently in stock.",
                     "schema": {
                         "type": "object",
                         "properties": {

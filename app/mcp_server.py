@@ -759,7 +759,7 @@ async def _run_extract_structured(args: dict, payer: str | None) -> dict:
     try:
         with Timer() as t:
             content = await _get_extract_content(args)
-            data, model_served = await _run_extract(content, schema)
+            data, model_served, missing_fields = await _run_extract(content, schema)
     except ExtractError as exc:
         db.log_request(
             route="extract", method="MCP", status="error", payer=payer,
@@ -773,7 +773,7 @@ async def _run_extract_structured(args: dict, payer: str | None) -> dict:
         user_agent="mcp", body_excerpt=body_excerpt,
     )
     receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price)
-    return {"data": data, "x402_receipt": receipt}
+    return {"data": data, "missing_fields": missing_fields, "x402_receipt": receipt}
 
 
 @mcp.tool(
