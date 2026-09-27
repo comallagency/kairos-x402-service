@@ -133,10 +133,10 @@ async def server_json_manifest():
         "name": "world.agentindex/x402",
         "title": "AgentIndex x402",
         "description": (
-            "Pay-per-call web search, translation and research jobs for AI agents. "
-            "USDC on Base, no account."
+            "Jev-powered decisions, web search, PDF/web to Markdown, summarize. "
+            "From $0.001, no API key."
         ),
-        "version": "1.1.0",
+        "version": "1.2.0",
         "websiteUrl": f"{base}/openapi.json",
         "remotes": [
             {"type": "streamable-http", "url": f"{base}/mcp/"},
@@ -360,6 +360,8 @@ def _llms_catalog() -> str:
         "",
         "## Decision and judgment tools ($0.001 USDC)",
         "",
+        "Powered by Jev (TypeSafe System One). $0.001 per call, no OpenRouter or TypeSafe account needed.",
+        "",
         f"- [Decide]({base}/decide): POST typed yes/no, multiple-choice or ordinal-scale questions about shared context - real probabilities, not generated text",
         f"- [Guard]({base}/guard): POST {{\"user_request\":...,\"tool_call\":...}} - allow/ask/deny with a probability (advisory, prompt-injection sensitive)",
         f"- [Verify]({base}/verify): POST {{\"claim\":...,\"source\":...}} - supported/contradicted/not_enough_info with a probability",
@@ -470,7 +472,7 @@ def _agent_card() -> dict:
         ),
         "url": base,
         "repository": "https://github.com/comallagency/kairos-x402-service",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "protocolVersion": "0.3.0",
         "x402": {"wellKnown": f"{base}/.well-known/x402"},
         "openapi": f"{base}/openapi.json",

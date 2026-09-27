@@ -515,7 +515,8 @@ ROUTE_DESCRIPTIONS = {
         "Ask up to 20 typed yes/no, multiple-choice or ordinal-scale questions "
         "about one shared piece of context in a single call - each answered "
         "with a real probability (Jev decision primitives), not generated "
-        "text. Try GET /decide/sample."
+        "text. Powered by Jev (TypeSafe System One). $0.001 per call, no "
+        "OpenRouter or TypeSafe account needed. Try GET /decide/sample."
     ),
     "guard": (
         "Ask whether a tool call should run automatically, need human "
@@ -523,17 +524,21 @@ ROUTE_DESCRIPTIONS = {
         "allow/ask/deny with a probability. Advisory only: like any "
         "LLM-based judge it is sensitive to prompt injection in the request "
         "or tool call, so the calling agent must keep the final decision, "
-        "not delegate it outright. Try GET /guard/sample."
+        "not delegate it outright. Powered by Jev (TypeSafe System One). "
+        "$0.001 per call, no OpenRouter or TypeSafe account needed. Try GET "
+        "/guard/sample."
     ),
     "verify": (
         "Check whether a source supports, contradicts, or gives insufficient "
         "information about a claim - a typed verdict with a real probability, "
-        "not generated text. Try GET /verify/sample."
+        "not generated text. Powered by Jev (TypeSafe System One). $0.001 per "
+        "call, no OpenRouter or TypeSafe account needed. Try GET /verify/sample."
     ),
     "rank": (
         "Rank up to 50 documents by relevance to a query in a single call - "
         "each document returned with its relevance probability, sorted "
-        "highest first. Try GET /rank/sample."
+        "highest first. Powered by Jev (TypeSafe System One). $0.001 per call, "
+        "no OpenRouter or TypeSafe account needed. Try GET /rank/sample."
     ),
 }
 
