@@ -352,7 +352,7 @@ def _llms_catalog() -> str:
         "",
         "## High-value web and document tools",
         "",
-        f"- [Search + Content]({base}/search): POST `{{\"query\":\"...\",\"include_content\":true}}` — live results plus clean Markdown from the top 3 pages (launch price $0.001)",
+        f"- [Search + Content]({base}/search): POST `{{\"query\":\"...\",\"include_content\":true}}` — each query routed by Jev to the best specialised source (code, facts, news, prices, weather), results ranked by relevance, plus clean Markdown from the top 3 pages ($0.001)",
         f"- [PDF to Markdown]({base}/pdf): POST `{{\"url\":\"https://...pdf\"}}` — text, metadata and token count ($0.002)",
         f"- [Web Read]({base}/web-read): POST `{{\"url\":\"https://...\"}}` — main content as clean Markdown ($0.002)",
         f"- [Structured Extract]({base}/extract): POST URL/text plus JSON schema ($0.002)",

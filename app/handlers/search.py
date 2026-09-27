@@ -23,41 +23,54 @@ SAMPLE_QUERY = "best ramen restaurants in Shibuya Tokyo"
 # ("too many requests") after a handful of calls in a short span. "bitcoin
 # price" is used for the captured sample instead, since it reliably reflects
 # what a good /search response actually looks like.
+# search v2 (2026-09-27): each query is routed by Jev to a specialized free
+# source when one fits (code -> GitHub, fact -> Wikipedia, news -> GDELT,
+# price/weather -> the /crypto and /weather routes' own lookups), falling
+# back to SearXNG otherwise - see app/upstream/search_sources.py. This
+# sample shows the "code" path, since it is the clearest illustration of
+# why: the old SearXNG-only /search returned generic Python docs for this
+# exact query, never anything FastAPI-specific - GitHub repository search
+# does.
 SAMPLE_SEARCH_OUTPUT = {
-    "query": "bitcoin price",
+    "query": "python fastapi tutorial",
     "results": [
         {
-            "title": "Bitcoin Price (BTC/USD) Today | Live Price, Market Cap & Chart",
-            "url": "https://www.binance.com/en/price/bitcoin",
-            "date": None,
-            "extract": "19 hours ago · 1 Bitcoin currently costs $84.7K, up 0.76% in the last 24 hours. View the live Bitcoin price in USD (BTC/USD), chart, …",
+            "title": "liaogx/fastapi-tutorial",
+            "url": "https://github.com/liaogx/fastapi-tutorial",
+            "date": "2023-08-09T09:13:40Z",
+            "source": "github",
+            "extract": "整体的介绍 FastAPI，快速上手开发，结合 API 交互文档逐个讲解核心模块的使用。视频学习地址：",
         },
         {
-            "title": "Bitcoin price today, BTC to USD live price, marketcap and chart",
-            "url": "https://www.coindesk.com/price/bitcoin",
-            "date": None,
-            "extract": "The price of Bitcoin (BTC) is $84,667.49 today as of Sep 27, 2026, 2:33 pm EDT, with a 24-hour trading volume of $8.91B.",
+            "title": "windson/fastapi",
+            "url": "https://github.com/windson/fastapi",
+            "date": "2024-03-29T06:30:47Z",
+            "source": "github",
+            "extract": "FastAPI Tutorials & Deployment Methods to Cloud and on-prem infrastructures",
         },
         {
-            "title": "Bitcoin price today, BTC to USD live price, marketcap and chart ...",
-            "url": "https://coinmarketcap.com/currencies/bitcoin/",
-            "date": None,
-            "extract": "The live Bitcoin price today is $84,013.50 USD with a 24-hour trading volume of $14,633,965,323.81 USD. We update our BTC to …",
+            "title": "microsoft/python-sample-vscode-fastapi-tutorial",
+            "url": "https://github.com/microsoft/python-sample-vscode-fastapi-tutorial",
+            "date": "2026-06-17T23:54:14Z",
+            "source": "github",
+            "extract": "Sample code for the FastAPI tutorial in the VS Code documentation",
         },
         {
-            "title": "Bitcoin Price: BTC/USD Live Price Chart, Market Cap & News Today ...",
-            "url": "https://www.coingecko.com/en/coins/bitcoin",
-            "date": None,
-            "extract": "Price of Bitcoin (BTC) today is $84,675.37 with a 24-hour trading volume of $21,847,507,423. Track Bitcoin's live price, market cap, …",
+            "title": "YapayZekaveTeknolojiAkademisi/FastAPI-Notes",
+            "url": "https://github.com/YapayZekaveTeknolojiAkademisi/FastAPI-Notes",
+            "date": "2025-12-20T22:16:17Z",
+            "source": "github",
+            "extract": "FastAPI framework'ünü sıfırdan öğrenmek isteyenler için hazırlanmış, Türkçe bir eğitim rehber serisi. Temel kavramlardan production-ready API geliştirmeye kadar ilerleyen bir öğrenme yolu sunar.",
         },
         {
-            "title": "BTC USD — Bitcoin Price and Chart — TradingView",
-            "url": "https://www.tradingview.com/symbols/BTCUSD/",
-            "date": None,
-            "extract": "Watch live Bitcoin to Dollar chart, follow BTCUSD prices in real-time and get bitcoin price history. Check the Bitcoin technical …",
+            "title": "zhiyuan8/FastAPI-websocket-tutorial",
+            "url": "https://github.com/zhiyuan8/FastAPI-websocket-tutorial",
+            "date": "2024-02-25T03:13:55Z",
+            "source": "github",
+            "extract": "Build dynamic, secure APIs with FastAPI: Features DB integration, real-time WebSocket, streaming, and efficient request handling with middleware, powered by Starlette and Pydantic.",
         },
     ],
-    "x402_receipt": make_receipt(neutral_model_id(None), "web_search", 281, 0.0, searches_run=1, sources_read=5),
+    "x402_receipt": make_receipt(neutral_model_id(None), "web_search", 1292, 0.0, searches_run=1, sources_read=5),
 }
 MAX_BATCH_QUERIES = 5
 MAX_CONTENT_RESULTS = 3
@@ -93,9 +106,11 @@ async def _summarize(query: str, results: list[dict]) -> str | None:
 def _shape_results(results: list[dict], extract: bool) -> list[dict]:
     shaped = []
     for r in results:
-        item = {"title": r["title"], "url": r["url"], "date": r["date"]}
+        item = {"title": r["title"], "url": r["url"], "date": r["date"], "source": r.get("source", "web")}
         if extract:
             item["extract"] = r["extract"]
+        if r.get("attribution"):
+            item["attribution"] = r["attribution"]
         shaped.append(item)
     return shaped
 

@@ -6,6 +6,7 @@ import httpx
 from py3langid.langid import MODEL_FILE, LanguageIdentifier
 
 from app import config
+from app.upstream import search_sources
 from app.upstream.jev import JevError, ask_jev
 
 # Searches now run against a local SearXNG instance (searxng-kairos, same
@@ -80,6 +81,7 @@ def _shape_result(title, url, extract, date=None) -> dict[str, Any]:
         "url": url,
         "extract": _clean_extract(extract),
         "date": date,
+        "source": "web",
     }
 
 
@@ -211,28 +213,74 @@ async def _jev_rerank(query: str, raw_results: list[dict[str, Any]], max_results
     return [raw_results[i] for i in order[:max_results]]
 
 
+async def _searxng_fallback(query: str, raw_limit: int) -> list[dict[str, Any]]:
+    """The general-purpose path: SearXNG (bing+brave), retried once on a
+    zero-hit response - both configured engines transiently missing a query
+    at the same instant is rare but real (this is exactly what tripped a
+    live 502 on 2026-09-27), and a 1s gap is enough for that kind of blip to
+    clear without meaningfully slowing down a genuine no-result query."""
+    language = _detect_non_english_language(query)
+    raw = await _search_once(query, raw_limit, language)
+    if not raw:
+        await asyncio.sleep(SEARCH_RETRY_DELAY_SECONDS)
+        raw = await _search_once(query, raw_limit, language)
+    return raw
+
+
+async def _collect_raw(query: str, raw_limit: int) -> list[dict[str, Any]]:
+    """search v2 routing: one Jev Choice call classifies the query into
+    code/place/fact/news/price/weather/general, then the winning category's
+    specialized free source is queried (and the runner-up too, if the
+    winner's probability is under 0.6). "place" and "general" have no
+    specialized source - Phase 0 (2026-09-27) found OSM Nominatim and
+    Overpass both explicitly tell "API resellers" to self-host rather than
+    use the public instance, so neither is used here, and both categories
+    fall through to the SearXNG general-purpose path below like any other
+    category whose specialized source came back empty."""
+    try:
+        probabilities = await search_sources.classify_query(query)
+        ranked = search_sources.ranked_categories(probabilities)
+    except JevError:
+        ranked = [("general", 1.0)]
+
+    to_try = [ranked[0]]
+    if len(ranked) > 1 and ranked[0][1] < search_sources._SECOND_CHOICE_THRESHOLD:
+        to_try.append(ranked[1])
+
+    raw: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    for category, _probability in to_try:
+        try:
+            specialized = await search_sources.search_by_category(category, query, raw_limit)
+        except Exception:
+            specialized = []
+        for r in specialized:
+            url = r.get("url")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            raw.append(r)
+
+    if not raw:
+        raw = await _searxng_fallback(query, raw_limit)
+
+    return raw
+
+
 async def run_web_search(query: str, max_results: int = 5) -> tuple[list[dict[str, Any]], str | None]:
     """Returns (results, model_served) - model_served is always None here (no
     LLM is involved, see app/handlers/search.py's neutral_model_id() call),
     kept only so this function's signature matches its pre-SearXNG version.
 
-    Collects a wider raw pool (RAW_COLLECTION_SIZE) from SearXNG than the
-    caller asked for, then has Jev pick and rank the genuinely relevant ones
-    out of that pool - a zero-hit raw response is retried once, after a
-    short pause, before giving up (both configured engines transiently
-    missing a query at the same instant is rare but real - this is exactly
-    what tripped a live 502 on 2026-09-27), and a 1s gap is enough for that
-    kind of blip to clear without meaningfully slowing down a genuine
-    no-result query. If the Jev rerank call itself fails (upstream hiccup on
-    OpenRouter's alpha decisions endpoint), falls back to the previous
-    keyword heuristic rather than failing the whole search over a reranking
-    outage."""
+    Collects a wider raw pool (RAW_COLLECTION_SIZE) than the caller asked
+    for - from a specialized free source when the query fits one (see
+    _collect_raw), otherwise from SearXNG - then has Jev pick and rank the
+    genuinely relevant ones out of that pool. If the Jev rerank call itself
+    fails (upstream hiccup on OpenRouter's alpha decisions endpoint), falls
+    back to the previous keyword heuristic rather than failing the whole
+    search over a reranking outage."""
     max_results = max(1, min(max_results, 10))
-    language = _detect_non_english_language(query)
-    raw = await _search_once(query, RAW_COLLECTION_SIZE, language)
-    if not raw:
-        await asyncio.sleep(SEARCH_RETRY_DELAY_SECONDS)
-        raw = await _search_once(query, RAW_COLLECTION_SIZE, language)
+    raw = await _collect_raw(query, RAW_COLLECTION_SIZE)
     if not raw:
         return [], None
 
