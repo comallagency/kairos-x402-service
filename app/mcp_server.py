@@ -143,6 +143,7 @@ logger = logging.getLogger("x402.mcp_server")
 
 mcp = FastMCP(
     "AgentIndex x402",
+    version="1.1.0",
     instructions=(
         f"{KIT_TAGLINE} Paid per call in USDC on Base (x402) - no "
         "account, no API key. FIRST CALL (feeds CDP Bazaar): can_pay "
