@@ -82,3 +82,53 @@ class CapacityGateMiddleware:
             return
 
         await self.app(scope, receive, send)
+
+
+class JobsCircuitBreakerMiddleware:
+    """Pure-ASGI middleware, wrapped OUTSIDE the x402 payment middleware -
+    same placement as CapacityGateMiddleware.
+
+    Temporary (2026-09-28, remove once OPENROUTER_API_KEY's balance is
+    confirmed positive - see the "Nouvelle passerelle LLM" investigation).
+    Unlike search/translate/summarize/extract, which settle only after a
+    successful OpenRouter call, POST /jobs settles payment at CREATION time
+    (app/handlers/jobs.py::create_job) - the actual OpenRouter calls happen
+    later, asynchronously, in app/jobs_worker.py::_run_job. A job created
+    while the account has no credit gets charged in full, then fails
+    ("job_execution_error") with nothing delivered and no refund path.
+
+    Returns a plain 503 before any x402 payment challenge is ever offered -
+    not a 402, so this reads as "temporarily unavailable" rather than
+    "payment required for a service that will fail regardless".
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] != "POST" or scope["path"] != "/jobs":
+            await self.app(scope, receive, send)
+            return
+
+        db.log_request(
+            route="jobs",
+            method="POST",
+            status="circuit_breaker_open",
+            error_reason="openrouter_balance_negative",
+        )
+        body = json.dumps(
+            {
+                "error": {
+                    "reason": "temporarily_unavailable",
+                    "detail": "Job creation is temporarily disabled (upstream credit issue). Other routes are unaffected.",
+                }
+            }
+        ).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 503,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})

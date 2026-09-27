@@ -17,7 +17,7 @@ from fastmcp.utilities.lifespan import combine_lifespans
 
 from app import db
 from app.admin import router as admin_router
-from app.capacity import CapacityGateMiddleware
+from app.capacity import CapacityGateMiddleware, JobsCircuitBreakerMiddleware
 from app.client_ip import ClientIpMiddleware
 from app.db import init_db
 from app.discovery import router as discovery_router
@@ -151,7 +151,8 @@ payment_wrapped = build_payment_middleware(mcp_accept_compat)
 intent_logged = IntentLoggingMiddleware(payment_wrapped)
 mpp_wrapped = MPPMiddleware(intent_logged, inner_app)
 capacity_gated = CapacityGateMiddleware(mpp_wrapped)
-body_compat = PaymentBodyCompatMiddleware(capacity_gated)
+jobs_breaker = JobsCircuitBreakerMiddleware(capacity_gated)
+body_compat = PaymentBodyCompatMiddleware(jobs_breaker)
 # Outermost: captures the client IP (already resolved from X-Forwarded-For
 # by uvicorn proxy-headers) before anything else runs, purely observational.
 app = ClientIpMiddleware(body_compat)
