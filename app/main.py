@@ -141,11 +141,17 @@ async def health():
 
 
 FAVICON_PATH = Path(__file__).parent / "static" / "favicon.ico"
+ICON_PATH = Path(__file__).parent / "static" / "icon.png"
 
 
 @inner_app.get("/favicon.ico", openapi_extra={"security": []})
 async def favicon():
     return FileResponse(FAVICON_PATH, media_type="image/x-icon")
+
+
+@inner_app.get("/icon.png", openapi_extra={"security": []})
+async def icon():
+    return FileResponse(ICON_PATH, media_type="image/png")
 
 
 mcp_accept_compat = McpAcceptCompatMiddleware(inner_app)
