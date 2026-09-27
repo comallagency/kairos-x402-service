@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from app import config, db
+from app.upstream.openrouter import has_sufficient_balance
 from app.generated.dynamic_routes import dynamic_daily_capacity
 from app.x402_setup import build_route_configs
 
@@ -88,19 +89,22 @@ class JobsCircuitBreakerMiddleware:
     """Pure-ASGI middleware, wrapped OUTSIDE the x402 payment middleware -
     same placement as CapacityGateMiddleware.
 
-    Temporary (2026-09-28, remove once OPENROUTER_API_KEY's balance is
-    confirmed positive - see the "Nouvelle passerelle LLM" investigation).
     Unlike search/translate/summarize/extract, which settle only after a
     successful OpenRouter call, POST /jobs settles payment at CREATION time
     (app/handlers/jobs.py::create_job) - the actual OpenRouter calls happen
     later, asynchronously, in app/jobs_worker.py::_run_job. A job created
-    while the account has no credit gets charged in full, then fails
-    ("job_execution_error") with nothing delivered and no refund path.
+    while the account can't afford its own worst case gets charged in full,
+    then fails ("job_execution_error") with nothing delivered and no refund
+    path.
 
-    Returns a plain 503 before any x402 payment challenge is ever offered -
-    not a 402, so this reads as "temporarily unavailable" rather than
-    "payment required for a service that will fail regardless".
+    Checks the real (60s-cached) OpenRouter balance via
+    app.upstream.openrouter.has_sufficient_balance before ever offering the
+    x402 payment challenge. Below MIN_BALANCE_USD, returns a plain 503 - not
+    a 402, so this reads as "temporarily unavailable" rather than "payment
+    required for a service likely to fail regardless".
     """
+
+    MIN_BALANCE_USD = 0.50
 
     def __init__(self, app):
         self.app = app
@@ -110,17 +114,21 @@ class JobsCircuitBreakerMiddleware:
             await self.app(scope, receive, send)
             return
 
+        if await has_sufficient_balance(self.MIN_BALANCE_USD):
+            await self.app(scope, receive, send)
+            return
+
         db.log_request(
             route="jobs",
             method="POST",
             status="circuit_breaker_open",
-            error_reason="openrouter_balance_negative",
+            error_reason="openrouter_balance_below_floor",
         )
         body = json.dumps(
             {
                 "error": {
                     "reason": "temporarily_unavailable",
-                    "detail": "Job creation is temporarily disabled (upstream credit issue). Other routes are unaffected.",
+                    "detail": "Job creation is temporarily disabled (upstream credit low). Other routes are unaffected.",
                 }
             }
         ).encode("utf-8")
