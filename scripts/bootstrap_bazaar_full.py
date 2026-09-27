@@ -9,57 +9,69 @@ that much - it doesn't (A has ~$0.004). The money doesn't need to: it can
 circulate. For each route, A only ever fronts exactly that route's price
 (1 funding payment for $0.001, 2 for $0.002), B immediately pays it back
 to A via the route itself, and the total held across A+B never moves -
-only its split does, one route at a time. So the actual working capital
-needed is just the price of the single most expensive route in flight at
-once (currently $0.002), not the sum of all of them.
+only its split does, one route at a time.
 
 Flow, per route (ascending by price)
 -------------------------------------
 1. A pays /x402-echo (fixed payTo=B, $0.001 each) exactly as many times
-   as this route's price requires, topping B up to exactly what it needs
-   - no more. Each of these payments is itself a real settlement on
-   /x402-echo, refreshing its own Bazaar listing as a side effect (its
-   payTo is hardcoded to B, so B could never pay it toward A directly).
+   as this route's price requires. Each of these payments is itself a
+   real settlement on /x402-echo, refreshing its own Bazaar listing.
 2. B pays the route once, toward A (fixed payTo=A, unchanged).
-3. Repeat for the next route. The two balances return close to where they
-   started after every route; only in-flight for the few seconds between
-   steps 1 and 2.
+3. Repeat for the next route.
 
 Balance tracking - local, not re-read from chain mid-run
 -----------------------------------------------------------
-The very first run failed because the chain was queried for a live
-balance between payments and returned stale data (settlement lag) -
-the script decided a wallet couldn't afford a payment it actually could.
-This version reads each wallet's balance from chain exactly ONCE, before
-the loop starts, then tracks both locally in Python floats, updated
-optimistically after every payment this script itself made. It never
-calls usdc_balance() again after that first read.
+Read once from chain before the loop starts, then tracked locally and
+updated optimistically after every payment this script itself made.
+Never re-read from chain mid-run - the very first attempt failed because
+a mid-run chain read returned stale (settlement-lag) data.
+
+2026-09-27 incident: after /search settled cleanly, the next /x402-echo
+funding payment (for /discover) came back as an empty `{}` 402 body. The
+requests table confirms this was a genuine settlement failure, not a
+malformed request on this script's end: app/intent_logging.py logs
+status="payment_failed" specifically when "a payment header was attached
+but the response was still 402" (a signed payment was submitted and
+rejected at settlement, not just an unauthenticated 402 challenge). It
+happened well under a second after the *previous* funding payment settled
+successfully - consistent with hitting the facilitator/chain again before
+the prior payment had time to fully land. Docker's container was recycled
+before this investigation (only ~30min of log history survive a
+recreate), so the exact facilitator-side rejection reason couldn't be
+pulled from application logs - but the timing and status="payment_failed"
+both point at the same class of lag this design already guards against
+for reads, just not yet for consecutive writes. Hence POST_SETTLE_PAUSE_S
+below, and treating any non-200 (not just "execution reverted" text) as
+retryable.
 
 --dry-run
 ---------
 Skips every real payment (each "settles" instantly, tx="SIMULATED") and
-prints the same balance trace and final table, so the loop's arithmetic
-can be checked without touching a wallet or the network beyond the one
-free GET to /.well-known/x402 for real route prices. Starting balances
-default to a real one-time chain read, or can be overridden for a
-what-if test with DRY_RUN_BAL_A / DRY_RUN_BAL_B (USDC, e.g. "0.004").
+prints the same balance trace and final table. Starting balances default
+to a real one-time chain read, overridable with DRY_RUN_BAL_A /
+DRY_RUN_BAL_B for a what-if test.
+
+--skip=slug1,slug2
+-------------------
+Drop already-settled routes from this run (e.g. --skip=search after a
+partial run that got /search done before failing later). Never affects
+/x402-echo funding, which always runs as needed.
 
 Per-payment outcome
 --------------------
 - 200 -> settled, tx noted.
 - invalidReason "amount_too_low" -> noted (not expected at these prices,
-  handled defensively); route dropped, run continues - the money B
-  already received for it is simply not spent back to A.
-- "execution reverted" (exception or response body) -> transient RPC
-  balance-read lag - retry the same payment up to MAX_RETRIES times,
-  RETRY_DELAY_S apart. Exhausting retries stops the whole run immediately.
-- anything else -> the whole run stops immediately.
+  handled defensively), NOT retried (it will never succeed) - route
+  dropped, run continues, its funding stays spent on B.
+- anything else (execution reverted, an empty {} payment_failed body, a
+  timeout, ...) -> transient - retry the SAME payment up to MAX_RETRIES
+  times, RETRY_DELAY_S apart. Exhausting retries stops the whole run.
 
 Usage
 -----
   read -s KEY_A && export KEY_A && \\
     read -s KEY_B && export KEY_B && \\
-    .venv/bin/python scripts/bootstrap_bazaar_full.py && \\
+    .venv/bin/python scripts/bootstrap_bazaar_full.py [--skip=search] && \\
     unset KEY_A KEY_B
 
   # dry run, no keys needed, no payment sent:
@@ -100,12 +112,17 @@ AMOUNT_TOO_LOW_MARKER = "amount_too_low"
 EXECUTION_REVERTED_MARKER = "execution reverted"
 MAX_RETRIES = 3
 RETRY_DELAY_S = 10
+POST_SETTLE_PAUSE_S = 8
 EPSILON = 1e-9
 
 USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 BASE_RPC = "https://mainnet.base.org"
 
 DRY_RUN = "--dry-run" in sys.argv
+SKIP_SLUGS = {
+    s.strip() for arg in sys.argv if arg.startswith("--skip=")
+    for s in arg[len("--skip="):].split(",") if s.strip()
+}
 
 
 # --- Base mainnet USDC balance (read once, at startup, only) ----------------
@@ -196,21 +213,21 @@ def _outcome(status: int, body_text: str) -> str:
         return "reglee"
     if AMOUNT_TOO_LOW_MARKER in body_text:
         return "amount_too_low"
-    if EXECUTION_REVERTED_MARKER in body_text.lower():
-        return "execution_reverted"
-    return "autre_erreur"
+    return "a_retenter"  # any other non-200 (execution reverted, empty {}, etc.) - retryable
 
 
 def _print_table(results: list[tuple[str, str, str | None, str, str | None]]) -> None:
     print("\n=== resume ===")
     print(f"{'route':26s} {'payeur':44s} {'resultat'}")
     for slug, payer, tx, outcome, detail in results:
-        label = {
-            "reglee": f"reglee, tx={tx}",
-            "amount_too_low": "amount_too_low",
-            "execution_reverted": f"execution reverted - {MAX_RETRIES} essais epuises, non reglee",
-            "autre_erreur": f"autre erreur: {detail}",
-        }[outcome]
+        if outcome == "reglee":
+            label = f"reglee, tx={tx}"
+        elif outcome == "amount_too_low":
+            label = "amount_too_low"
+        elif outcome == "a_retenter":
+            label = f"{MAX_RETRIES} essais epuises, non reglee: {detail}"
+        else:
+            label = f"autre erreur: {detail}"
         print(f"{slug:26s} {payer:44s} {label}")
 
 
@@ -230,21 +247,23 @@ async def _pay_with_retry(signer, route: dict) -> tuple[str, str | None, str | N
             async with x402HttpxClient(client, timeout=60.0) as http:
                 status, tx, body_text = await pay_once(http, route)
         except Exception as exc:
-            if EXECUTION_REVERTED_MARKER in str(exc).lower() and attempt < MAX_RETRIES:
-                print(f"  {route['slug']}: execution reverted (essai {attempt}/{MAX_RETRIES}), nouvel essai dans {RETRY_DELAY_S}s")
+            if attempt < MAX_RETRIES:
+                print(f"  {route['slug']}: exception (essai {attempt}/{MAX_RETRIES}: {str(exc)[:150]}), nouvel essai dans {RETRY_DELAY_S}s")
                 await asyncio.sleep(RETRY_DELAY_S)
                 continue
-            return "autre_erreur", None, str(exc)[:300]
+            return "a_retenter", None, str(exc)[:300]
 
         outcome = _outcome(status, body_text)
-        if outcome == "execution_reverted" and attempt < MAX_RETRIES:
-            print(f"  {route['slug']}: execution reverted (essai {attempt}/{MAX_RETRIES}), nouvel essai dans {RETRY_DELAY_S}s")
+        if outcome == "amount_too_low":
+            return outcome, tx, body_text[:300]
+        if outcome == "a_retenter" and attempt < MAX_RETRIES:
+            print(f"  {route['slug']}: status={status} non-200 (essai {attempt}/{MAX_RETRIES}, corps: {body_text[:100]!r}), nouvel essai dans {RETRY_DELAY_S}s")
             await asyncio.sleep(RETRY_DELAY_S)
             continue
         detail = None if outcome == "reglee" else body_text[:300]
         return outcome, tx, detail
 
-    return "execution_reverted", None, None
+    return "a_retenter", None, "essais epuises"
 
 
 def _fundings_needed(price: float) -> int:
@@ -277,6 +296,9 @@ async def run(account_a, account_b, funding_route: dict, routes: dict[str, dict]
             bal_a -= FUNDING_PRICE
             bal_b += FUNDING_PRICE
             print(f"  financement {i}/{n_fundings} regle, tx={tx} | solde local A={bal_a:.6f} B={bal_b:.6f}")
+            if not DRY_RUN:
+                print(f"  pause {POST_SETTLE_PAUSE_S}s (laisser la chaine rattraper)")
+                await asyncio.sleep(POST_SETTLE_PAUSE_S)
 
         if bal_b + EPSILON < price:
             raise RuntimeError(f"solde local B insuffisant ({bal_b:.6f}) pour payer {route['slug']} (${price:.3f})")
@@ -286,7 +308,11 @@ async def run(account_a, account_b, funding_route: dict, routes: dict[str, dict]
         if outcome == "reglee":
             bal_b -= price
             bal_a += price
-            print(f"  {route['slug']:22s} regle, tx={tx} | solde local A={bal_a:.6f} B={bal_b:.6f}\n")
+            print(f"  {route['slug']:22s} regle, tx={tx} | solde local A={bal_a:.6f} B={bal_b:.6f}")
+            if not DRY_RUN:
+                print(f"  pause {POST_SETTLE_PAUSE_S}s (laisser la chaine rattraper)")
+                await asyncio.sleep(POST_SETTLE_PAUSE_S)
+            print()
         elif outcome == "amount_too_low":
             print(f"  {route['slug']:22s} amount_too_low - notee, route abandonnee (le financement deja verse reste sur B)\n")
         else:
@@ -296,6 +322,9 @@ async def run(account_a, account_b, funding_route: dict, routes: dict[str, dict]
 
 
 async def main() -> int:
+    if SKIP_SLUGS:
+        print(f"routes ignorees (deja reglees): {sorted(SKIP_SLUGS)}")
+
     if DRY_RUN:
         print("=== DRY RUN - aucun paiement reel, aucune cle requise ===\n")
         override_a = os.getenv("DRY_RUN_BAL_A")
@@ -316,7 +345,7 @@ async def main() -> int:
                 "KEY_A et/ou KEY_B manquant(e).\n"
                 "  read -s KEY_A && export KEY_A && \\\n"
                 "    read -s KEY_B && export KEY_B && \\\n"
-                "    .venv/bin/python scripts/bootstrap_bazaar_full.py && \\\n"
+                "    .venv/bin/python scripts/bootstrap_bazaar_full.py [--skip=search] && \\\n"
                 "    unset KEY_A KEY_B",
                 file=sys.stderr,
             )
@@ -343,7 +372,8 @@ async def main() -> int:
     exit_code = 0
     try:
         funding_route = (await fetch_routes([FUNDING_SLUG]))[FUNDING_SLUG]
-        routes = await fetch_routes(TARGET_SLUGS)
+        wanted = [s for s in TARGET_SLUGS if s not in SKIP_SLUGS]
+        routes = await fetch_routes(wanted)
         bal_a, bal_b = await run(account_a, account_b, funding_route, routes, bal_a, bal_b, results)
         print(f"solde local final: A={bal_a:.6f} B={bal_b:.6f}")
     except Exception as exc:
