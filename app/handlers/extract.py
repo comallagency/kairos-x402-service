@@ -31,6 +31,29 @@ SAMPLE_SCHEMA = {
     },
 }
 
+
+def _make_nullable(schema):
+    """Every property becomes nullable, recursively - the extraction prompt
+    tells the model to return null for a field the content doesn't support
+    rather than inventing one (see SYSTEM_PROMPT), so validating against
+    the caller's schema as given rejects every legitimate "not found"
+    answer with a 502. The caller's schema is the source of truth for
+    shape and required fields; only nullability is relaxed."""
+    if not isinstance(schema, dict):
+        return schema
+    schema = dict(schema)
+    if "type" in schema:
+        t = schema["type"]
+        if isinstance(t, str) and t != "null":
+            schema["type"] = [t, "null"]
+        elif isinstance(t, list) and "null" not in t:
+            schema["type"] = [*t, "null"]
+    if "properties" in schema:
+        schema["properties"] = {k: _make_nullable(v) for k, v in schema["properties"].items()}
+    if "items" in schema and isinstance(schema["items"], dict):
+        schema["items"] = _make_nullable(schema["items"])
+    return schema
+
 _CALLER_ERROR_REASONS = {
     "missing_url_or_text", "both_url_and_text_provided", "invalid_schema",
     "no_extractable_content", "missing_schema",
@@ -63,7 +86,7 @@ async def _get_content(body: dict) -> str:
     raise ExtractError("missing_url_or_text")
 
 
-async def _run_extract(content: str, schema: dict) -> tuple[dict, str | None]:
+async def _run_extract(content: str, schema: dict) -> tuple[dict, str | None, list[str]]:
     try:
         jsonschema.Draft7Validator.check_schema(schema)
     except jsonschema.SchemaError as exc:
@@ -88,11 +111,12 @@ async def _run_extract(content: str, schema: dict) -> tuple[dict, str | None]:
         raise ExtractError("extraction_failed", "model did not return valid JSON")
 
     try:
-        jsonschema.validate(instance=parsed, schema=schema)
+        jsonschema.validate(instance=parsed, schema=_make_nullable(schema))
     except jsonschema.ValidationError as exc:
         raise ExtractError("extraction_failed", f"result does not match schema: {exc.message[:200]}")
 
-    return parsed, model_served
+    missing_fields = sorted(k for k, v in parsed.items() if v is None) if isinstance(parsed, dict) else []
+    return parsed, model_served, missing_fields
 
 
 @router.get("/extract/sample", openapi_extra={"security": []})
@@ -101,11 +125,11 @@ async def extract_sample():
         return JSONResponse({"error": {"reason": "upstream_not_configured"}}, status_code=503)
     with Timer() as t:
         try:
-            data, model_served = await _run_extract(SAMPLE_TEXT, SAMPLE_SCHEMA)
+            data, model_served, missing_fields = await _run_extract(SAMPLE_TEXT, SAMPLE_SCHEMA)
         except ExtractError as exc:
             return JSONResponse({"error": {"reason": exc.reason, "detail": exc.detail}}, status_code=502)
     receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, 0.0)
-    return {"data": data, "x402_receipt": receipt}
+    return {"data": data, "missing_fields": missing_fields, "x402_receipt": receipt}
 
 
 @router.post("/extract", description=ROUTE_DESCRIPTIONS["extract"])
@@ -128,7 +152,7 @@ async def extract(request: Request):
     try:
         with Timer() as t:
             content = await _get_content(body)
-            data, model_served = await _run_extract(content, schema)
+            data, model_served, missing_fields = await _run_extract(content, schema)
     except ExtractError as exc:
         db.log_request(
             route="extract", method="POST", status="error", payer=payer,
@@ -143,4 +167,4 @@ async def extract(request: Request):
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
     receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price)
-    return {"data": data, "x402_receipt": receipt}
+    return {"data": data, "missing_fields": missing_fields, "x402_receipt": receipt}
