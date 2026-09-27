@@ -86,7 +86,7 @@ async def _get_content(body: dict) -> str:
     raise ExtractError("missing_url_or_text")
 
 
-async def _run_extract(content: str, schema: dict) -> tuple[dict, str | None, list[str]]:
+async def _run_extract(content: str, schema: dict) -> tuple[dict, str | None, list[str], bool]:
     try:
         jsonschema.Draft7Validator.check_schema(schema)
     except jsonschema.SchemaError as exc:
@@ -97,7 +97,7 @@ async def _run_extract(content: str, schema: dict) -> tuple[dict, str | None, li
         {"role": "user", "content": json.dumps({"schema": schema, "content": content[:12000]})},
     ]
     try:
-        data, _used_last_resort = await chat_completion_with_fallback(
+        data, used_last_resort = await chat_completion_with_fallback(
             messages, config.OPENROUTER_TRANSLATE_MODELS, config.OPENROUTER_LAST_RESORT_MODEL, max_tokens=2000,
         )
     except OpenRouterError as exc:
@@ -105,6 +105,7 @@ async def _run_extract(content: str, schema: dict) -> tuple[dict, str | None, li
 
     content_str = data["choices"][0]["message"]["content"]
     model_served = data.get("model")
+    fallback_used = used_last_resort or (model_served is not None and model_served != config.OPENROUTER_TRANSLATE_MODELS[0])
     try:
         parsed = json.loads(content_str)
     except json.JSONDecodeError:
@@ -116,7 +117,7 @@ async def _run_extract(content: str, schema: dict) -> tuple[dict, str | None, li
         raise ExtractError("extraction_failed", f"result does not match schema: {exc.message[:200]}")
 
     missing_fields = sorted(k for k, v in parsed.items() if v is None) if isinstance(parsed, dict) else []
-    return parsed, model_served, missing_fields
+    return parsed, model_served, missing_fields, fallback_used
 
 
 @router.get("/extract/sample", openapi_extra={"security": []})
@@ -125,10 +126,10 @@ async def extract_sample():
         return JSONResponse({"error": {"reason": "upstream_not_configured"}}, status_code=503)
     with Timer() as t:
         try:
-            data, model_served, missing_fields = await _run_extract(SAMPLE_TEXT, SAMPLE_SCHEMA)
+            data, model_served, missing_fields, fallback_used = await _run_extract(SAMPLE_TEXT, SAMPLE_SCHEMA)
         except ExtractError as exc:
             return JSONResponse({"error": {"reason": exc.reason, "detail": exc.detail}}, status_code=502)
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, 0.0)
+    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, 0.0, fallback_used=fallback_used)
     return {"data": data, "missing_fields": missing_fields, "x402_receipt": receipt}
 
 
@@ -152,7 +153,7 @@ async def extract(request: Request):
     try:
         with Timer() as t:
             content = await _get_content(body)
-            data, model_served, missing_fields = await _run_extract(content, schema)
+            data, model_served, missing_fields, fallback_used = await _run_extract(content, schema)
     except ExtractError as exc:
         db.log_request(
             route="extract", method="POST", status="error", payer=payer,
@@ -166,5 +167,5 @@ async def extract(request: Request):
         route="extract", method="POST", status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price)
+    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price, fallback_used=fallback_used)
     return {"data": data, "missing_fields": missing_fields, "x402_receipt": receipt}

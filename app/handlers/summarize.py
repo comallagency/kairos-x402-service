@@ -67,20 +67,22 @@ async def _get_content_and_sources(body: dict) -> tuple[str, list[str]]:
     return text, []
 
 
-async def _summarize_content(content: str, length: str) -> tuple[str, str | None]:
+async def _summarize_content(content: str, length: str) -> tuple[str, str | None, bool]:
     length_desc, max_tokens = _LENGTH_TARGETS.get(length, _LENGTH_TARGETS["medium"])
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE.format(length_desc=length_desc)},
         {"role": "user", "content": content[:12000]},
     ]
     try:
-        data, _used_last_resort = await chat_completion_with_fallback(
+        data, used_last_resort = await chat_completion_with_fallback(
             messages, config.OPENROUTER_TRANSLATE_MODELS, config.OPENROUTER_LAST_RESORT_MODEL, max_tokens=max_tokens,
         )
     except OpenRouterError as exc:
         raise SummarizeError("upstream_error", str(exc)[:200])
     summary = data["choices"][0]["message"]["content"].strip()
-    return summary, data.get("model")
+    model_served = data.get("model")
+    fallback_used = used_last_resort or (model_served is not None and model_served != config.OPENROUTER_TRANSLATE_MODELS[0])
+    return summary, model_served, fallback_used
 
 
 @router.get("/summarize/sample", openapi_extra={"security": []})
@@ -89,10 +91,10 @@ async def summarize_sample():
         return JSONResponse({"error": {"reason": "upstream_not_configured"}}, status_code=503)
     with Timer() as t:
         try:
-            summary, model_served = await _summarize_content(SAMPLE_TEXT, "short")
+            summary, model_served, fallback_used = await _summarize_content(SAMPLE_TEXT, "short")
         except SummarizeError as exc:
             return JSONResponse({"error": {"reason": exc.reason, "detail": exc.detail}}, status_code=502)
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, 0.0)
+    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, 0.0, fallback_used=fallback_used)
     return {"summary": summary, "length": "short", "sources": [], "x402_receipt": receipt}
 
 
@@ -112,7 +114,7 @@ async def summarize(request: Request):
     try:
         with Timer() as t:
             content, sources = await _get_content_and_sources(body)
-            summary, model_served = await _summarize_content(content, length)
+            summary, model_served, fallback_used = await _summarize_content(content, length)
     except SummarizeError as exc:
         db.log_request(
             route="summarize", method="POST", status="error", payer=payer,
@@ -126,5 +128,5 @@ async def summarize(request: Request):
         route="summarize", method="POST", status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price)
+    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price, fallback_used=fallback_used)
     return {"summary": summary, "length": length, "sources": sources, "x402_receipt": receipt}
