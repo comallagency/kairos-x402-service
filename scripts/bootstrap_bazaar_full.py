@@ -13,9 +13,13 @@ only its split does, one route at a time.
 
 Flow, per route (ascending by price)
 -------------------------------------
-1. A pays /x402-echo (fixed payTo=B, $0.001 each) exactly as many times
-   as this route's price requires. Each of these payments is itself a
-   real settlement on /x402-echo, refreshing its own Bazaar listing.
+1. If B's local balance doesn't already cover this route's price, A pays
+   /x402-echo (fixed payTo=B, $0.001 each) exactly enough times to close
+   that shortfall - not the route's full price, whatever B already
+   holds counts first. Each funding payment is itself a real settlement
+   on /x402-echo, refreshing its own Bazaar listing. If B's leftover
+   balance from a previous route already covers this one, no funding
+   happens at all.
 2. B pays the route once, toward A (fixed payTo=A, unchanged).
 3. Repeat for the next route.
 
@@ -266,10 +270,16 @@ async def _pay_with_retry(signer, route: dict) -> tuple[str, str | None, str | N
     return "a_retenter", None, "essais epuises"
 
 
-def _fundings_needed(price: float) -> int:
-    n = round(price / FUNDING_PRICE)
-    if abs(n * FUNDING_PRICE - price) > EPSILON:
-        raise RuntimeError(f"prix {price} n'est pas un multiple exact de {FUNDING_PRICE} - financement impossible")
+def _fundings_needed_for_shortfall(shortfall: float) -> int:
+    """How many FUNDING_PRICE payments close a shortfall - 0 if B already
+    covers the route (the whole point: don't fund what's already there)."""
+    if shortfall <= EPSILON:
+        return 0
+    n = round(shortfall / FUNDING_PRICE)
+    if n < 1:
+        n = 1
+    if abs(n * FUNDING_PRICE - shortfall) > 1e-6:
+        raise RuntimeError(f"écart {shortfall} n'est pas un multiple exact de {FUNDING_PRICE} - financement impossible")
     return n
 
 
@@ -280,8 +290,13 @@ async def run(account_a, account_b, funding_route: dict, routes: dict[str, dict]
 
     for route in ordered:
         price = route["price"]
-        n_fundings = _fundings_needed(price)
-        print(f"--- {route['slug']} (${price:.3f}, {n_fundings} financement(s)) ---")
+        shortfall = price - bal_b
+        n_fundings = _fundings_needed_for_shortfall(shortfall)
+
+        if n_fundings == 0:
+            print(f"--- {route['slug']} (${price:.3f}): B a deja {bal_b:.6f}, aucun financement necessaire ---")
+        else:
+            print(f"--- {route['slug']} (${price:.3f}): B a {bal_b:.6f}, il manque {shortfall:.6f} -> {n_fundings} financement(s) ---")
 
         for i in range(1, n_fundings + 1):
             if bal_a + EPSILON < FUNDING_PRICE:
