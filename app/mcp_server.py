@@ -759,7 +759,7 @@ async def _run_extract_structured(args: dict, payer: str | None) -> dict:
     try:
         with Timer() as t:
             content = await _get_extract_content(args)
-            data, model_served, missing_fields = await _run_extract(content, schema)
+            data, model_served, missing_fields, fallback_used = await _run_extract(content, schema)
     except ExtractError as exc:
         db.log_request(
             route="extract", method="MCP", status="error", payer=payer,
@@ -772,7 +772,7 @@ async def _run_extract_structured(args: dict, payer: str | None) -> dict:
         route="extract", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer,
         user_agent="mcp", body_excerpt=body_excerpt,
     )
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price)
+    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price, fallback_used=fallback_used)
     return {"data": data, "missing_fields": missing_fields, "x402_receipt": receipt}
 
 
@@ -819,7 +819,7 @@ async def _run_summarize(args: dict, payer: str | None) -> dict:
     try:
         with Timer() as t:
             content, sources = await _get_summarize_content_and_sources(args)
-            summary, model_served = await _summarize_content(content, length)
+            summary, model_served, fallback_used = await _summarize_content(content, length)
     except SummarizeError as exc:
         db.log_request(
             route="summarize", method="MCP", status="error", payer=payer,
@@ -832,7 +832,7 @@ async def _run_summarize(args: dict, payer: str | None) -> dict:
         route="summarize", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer,
         user_agent="mcp", body_excerpt=body_excerpt,
     )
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price)
+    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price, fallback_used=fallback_used)
     return {"summary": summary, "length": length, "sources": sources, "x402_receipt": receipt}
 
 

@@ -196,10 +196,22 @@ DAILY_CAPACITY = {
 # from 150 tokens up, translate, extract) - kept first. The other two still
 # work for extract/translate's larger budgets, just not summarize's "short"
 # (100 tokens, bumped to 180 below for exactly this reason):
+# Primary: a small, reliable, cheap PAID model (OpenRouter pricing:
+# $0.0000001/prompt token, $0.00000032/completion token - the cheapest of
+# the confirmed-working paid models as of 2026-09-27; a real /summarize
+# call on the Photosynthesis sample cost $0.00005996). The two free-tier
+# models kept here are fallback only now - they were the actual cause of
+# the "empty content" / model-churn failures documented elsewhere in this
+# file (see the 100->180 max_tokens comment on summarize.py's
+# _LENGTH_TARGETS). Capped at 3 entries: OpenRouter rejects a "models"
+# array with more than 3 with a 400 ("'models' array must have 3 items or
+# fewer") - one of the original three free fallbacks (dots-studio) was
+# dropped to make room; OPENROUTER_LAST_RESORT_MODEL below is a separate,
+# single-model mechanism, not subject to this cap.
 OPENROUTER_TRANSLATE_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct",
     "cohere/north-mini-code:free",
     "inclusionai/ling-3.0-flash-fin:free",
-    "dots-studio/dots-3-note-preview:free",
 ]
 OPENROUTER_LAST_RESORT_MODEL = "openrouter/free"
 
