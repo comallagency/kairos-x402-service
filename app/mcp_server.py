@@ -364,6 +364,12 @@ async def _run_search(args: dict, payer: str | None) -> dict:
             else:
                 results, model_served = await run_web_search(query, max_results)
                 summary_label = query
+            if not results:
+                # Every configured search engine can transiently fail/rate-limit
+                # at once (run_web_search only raises SearchError for a
+                # request-level failure, not for a 200-with-zero-hits response) -
+                # an empty result set must not be billed either.
+                raise SearchError("no_results")
             results = await _enrich_results(
                 results, include_content, content_results, content_chars
             )
