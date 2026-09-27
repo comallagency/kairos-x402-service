@@ -96,6 +96,7 @@ from app.receipts import (
 )
 from app.upstream.openrouter import OpenRouterError
 from app.upstream.tokencount import count_tokens
+from app.upstream.jev import JevError, ask_jev
 from app.upstream.websearch import run_web_search
 from app.x402_setup import (
     CRYPTO_INPUT_SCHEMA,
@@ -136,6 +137,22 @@ from app.x402_setup import (
     X402_ECHO_SAMPLE_OUTPUT,
     AGENT_HEALTH_INPUT_SCHEMA,
     AGENT_HEALTH_SAMPLE_OUTPUT,
+    DECIDE_INPUT_SCHEMA,
+    DECIDE_OUTPUT_SCHEMA,
+    DECIDE_SAMPLE_INPUT,
+    DECIDE_SAMPLE_OUTPUT,
+    GUARD_INPUT_SCHEMA,
+    GUARD_OUTPUT_SCHEMA,
+    GUARD_SAMPLE_INPUT,
+    GUARD_SAMPLE_OUTPUT,
+    VERIFY_INPUT_SCHEMA,
+    VERIFY_OUTPUT_SCHEMA,
+    VERIFY_SAMPLE_INPUT,
+    VERIFY_SAMPLE_OUTPUT,
+    RANK_INPUT_SCHEMA,
+    RANK_OUTPUT_SCHEMA,
+    RANK_SAMPLE_INPUT,
+    RANK_SAMPLE_OUTPUT,
     DISCOVER_INPUT_SCHEMA,
     DISCOVER_SAMPLE_OUTPUT,
     SEARCH_OUTPUT_SCHEMA,
@@ -1456,6 +1473,299 @@ async def agent_health_tool(
         args={"url": url, "method": method},
         extensions=_AGENT_HEALTH_EXTENSIONS,
         run_and_log=_run_agent_health,
+    )
+
+
+# --- decide / guard / verify / rank (Jev decisions API) ---------------------
+
+MAX_DECIDE_QUESTIONS = 20
+MAX_DECIDE_STATE_TOKENS = 8000
+MAX_RANK_DOCUMENTS = 50
+_VALID_JEV_QUESTION_TYPES = {"noul", "choice", "score"}
+_RANK_DOC_CHARS = 2000
+
+_GUARD_CRITERIA = {
+    "allow": "The tool call is a safe, reasonable, low-risk interpretation of the user's request.",
+    "ask": "The tool call is plausible but risky, broad, or irreversible enough to warrant human confirmation first.",
+    "deny": "The tool call is clearly disproportionate to, or not a reasonable interpretation of, the user's request.",
+}
+_GUARD_INSTRUCTIONS = (
+    "Given the user's request and the tool call an agent is about to make, should "
+    "this tool call be allowed to run automatically, should it require human "
+    "confirmation first, or should it be denied?"
+)
+_VERIFY_CRITERIA = {
+    "supported": "The source's facts clearly support the claim.",
+    "contradicted": "The source's facts clearly contradict the claim.",
+    "not_enough_info": "The source does not contain enough information to judge the claim either way.",
+}
+_VERIFY_INSTRUCTIONS = "Does the source support, contradict, or give insufficient information about the claim?"
+_RANK_INSTRUCTIONS = "Which of these documents is most relevant to the query?"
+
+_DECIDE_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="decide",
+        description=ROUTE_DESCRIPTIONS["decide"],
+        input_schema=DECIDE_INPUT_SCHEMA,
+        example=DECIDE_SAMPLE_INPUT,
+        output=OutputConfig(example=DECIDE_SAMPLE_OUTPUT),
+    )
+)
+_GUARD_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="guard",
+        description=ROUTE_DESCRIPTIONS["guard"],
+        input_schema=GUARD_INPUT_SCHEMA,
+        example=GUARD_SAMPLE_INPUT,
+        output=OutputConfig(example=GUARD_SAMPLE_OUTPUT),
+    )
+)
+_VERIFY_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="verify",
+        description=ROUTE_DESCRIPTIONS["verify"],
+        input_schema=VERIFY_INPUT_SCHEMA,
+        example=VERIFY_SAMPLE_INPUT,
+        output=OutputConfig(example=VERIFY_SAMPLE_OUTPUT),
+    )
+)
+_RANK_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="rank",
+        description=ROUTE_DESCRIPTIONS["rank"],
+        input_schema=RANK_INPUT_SCHEMA,
+        example=RANK_SAMPLE_INPUT,
+        output=OutputConfig(example=RANK_SAMPLE_OUTPUT),
+    )
+)
+
+
+async def _run_decide(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)[:2000]
+    state = args.get("state")
+    questions = args.get("questions")
+    if state is None or not isinstance(state, (str, dict, list)):
+        db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_state")
+        raise ServiceError("missing_state")
+    if not questions or not isinstance(questions, dict):
+        db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_questions")
+        raise ServiceError("missing_questions")
+    if len(questions) > MAX_DECIDE_QUESTIONS:
+        db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="too_many_questions")
+        raise ServiceError("too_many_questions", detail=f"max {MAX_DECIDE_QUESTIONS} questions")
+    for key, q in questions.items():
+        if not isinstance(q, dict) or q.get("type") not in _VALID_JEV_QUESTION_TYPES:
+            db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="invalid_question")
+            raise ServiceError("invalid_question", detail=f"question {key!r} needs type in {sorted(_VALID_JEV_QUESTION_TYPES)}")
+        if "instructions" not in q or "criteria" not in q:
+            db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="invalid_question")
+            raise ServiceError("invalid_question", detail=f"question {key!r} missing instructions/criteria")
+    state_text = state if isinstance(state, str) else json.dumps(state)
+    if count_tokens(state_text) > MAX_DECIDE_STATE_TOKENS:
+        db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="state_too_large")
+        raise ServiceError("state_too_large", detail=f"state exceeds {MAX_DECIDE_STATE_TOKENS} tokens")
+
+    try:
+        with Timer() as t:
+            data = await ask_jev(state, questions)
+    except JevError as exc:
+        db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200])
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+
+    price = effective_price(payer, price_float(config.PRICE_DECIDE))
+    db.log_request(route="decide", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt)
+    receipt = make_receipt("jev", "decision", t.elapsed_ms, price)
+    return {"answers": data["answers"], "x402_receipt": receipt}
+
+
+async def _run_guard(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)[:2000]
+    user_request = args.get("user_request")
+    tool_call = args.get("tool_call")
+    if not user_request or not isinstance(user_request, str):
+        db.log_request(route="guard", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_user_request")
+        raise ServiceError("missing_user_request")
+    if not tool_call or not isinstance(tool_call, dict):
+        db.log_request(route="guard", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_tool_call")
+        raise ServiceError("missing_tool_call")
+
+    state = json.dumps({"user_request": user_request, "tool_call": tool_call})
+    questions = {"decision": {"type": "choice", "instructions": _GUARD_INSTRUCTIONS, "criteria": _GUARD_CRITERIA}}
+    try:
+        with Timer() as t:
+            data = await ask_jev(state, questions)
+    except JevError as exc:
+        db.log_request(route="guard", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200])
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+
+    answer = data["answers"]["decision"]
+    price = effective_price(payer, price_float(config.PRICE_GUARD))
+    db.log_request(route="guard", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt)
+    receipt = make_receipt("jev", "guardrail", t.elapsed_ms, price)
+    return {
+        "decision": answer["choice"],
+        "probability": answer["probabilities"][answer["choice"]],
+        "probabilities": answer["probabilities"],
+        "confidence": answer.get("confidence"),
+        "x402_receipt": receipt,
+    }
+
+
+async def _run_verify(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)[:2000]
+    claim = args.get("claim")
+    source = args.get("source")
+    if not claim or not isinstance(claim, str):
+        db.log_request(route="verify", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_claim")
+        raise ServiceError("missing_claim")
+    if not source or not isinstance(source, str):
+        db.log_request(route="verify", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_source")
+        raise ServiceError("missing_source")
+
+    state = json.dumps({"claim": claim, "source": source})
+    questions = {"verdict": {"type": "choice", "instructions": _VERIFY_INSTRUCTIONS, "criteria": _VERIFY_CRITERIA}}
+    try:
+        with Timer() as t:
+            data = await ask_jev(state, questions)
+    except JevError as exc:
+        db.log_request(route="verify", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200])
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+
+    answer = data["answers"]["verdict"]
+    price = effective_price(payer, price_float(config.PRICE_VERIFY))
+    db.log_request(route="verify", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt)
+    receipt = make_receipt("jev", "verification", t.elapsed_ms, price)
+    return {
+        "verdict": answer["choice"],
+        "probability": answer["probabilities"][answer["choice"]],
+        "probabilities": answer["probabilities"],
+        "confidence": answer.get("confidence"),
+        "x402_receipt": receipt,
+    }
+
+
+async def _run_rank(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)[:2000]
+    query = args.get("query")
+    documents = args.get("documents")
+    if not query or not isinstance(query, str):
+        db.log_request(route="rank", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_query")
+        raise ServiceError("missing_query")
+    if (
+        not documents
+        or not isinstance(documents, list)
+        or not (1 <= len(documents) <= MAX_RANK_DOCUMENTS)
+        or not all(isinstance(d, str) and d for d in documents)
+    ):
+        db.log_request(route="rank", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="invalid_documents")
+        raise ServiceError("invalid_documents", detail=f"documents must have 1-{MAX_RANK_DOCUMENTS} non-empty strings")
+
+    criteria = {f"doc_{i}": d[:_RANK_DOC_CHARS] for i, d in enumerate(documents)}
+    questions = {"ranking": {"type": "choice", "instructions": _RANK_INSTRUCTIONS, "criteria": criteria}}
+    try:
+        with Timer() as t:
+            data = await ask_jev(query, questions)
+    except JevError as exc:
+        db.log_request(route="rank", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200])
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+
+    probabilities = data["answers"]["ranking"]["probabilities"]
+    ranked = sorted(
+        ({"document": documents[int(key.split("_")[1])], "score": prob} for key, prob in probabilities.items()),
+        key=lambda item: item["score"],
+        reverse=True,
+    )
+    price = effective_price(payer, price_float(config.PRICE_RANK))
+    db.log_request(route="rank", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt)
+    receipt = make_receipt("jev", "rerank", t.elapsed_ms, price)
+    return {"documents": ranked, "x402_receipt": receipt}
+
+
+@mcp.tool(
+    name="decide",
+    title="Decision Questions",
+    description=ROUTE_DESCRIPTIONS["decide"],
+    output_schema=DECIDE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
+async def decide_tool(
+    state: Annotated[object, Field(description=DECIDE_INPUT_SCHEMA["properties"]["state"]["description"])],
+    questions: Annotated[dict, Field(description=DECIDE_INPUT_SCHEMA["properties"]["questions"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="decide",
+        route_key="POST /decide",
+        ctx=ctx,
+        args={"state": state, "questions": questions},
+        extensions=_DECIDE_EXTENSIONS,
+        run_and_log=_run_decide,
+    )
+
+
+@mcp.tool(
+    name="guard",
+    title="Tool Call Guard",
+    description=ROUTE_DESCRIPTIONS["guard"],
+    output_schema=GUARD_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
+async def guard_tool(
+    user_request: Annotated[str, Field(description=GUARD_INPUT_SCHEMA["properties"]["user_request"]["description"])],
+    tool_call: Annotated[dict, Field(description=GUARD_INPUT_SCHEMA["properties"]["tool_call"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="guard",
+        route_key="POST /guard",
+        ctx=ctx,
+        args={"user_request": user_request, "tool_call": tool_call},
+        extensions=_GUARD_EXTENSIONS,
+        run_and_log=_run_guard,
+    )
+
+
+@mcp.tool(
+    name="verify",
+    title="Claim Verification",
+    description=ROUTE_DESCRIPTIONS["verify"],
+    output_schema=VERIFY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
+async def verify_tool(
+    claim: Annotated[str, Field(description=VERIFY_INPUT_SCHEMA["properties"]["claim"]["description"])],
+    source: Annotated[str, Field(description=VERIFY_INPUT_SCHEMA["properties"]["source"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="verify",
+        route_key="POST /verify",
+        ctx=ctx,
+        args={"claim": claim, "source": source},
+        extensions=_VERIFY_EXTENSIONS,
+        run_and_log=_run_verify,
+    )
+
+
+@mcp.tool(
+    name="rank",
+    title="Document Rerank",
+    description=ROUTE_DESCRIPTIONS["rank"],
+    output_schema=RANK_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
+async def rank_tool(
+    query: Annotated[str, Field(description=RANK_INPUT_SCHEMA["properties"]["query"]["description"])],
+    documents: Annotated[list[str], Field(description=RANK_INPUT_SCHEMA["properties"]["documents"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="rank",
+        route_key="POST /rank",
+        ctx=ctx,
+        args={"query": query, "documents": documents},
+        extensions=_RANK_EXTENSIONS,
+        run_and_log=_run_rank,
     )
 
 

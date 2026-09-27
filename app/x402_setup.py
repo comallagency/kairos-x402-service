@@ -509,6 +509,30 @@ ROUTE_DESCRIPTIONS = {
         "agent card and MCP manifest. Returns a 0-100 score, verdict and issues. "
         "Try GET /agent-health/sample."
     ),
+    "decide": (
+        "Ask up to 20 typed yes/no, multiple-choice or ordinal-scale questions "
+        "about one shared piece of context in a single call - each answered "
+        "with a real probability (Jev decision primitives), not generated "
+        "text. Try GET /decide/sample."
+    ),
+    "guard": (
+        "Ask whether a tool call should run automatically, need human "
+        "confirmation, or be denied, given the user's request - returns "
+        "allow/ask/deny with a probability. Advisory only: like any "
+        "LLM-based judge it is sensitive to prompt injection in the request "
+        "or tool call, so the calling agent must keep the final decision, "
+        "not delegate it outright. Try GET /guard/sample."
+    ),
+    "verify": (
+        "Check whether a source supports, contradicts, or gives insufficient "
+        "information about a claim - a typed verdict with a real probability, "
+        "not generated text. Try GET /verify/sample."
+    ),
+    "rank": (
+        "Rank up to 50 documents by relevance to a query in a single call - "
+        "each document returned with its relevance probability, sorted "
+        "highest first. Try GET /rank/sample."
+    ),
 }
 
 for _name, _desc in ROUTE_DESCRIPTIONS.items():
@@ -1180,6 +1204,122 @@ AGENT_HEALTH_OUTPUT_SCHEMA = {
     ],
 }
 
+DECIDE_INPUT_SCHEMA = {
+    "properties": {
+        "state": {
+            "description": (
+                "Shared context the questions are asked about - a string, or a "
+                "JSON object/array. Capped at 8000 tokens."
+            ),
+        },
+        "questions": {
+            "type": "object",
+            "description": (
+                "Up to 20 typed questions, keyed by a name you choose. Each needs "
+                "type ('noul', 'choice' or 'score'), instructions, and criteria "
+                "(shape depends on type - see /decide/sample)."
+            ),
+        },
+    },
+    "required": ["state", "questions"],
+}
+
+DECIDE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "answers": {
+            "type": "object",
+            "description": (
+                "One answer per question key, shaped by its type: noul (probability "
+                "of yes), choice (selected option, per-option probabilities, "
+                "confidence), or score (position, per-level probabilities, "
+                "confidence, legend)."
+            ),
+        },
+        "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
+    },
+    "required": ["answers"],
+}
+
+GUARD_INPUT_SCHEMA = {
+    "properties": {
+        "user_request": {"type": "string", "description": "The user's original request, in their own words."},
+        "tool_call": {
+            "type": "object",
+            "description": "The tool call an agent is about to make, e.g. {\"name\": ..., \"arguments\": {...}}.",
+        },
+    },
+    "required": ["user_request", "tool_call"],
+}
+
+GUARD_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "decision": {"type": "string", "enum": ["allow", "ask", "deny"]},
+        "probability": {"type": "number", "description": "Probability of the returned decision."},
+        "probabilities": {"type": "object", "description": "Probability for each of allow/ask/deny."},
+        "confidence": {"type": "number"},
+        "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
+    },
+    "required": ["decision", "probability", "probabilities"],
+}
+
+VERIFY_INPUT_SCHEMA = {
+    "properties": {
+        "claim": {"type": "string", "description": "The factual claim to check."},
+        "source": {"type": "string", "description": "The source text to check the claim against."},
+    },
+    "required": ["claim", "source"],
+}
+
+VERIFY_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["supported", "contradicted", "not_enough_info"]},
+        "probability": {"type": "number", "description": "Probability of the returned verdict."},
+        "probabilities": {"type": "object"},
+        "confidence": {"type": "number"},
+        "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
+    },
+    "required": ["verdict", "probability", "probabilities"],
+}
+
+RANK_INPUT_SCHEMA = {
+    "properties": {
+        "query": {"type": "string", "description": "The query to rank documents against."},
+        "documents": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "maxItems": 50,
+            "description": (
+                "Up to 50 documents to rank by relevance to the query. Each "
+                "truncated to 2000 characters before scoring."
+            ),
+        },
+    },
+    "required": ["query", "documents"],
+}
+
+RANK_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "documents": {
+            "type": "array",
+            "description": "Input documents, sorted by relevance score descending.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "document": {"type": "string"},
+                    "score": {"type": "number", "description": "Relevance probability, 0-1."},
+                },
+            },
+        },
+        "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
+    },
+    "required": ["documents"],
+}
+
 # One-sentence outcome summary per route (OpenAPI `summary`, distinct from the
 # longer `description`) and imperative-phrased agent intents (`x-use-cases`,
 # not a standard field but harmless if unread, and cheap extra signal if
@@ -1422,6 +1562,78 @@ ROUTE_USE_CASES = {
         "check OpenAPI, A2A agent card and MCP discovery in one call",
         "score a third-party agent and receive explicit remediation issues",
     ],
+}
+
+
+DECIDE_SAMPLE_INPUT = {
+    "state": (
+        "A customer wrote: 'The app crashed when I tried to upload a photo "
+        "larger than 10MB, and I have already been charged for premium.'"
+    ),
+    "questions": {
+        "is_bug": {
+            "type": "noul",
+            "instructions": "Is the customer reporting a software defect?",
+            "criteria": {
+                "true": "The customer describes broken or unexpected behavior.",
+                "false": "The customer is asking a question or requesting a feature.",
+            },
+        },
+    },
+}
+# Captured from a real Jev call (2026-09-27).
+DECIDE_SAMPLE_OUTPUT = {
+    "answers": {
+        "is_bug": {"type": "noul", "noul": 0.96},
+    },
+    "x402_receipt": {"model_served": "jev", "upstream": "decision", "latency_ms": 468, "price_paid_usdc": 0.0},
+}
+
+GUARD_SAMPLE_INPUT = {
+    "user_request": "Clean up my project folder, it's gotten messy.",
+    "tool_call": {"name": "delete_files", "arguments": {"path": "/", "recursive": True}},
+}
+# Captured from a real Jev call (2026-09-27).
+GUARD_SAMPLE_OUTPUT = {
+    "decision": "deny",
+    "probability": 0.92,
+    "probabilities": {"allow": 0, "deny": 0.92, "ask": 0.08},
+    "confidence": 0.89,
+    "x402_receipt": {"model_served": "jev", "upstream": "guardrail", "latency_ms": 420, "price_paid_usdc": 0.0},
+}
+
+VERIFY_SAMPLE_INPUT = {
+    "claim": "The Eiffel Tower is taller than the Statue of Liberty.",
+    "source": (
+        "The Eiffel Tower stands 330 meters tall including antennas, while the "
+        "Statue of Liberty, including its pedestal, reaches about 93 meters."
+    ),
+}
+# Captured from a real Jev call (2026-09-27).
+VERIFY_SAMPLE_OUTPUT = {
+    "verdict": "supported",
+    "probability": 1,
+    "probabilities": {"not_enough_info": 0, "supported": 1, "contradicted": 0},
+    "confidence": 1,
+    "x402_receipt": {"model_served": "jev", "upstream": "verification", "latency_ms": 390, "price_paid_usdc": 0.0},
+}
+
+RANK_SAMPLE_INPUT = {
+    "query": "best practices for REST API design",
+    "documents": [
+        "A blog post comparing REST API versioning strategies: URL path, header, and query param versioning.",
+        "A recipe for chocolate cake with step-by-step baking instructions.",
+        "A guide to RESTful resource naming conventions and correct HTTP verb usage.",
+    ],
+}
+# Captured from a real Jev call (2026-09-27).
+RANK_SAMPLE_OUTPUT = {
+    "documents": [
+        {"document": RANK_SAMPLE_INPUT["documents"][2], "score": 1},
+        {"document": RANK_SAMPLE_INPUT["documents"][0], "score": 0},
+        {"document": RANK_SAMPLE_INPUT["documents"][1], "score": 0},
+    ],
+    "x402_receipt": {"model_served": "jev", "upstream": "rerank", "latency_ms": 405, "price_paid_usdc": 0.0},
 }
 
 
@@ -2072,6 +2284,66 @@ def _core_route_configs() -> dict[str, RouteConfig]:
                     example=AGENT_HEALTH_SAMPLE_OUTPUT,
                     schema=AGENT_HEALTH_OUTPUT_SCHEMA,
                 ),
+            ),
+        ),
+        "POST /decide": RouteConfig(
+            accepts=_payment_option(config.PRICE_DECIDE),
+            resource=f"{config.BASE_URL}/decide",
+            description=ROUTE_DESCRIPTIONS["decide"],
+            mime_type="application/json",
+            service_name="decision-questions",
+            icon_url=ICON_URL,
+            tags=["decision", "classification"],
+            extensions=declare_discovery_extension(
+                input=DECIDE_SAMPLE_INPUT,
+                input_schema=DECIDE_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=DECIDE_SAMPLE_OUTPUT, schema=DECIDE_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /guard": RouteConfig(
+            accepts=_payment_option(config.PRICE_GUARD),
+            resource=f"{config.BASE_URL}/guard",
+            description=ROUTE_DESCRIPTIONS["guard"],
+            mime_type="application/json",
+            service_name="tool-call-guard",
+            icon_url=ICON_URL,
+            tags=["guardrail"],
+            extensions=declare_discovery_extension(
+                input=GUARD_SAMPLE_INPUT,
+                input_schema=GUARD_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=GUARD_SAMPLE_OUTPUT, schema=GUARD_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /verify": RouteConfig(
+            accepts=_payment_option(config.PRICE_VERIFY),
+            resource=f"{config.BASE_URL}/verify",
+            description=ROUTE_DESCRIPTIONS["verify"],
+            mime_type="application/json",
+            service_name="claim-verification",
+            icon_url=ICON_URL,
+            tags=["verification"],
+            extensions=declare_discovery_extension(
+                input=VERIFY_SAMPLE_INPUT,
+                input_schema=VERIFY_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=VERIFY_SAMPLE_OUTPUT, schema=VERIFY_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /rank": RouteConfig(
+            accepts=_payment_option(config.PRICE_RANK),
+            resource=f"{config.BASE_URL}/rank",
+            description=ROUTE_DESCRIPTIONS["rank"],
+            mime_type="application/json",
+            service_name="document-rerank",
+            icon_url=ICON_URL,
+            tags=["rerank"],
+            extensions=declare_discovery_extension(
+                input=RANK_SAMPLE_INPUT,
+                input_schema=RANK_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=RANK_SAMPLE_OUTPUT, schema=RANK_OUTPUT_SCHEMA),
             ),
         ),
     }

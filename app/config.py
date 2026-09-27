@@ -132,6 +132,12 @@ PRICE_TIP = "$0.01"
 PRICE_AGENT_CLAIM = "$0.01"
 # Fresh operational + discovery audit, below $0.002-$0.005 competitors.
 PRICE_AGENT_HEALTH = "$0.001"
+# Jev decisions API (typed noul/choice/score questions), flat per call -
+# real upstream cost measured ~$0.00002/call, comfortable margin at $0.001.
+PRICE_DECIDE = "$0.001"
+PRICE_GUARD = "$0.001"
+PRICE_VERIFY = "$0.001"
+PRICE_RANK = "$0.001"
 # GET /discover is free by design too, and has no price constant. A
 # PRICE_DISCOVER = "$0.001" sat here from 13:29 on 2026-09-11 until it was
 # removed: a run was cut by its turn ceiling after writing the constant and

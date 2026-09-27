@@ -33,6 +33,7 @@ from app.handlers.agent_health import router as agent_health_router
 from app.handlers.agent_claim import router as agent_claim_router
 from app.handlers.gas_price import router as gas_price_router
 from app.handlers.jobs import router as jobs_router
+from app.handlers.jev import router as jev_router
 from app.handlers.news import router as news_router
 from app.handlers.pdf import router as pdf_router
 from app.handlers.probe import router as probe_router
@@ -123,6 +124,7 @@ inner_app.include_router(wallet_intelligence_router)
 inner_app.include_router(x402_echo_router)
 inner_app.include_router(agent_health_router)
 inner_app.include_router(agent_claim_router)
+inner_app.include_router(jev_router)
 inner_app.include_router(capabilities_router)
 inner_app.include_router(discovery_router)
 inner_app.include_router(admin_router)
