@@ -2,9 +2,13 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "world.agentindex/x402",
   "title": "AgentIndex x402",
-  "description": "Pay-per-call web search, translation and research jobs for AI agents. USDC on Base, no account.",
-  "version": "1.0.0",
-  "websiteUrl": "https://x402.agentindex.world/openapi.json",
+  "description": "Pay-per-call x402 tools for AI agents: search, PDF/web-read, extraction, market data, wallet reads.",
+  "version": "1.1.0",
+  "repository": {
+    "url": "https://github.com/comallagency/kairos-x402-service",
+    "source": "github"
+  },
+  "websiteUrl": "https://x402.agentindex.world",
   "remotes": [
     {
       "type": "streamable-http",
