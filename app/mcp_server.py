@@ -40,6 +40,9 @@ project-specific client code.
 import asyncio
 import json
 import logging
+from typing import Annotated
+
+from pydantic import Field
 
 from fastmcp import Context, FastMCP
 from fastmcp.tools.base import ToolResult
@@ -135,6 +138,24 @@ from app.x402_setup import (
     AGENT_HEALTH_SAMPLE_OUTPUT,
     DISCOVER_INPUT_SCHEMA,
     DISCOVER_SAMPLE_OUTPUT,
+    SEARCH_OUTPUT_SCHEMA,
+    TRANSLATE_OUTPUT_SCHEMA,
+    JOBS_OUTPUT_SCHEMA,
+    PDF_OUTPUT_SCHEMA,
+    WEB_READ_OUTPUT_SCHEMA,
+    EXTRACT_OUTPUT_SCHEMA,
+    SUMMARIZE_OUTPUT_SCHEMA,
+    FACT_CHECK_OUTPUT_SCHEMA,
+    WEATHER_OUTPUT_SCHEMA,
+    CRYPTO_OUTPUT_SCHEMA,
+    NEWS_OUTPUT_SCHEMA,
+    CAN_PAY_OUTPUT_SCHEMA,
+    PROBE_OUTPUT_SCHEMA,
+    WALLET_BALANCE_OUTPUT_SCHEMA,
+    GAS_PRICE_OUTPUT_SCHEMA,
+    WALLET_INTELLIGENCE_OUTPUT_SCHEMA,
+    X402_ECHO_OUTPUT_SCHEMA,
+    AGENT_HEALTH_OUTPUT_SCHEMA,
     build_route_configs,
     get_resource_server,
 )
@@ -358,15 +379,21 @@ async def _run_search(args: dict, payer: str | None) -> dict:
 # KIT_TAGLINE comment in app/x402_setup.py). Function and helpers kept
 # intact; uncomment this decorator to re-register the tool once a real
 # balance exists.
-@mcp.tool(name="search", description=ROUTE_DESCRIPTIONS["search"])
+@mcp.tool(
+    name="search",
+    title="Web Search",
+    description=ROUTE_DESCRIPTIONS["search"],
+    output_schema=SEARCH_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def search_tool(
-    query: str | list[str],
-    max_results: int = 5,
-    extract: bool = True,
-    include_content: bool = True,
-    content_results: int = 3,
-    content_chars: int = DEFAULT_CONTENT_CHARS,
-    summarize: bool = False,
+    query: Annotated[str | list[str], Field(description=SEARCH_INPUT_SCHEMA["properties"]["query"]["description"])],
+    max_results: Annotated[int, Field(description=SEARCH_INPUT_SCHEMA["properties"]["max_results"]["description"])] = 5,
+    extract: Annotated[bool, Field(description=SEARCH_INPUT_SCHEMA["properties"]["extract"]["description"])] = True,
+    include_content: Annotated[bool, Field(description=SEARCH_INPUT_SCHEMA["properties"]["include_content"]["description"])] = True,
+    content_results: Annotated[int, Field(description=SEARCH_INPUT_SCHEMA["properties"]["content_results"]["description"])] = 3,
+    content_chars: Annotated[int, Field(description=SEARCH_INPUT_SCHEMA["properties"]["content_chars"]["description"])] = DEFAULT_CONTENT_CHARS,
+    summarize: Annotated[bool, Field(description=SEARCH_INPUT_SCHEMA["properties"]["summarize"]["description"])] = False,
     ctx: Context = None,
 ) -> ToolResult:
     args = {
@@ -471,12 +498,18 @@ async def _run_translate(args: dict, payer: str | None) -> dict:
     }
 
 
-@mcp.tool(name="translate", description=ROUTE_DESCRIPTIONS["translate"])
+@mcp.tool(
+    name="translate",
+    title="Translate Text",
+    description=ROUTE_DESCRIPTIONS["translate"],
+    output_schema=TRANSLATE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
 async def translate_tool(
-    text: str | list[str],
-    target_lang: str,
-    source_lang: str | None = None,
-    preserve_format: bool = True,
+    text: Annotated[str | list[str], Field(description=TRANSLATE_INPUT_SCHEMA["properties"]["text"]["description"])],
+    target_lang: Annotated[str, Field(description=TRANSLATE_INPUT_SCHEMA["properties"]["target_lang"]["description"])],
+    source_lang: Annotated[str | None, Field(description=TRANSLATE_INPUT_SCHEMA["properties"]["source_lang"]["description"])] = None,
+    preserve_format: Annotated[bool, Field(description=TRANSLATE_INPUT_SCHEMA["properties"]["preserve_format"]["description"])] = True,
     ctx: Context = None,
 ) -> ToolResult:
     args = {
@@ -530,8 +563,17 @@ async def _run_jobs(args: dict, payer: str | None) -> dict:
     return {"job_id": job_id, "eta_seconds": eta_seconds}
 
 
-@mcp.tool(name="jobs", description=ROUTE_DESCRIPTIONS["jobs"])
-async def jobs_tool(subject: str, ctx: Context = None) -> ToolResult:
+@mcp.tool(
+    name="jobs",
+    title="Research Job",
+    description=ROUTE_DESCRIPTIONS["jobs"],
+    output_schema=JOBS_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": False, "openWorldHint": True, "idempotentHint": False},
+)
+async def jobs_tool(
+    subject: Annotated[str, Field(description=JOBS_INPUT_SCHEMA["properties"]["subject"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
     args = {"subject": subject}
     return await _paid_tool_call(
         tool_name="jobs",
@@ -579,8 +621,18 @@ async def _run_read_pdf(args: dict, payer: str | None) -> dict:
     return {**parsed, "token_count": token_count, "x402_receipt": receipt}
 
 
-@mcp.tool(name="read_pdf", description=ROUTE_DESCRIPTIONS["pdf"])
-async def read_pdf_tool(url: str | None = None, pdf_base64: str | None = None, ctx: Context = None) -> ToolResult:
+@mcp.tool(
+    name="read_pdf",
+    title="PDF to Markdown",
+    description=ROUTE_DESCRIPTIONS["pdf"],
+    output_schema=PDF_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def read_pdf_tool(
+    url: Annotated[str | None, Field(description=PDF_INPUT_SCHEMA["properties"]["url"]["description"])] = None,
+    pdf_base64: Annotated[str | None, Field(description=PDF_INPUT_SCHEMA["properties"]["pdf_base64"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
     args = {"url": url, "pdf_base64": pdf_base64}
     return await _paid_tool_call(
         tool_name="read_pdf",
@@ -634,8 +686,17 @@ async def _run_read_web_page(args: dict, payer: str | None) -> dict:
     return {**result, "token_count": token_count, "x402_receipt": receipt}
 
 
-@mcp.tool(name="read_web_page", description=ROUTE_DESCRIPTIONS["web-read"])
-async def read_web_page_tool(url: str, ctx: Context = None) -> ToolResult:
+@mcp.tool(
+    name="read_web_page",
+    title="Web Page to Markdown",
+    description=ROUTE_DESCRIPTIONS["web-read"],
+    output_schema=WEB_READ_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def read_web_page_tool(
+    url: Annotated[str, Field(description=WEB_READ_INPUT_SCHEMA["properties"]["url"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
     return await _paid_tool_call(
         tool_name="read_web_page",
         route_key="POST /web-read",
@@ -698,9 +759,18 @@ async def _run_extract_structured(args: dict, payer: str | None) -> dict:
     return {"data": data, "x402_receipt": receipt}
 
 
-@mcp.tool(name="extract_structured", description=ROUTE_DESCRIPTIONS["extract"])
+@mcp.tool(
+    name="extract_structured",
+    title="Extract Structured Data",
+    description=ROUTE_DESCRIPTIONS["extract"],
+    output_schema=EXTRACT_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def extract_structured_tool(
-    schema: dict, url: str | None = None, text: str | None = None, ctx: Context = None
+    schema: Annotated[dict, Field(description=EXTRACT_INPUT_SCHEMA["properties"]["schema"]["description"])],
+    url: Annotated[str | None, Field(description=EXTRACT_INPUT_SCHEMA["properties"]["url"]["description"])] = None,
+    text: Annotated[str | None, Field(description=EXTRACT_INPUT_SCHEMA["properties"]["text"]["description"])] = None,
+    ctx: Context = None,
 ) -> ToolResult:
     args = {"schema": schema, "url": url, "text": text}
     return await _paid_tool_call(
@@ -749,10 +819,19 @@ async def _run_summarize(args: dict, payer: str | None) -> dict:
     return {"summary": summary, "length": length, "sources": sources, "x402_receipt": receipt}
 
 
-@mcp.tool(name="summarize", description=ROUTE_DESCRIPTIONS["summarize"])
+@mcp.tool(
+    name="summarize",
+    title="Summarize",
+    description=ROUTE_DESCRIPTIONS["summarize"],
+    output_schema=SUMMARIZE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def summarize_tool(
-    url: str | None = None, text: str | None = None, html: str | None = None,
-    length: str = "medium", ctx: Context = None,
+    url: Annotated[str | None, Field(description=SUMMARIZE_INPUT_SCHEMA["properties"]["url"]["description"])] = None,
+    text: Annotated[str | None, Field(description=SUMMARIZE_INPUT_SCHEMA["properties"]["text"]["description"])] = None,
+    html: Annotated[str | None, Field(description=SUMMARIZE_INPUT_SCHEMA["properties"]["html"]["description"])] = None,
+    length: Annotated[str, Field(description=SUMMARIZE_INPUT_SCHEMA["properties"]["length"]["description"])] = "medium",
+    ctx: Context = None,
 ) -> ToolResult:
     args = {"url": url, "text": text, "html": html, "length": length}
     return await _paid_tool_call(
@@ -812,8 +891,17 @@ async def _run_fact_check(args: dict, payer: str | None) -> dict:
 # Disabled 2026-09-07 along with "POST /fact-check" in app/x402_setup.py -
 # _check_claim() searches the web internally via the same paid plugin as
 # /search. See the comment above search_tool.
-@mcp.tool(name="fact_check", description=ROUTE_DESCRIPTIONS["fact-check"])
-async def fact_check_tool(claim: str, ctx: Context = None) -> ToolResult:
+@mcp.tool(
+    name="fact_check",
+    title="Fact Check",
+    description=ROUTE_DESCRIPTIONS["fact-check"],
+    output_schema=FACT_CHECK_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def fact_check_tool(
+    claim: Annotated[str, Field(description=FACT_CHECK_INPUT_SCHEMA["properties"]["claim"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
     return await _paid_tool_call(
         tool_name="fact_check",
         route_key="POST /fact-check",
@@ -916,11 +1004,17 @@ async def _run_news(args: dict, payer: str | None) -> dict:
     return {**result, "x402_receipt": make_receipt(None, "news", t.elapsed_ms, price)}
 
 
-@mcp.tool(name="weather", description=ROUTE_DESCRIPTIONS["weather"])
+@mcp.tool(
+    name="weather",
+    title="Weather Forecast",
+    description=ROUTE_DESCRIPTIONS["weather"],
+    output_schema=WEATHER_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def weather_tool(
-    city: str | None = None,
-    lat: float | None = None,
-    lon: float | None = None,
+    city: Annotated[str | None, Field(description=WEATHER_INPUT_SCHEMA["properties"]["city"]["description"])] = None,
+    lat: Annotated[float | None, Field(description=WEATHER_INPUT_SCHEMA["properties"]["lat"]["description"])] = None,
+    lon: Annotated[float | None, Field(description=WEATHER_INPUT_SCHEMA["properties"]["lon"]["description"])] = None,
     ctx: Context = None,
 ) -> ToolResult:
     args = {k: v for k, v in (("city", city), ("lat", lat), ("lon", lon)) if v is not None}
@@ -934,10 +1028,16 @@ async def weather_tool(
     )
 
 
-@mcp.tool(name="crypto", description=ROUTE_DESCRIPTIONS["crypto"])
+@mcp.tool(
+    name="crypto",
+    title="Crypto Price",
+    description=ROUTE_DESCRIPTIONS["crypto"],
+    output_schema=CRYPTO_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def crypto_tool(
-    coins: str | list[str],
-    vs_currency: str = "usd",
+    coins: Annotated[str | list[str], Field(description=CRYPTO_INPUT_SCHEMA["properties"]["coins"]["description"])],
+    vs_currency: Annotated[str, Field(description=CRYPTO_INPUT_SCHEMA["properties"]["vs_currency"]["description"])] = "usd",
     ctx: Context = None,
 ) -> ToolResult:
     return await _paid_tool_call(
@@ -950,8 +1050,17 @@ async def crypto_tool(
     )
 
 
-@mcp.tool(name="news", description=ROUTE_DESCRIPTIONS["news"])
-async def news_tool(limit: int = 10, ctx: Context = None) -> ToolResult:
+@mcp.tool(
+    name="news",
+    title="Hacker News Headlines",
+    description=ROUTE_DESCRIPTIONS["news"],
+    output_schema=NEWS_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def news_tool(
+    limit: Annotated[int, Field(description=NEWS_INPUT_SCHEMA["properties"]["limit"]["description"])] = 10,
+    ctx: Context = None,
+) -> ToolResult:
     return await _paid_tool_call(
         tool_name="news",
         route_key="POST /news",
@@ -1025,10 +1134,16 @@ async def _run_probe(args: dict, payer: str | None) -> dict:
     return {**result, "x402_receipt": make_receipt(None, "probe", t.elapsed_ms, price)}
 
 
-@mcp.tool(name="can_pay", description=ROUTE_DESCRIPTIONS["can-pay"])
+@mcp.tool(
+    name="can_pay",
+    title="Wallet Can Pay",
+    description=ROUTE_DESCRIPTIONS["can-pay"],
+    output_schema=CAN_PAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def can_pay_tool(
-    address: str,
-    amount: float = 0.001,
+    address: Annotated[str, Field(description=CAN_PAY_INPUT_SCHEMA["properties"]["address"]["description"])],
+    amount: Annotated[float, Field(description=CAN_PAY_INPUT_SCHEMA["properties"]["amount"]["description"])] = 0.001,
     ctx: Context = None,
 ) -> ToolResult:
     return await _paid_tool_call(
@@ -1041,10 +1156,16 @@ async def can_pay_tool(
     )
 
 
-@mcp.tool(name="probe", description=ROUTE_DESCRIPTIONS["probe"])
+@mcp.tool(
+    name="probe",
+    title="x402 Paywall Probe",
+    description=ROUTE_DESCRIPTIONS["probe"],
+    output_schema=PROBE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def probe_tool(
-    url: str,
-    method: str = "GET",
+    url: Annotated[str, Field(description=PROBE_INPUT_SCHEMA["properties"]["url"]["description"])],
+    method: Annotated[str, Field(description=PROBE_INPUT_SCHEMA["properties"]["method"]["description"])] = "GET",
     ctx: Context = None,
 ) -> ToolResult:
     return await _paid_tool_call(
@@ -1226,10 +1347,16 @@ async def _run_agent_health(args: dict, payer: str | None) -> dict:
     }
 
 
-@mcp.tool(name="wallet_balance", description=ROUTE_DESCRIPTIONS["wallet-balance"])
+@mcp.tool(
+    name="wallet_balance",
+    title="Wallet Balance",
+    description=ROUTE_DESCRIPTIONS["wallet-balance"],
+    output_schema=WALLET_BALANCE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def wallet_balance_tool(
-    address: str,
-    network: str = "base",
+    address: Annotated[str, Field(description=WALLET_BALANCE_INPUT_SCHEMA["properties"]["address"]["description"])],
+    network: Annotated[str, Field(description=WALLET_BALANCE_INPUT_SCHEMA["properties"]["network"]["description"])] = "base",
     ctx: Context = None,
 ) -> ToolResult:
     return await _paid_tool_call(
@@ -1242,9 +1369,15 @@ async def wallet_balance_tool(
     )
 
 
-@mcp.tool(name="gas_price", description=ROUTE_DESCRIPTIONS["gas-price"])
+@mcp.tool(
+    name="gas_price",
+    title="Gas Price",
+    description=ROUTE_DESCRIPTIONS["gas-price"],
+    output_schema=GAS_PRICE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def gas_price_tool(
-    network: str = "base",
+    network: Annotated[str, Field(description=GAS_PRICE_INPUT_SCHEMA["properties"]["network"]["description"])] = "base",
     ctx: Context = None,
 ) -> ToolResult:
     return await _paid_tool_call(
@@ -1258,12 +1391,15 @@ async def gas_price_tool(
 
 @mcp.tool(
     name="wallet_intelligence",
+    title="Wallet Intelligence",
     description=ROUTE_DESCRIPTIONS["wallet-intelligence"],
+    output_schema=WALLET_INTELLIGENCE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
 )
 async def wallet_intelligence_tool(
-    address: str,
-    networks: list[str] | None = None,
-    amount_usdc: float = 0.001,
+    address: Annotated[str, Field(description=WALLET_INTELLIGENCE_INPUT_SCHEMA["properties"]["address"]["description"])],
+    networks: Annotated[list[str] | None, Field(description=WALLET_INTELLIGENCE_INPUT_SCHEMA["properties"]["networks"]["description"])] = None,
+    amount_usdc: Annotated[float, Field(description=WALLET_INTELLIGENCE_INPUT_SCHEMA["properties"]["amount_usdc"]["description"])] = 0.001,
     ctx: Context = None,
 ) -> ToolResult:
     return await _paid_tool_call(
@@ -1281,9 +1417,15 @@ async def wallet_intelligence_tool(
         run_and_log=_run_wallet_intelligence,
     )
 
-@mcp.tool(name="x402_echo", description=ROUTE_DESCRIPTIONS["x402-echo"])
+@mcp.tool(
+    name="x402_echo",
+    title="x402 Echo Test",
+    description=ROUTE_DESCRIPTIONS["x402-echo"],
+    output_schema=X402_ECHO_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
 async def x402_echo_tool(
-    message: str = "hello agent",
+    message: Annotated[str, Field(description=X402_ECHO_INPUT_SCHEMA["properties"]["message"]["description"])] = "hello agent",
     ctx: Context = None,
 ) -> ToolResult:
     return await _paid_tool_call(
@@ -1295,10 +1437,16 @@ async def x402_echo_tool(
         run_and_log=_run_x402_echo,
     )
 
-@mcp.tool(name="agent_health", description=ROUTE_DESCRIPTIONS["agent-health"])
+@mcp.tool(
+    name="agent_health",
+    title="Agent Health Check",
+    description=ROUTE_DESCRIPTIONS["agent-health"],
+    output_schema=AGENT_HEALTH_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def agent_health_tool(
-    url: str,
-    method: str = "GET",
+    url: Annotated[str, Field(description=AGENT_HEALTH_INPUT_SCHEMA["properties"]["url"]["description"])],
+    method: Annotated[str, Field(description=AGENT_HEALTH_INPUT_SCHEMA["properties"]["method"]["description"])] = "GET",
     ctx: Context = None,
 ) -> ToolResult:
     return await _paid_tool_call(
