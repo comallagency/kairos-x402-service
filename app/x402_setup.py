@@ -389,12 +389,12 @@ DISCOVER_SAMPLE_OUTPUT = {
 
 ROUTE_DESCRIPTIONS = {
     "search": (
-        "Real-time web search and content retrieval - up to 10 results with title, "
-        "URL, snippet and publish date, plus clean full-page Markdown for the top "
-        "3 results by default and an optional short summary. "
-        "Also accepts up to 5 queries in one call, merged and de-duplicated - "
-        "one call instead of five. No account, no API key, no quota. Try GET "
-        "/search/sample. " + _KIT_MENTION
+        "Real-time web search - up to 10 results with title, URL, snippet and "
+        "publish date, plus clean full-page Markdown for the top 3 by default. "
+        "Up to 5 queries per call, merged and de-duplicated. Each query is "
+        "routed by Jev to the best specialised source (code, facts, news, "
+        "prices, weather). No account, no API key. Try GET /search/sample. "
+        + _KIT_MENTION
     ),
     "translate": (
         "Translate up to 200 text segments in a single call - the same result "
