@@ -3,40 +3,31 @@
 
 B pays for one real chat completion against the cheapest model currently
 listed by GET /v1/models (by completion price, ties broken by prompt
-price), with max_tokens=50, toward A. One real "upto" settlement is enough
-to give the route a live Bazaar listing, same purpose as
-bootstrap_bazaar_full.py's ping-pong for the "exact"-scheme routes.
+price), with max_tokens=50, toward A - using the "exact" accepts[] option
+(added 2026-09-28 alongside "upto" specifically so a buyer with no ETH and
+no Permit2 allowance, like B, isn't excluded). One real settlement is
+enough to give the route a live Bazaar listing, same purpose as
+bootstrap_bazaar_full.py's ping-pong for the other routes.
 
-UNVERIFIED - read before running
----------------------------------
-This is the first script in this codebase to sign an "upto" (Permit2-based)
-payment. bootstrap_bazaar_full.py's signing path
-(x402.mechanisms.evm.exact.register.register_exact_evm_client) only knows
-the "exact" scheme; this uses the analogous upto client scheme
-(x402.mechanisms.evm.upto.client.UptoEvmScheme) by the same registration
-pattern, but that pattern itself has never been exercised end-to-end
-against the live CDP facilitator - only the SERVER side (the 402 challenge
-itself) has been verified live (2026-09-28: a real `curl` against
-/v1/chat/completions returned a well-formed scheme="upto" challenge with a
-facilitatorAddress, confirming CDP's facilitator advertises upto support -
-it does not confirm settlement succeeds).
+Why "exact", not "upto", for this bootstrap
+---------------------------------------------
+"upto" (Permit2-based) needs the payer to hold ETH (for their own client to
+approve Permit2's USDC allowance on-chain) and to have already granted that
+allowance - B has neither. "exact" (EIP-3009) needs neither: no prior
+approval, no gas paid by the signer, exactly the signing path
+bootstrap_bazaar_full.py already uses successfully for every other route.
+This script reuses that exact same registration call
+(register_exact_evm_client), unlike the abandoned upto-only version of this
+script, which used the untested UptoEvmScheme client path.
 
-The other open question is Permit2's own prerequisite: unlike "exact"
-(EIP-3009, needs no prior on-chain approval), "upto" payments settle via
-Permit2's permitWitnessTransferFrom, which requires wallet B to have
-already granted Permit2 an ERC-20 allowance on USDC. check_permit2_allowance()
-below only READS that allowance and warns if it looks insufficient - it
-does not submit an approve() transaction. The facilitator's own settlement
-code (x402/mechanisms/evm/upto/permit2_utils.py) has fallback paths
-mentioning EIP-2612 permit and "erc20 approval", which may mean the
-facilitator can obtain allowance itself as part of settling - or may not.
-This was not resolved (it would require an actual test payment to observe),
-so treat the allowance check's warning as "investigate before relying on
-this", not as a green light either way once it passes.
-
-Recommended before treating this as routine: run it once, read the result
-table, and check the tx on Basescan before assuming it will keep working
-unattended.
+--dry-run
+---------
+No real payment. Prints the cheapest model, B's balance, and the ceiling
+POST /v1/chat/completions would quote for that model at max_tokens=50 -
+and fails loudly (non-zero exit) if that ceiling exceeds 0.002 USDC, since
+B's balance is that small and a ceiling above it would mean B literally
+cannot sign for the "exact" option (which settles the full ceiling, not a
+reduced amount).
 """
 
 from __future__ import annotations
@@ -55,9 +46,9 @@ ADDRESS_B = "0x3cedc3Cba49c3809EE46B9bf60da75d6607b45Ec"
 BASE_URL = "https://x402.agentindex.world"
 NETWORK = "eip155:8453"
 USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA"  # canonical Permit2, all EVM chains
 BASE_RPC = "https://mainnet.base.org"
 MAX_TOKENS = 50
+MAX_EXPECTED_CEILING_USD = 0.002  # B's balance - see module docstring
 
 DRY_RUN = "--dry-run" in sys.argv
 
@@ -75,25 +66,12 @@ async def usdc_balance(address: str) -> float:
     return int(raw, 16) / 1_000_000
 
 
-async def check_permit2_allowance(owner: str) -> float:
-    """Read-only ERC-20 allowance(owner, Permit2) on USDC - see module
-    docstring: this warns, it does not fix a low allowance."""
-    selector = "0xdd62ed3e"
-    owner_padded = owner[2:].lower().rjust(64, "0")
-    spender_padded = PERMIT2_ADDRESS[2:].lower().rjust(64, "0")
-    data = selector + owner_padded + spender_padded
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.post(
-            BASE_RPC,
-            json={"jsonrpc": "2.0", "id": 1, "method": "eth_call", "params": [{"to": USDC_CONTRACT, "data": data}, "latest"]},
-            headers={"User-Agent": "bootstrap-llm-gateway/1.0"},
-        )
-        resp.raise_for_status()
-        raw = resp.json().get("result", "0x0")
-    return int(raw, 16) / 1_000_000
-
-
-async def cheapest_model() -> str:
+async def cheapest_model_and_ceiling() -> tuple[str, float]:
+    """Fetches OpenRouter's real catalog and reimplements
+    app/handlers/llm_gateway.py::_price_ceiling_usd's formula directly
+    (no import from the deployed app - this script runs standalone,
+    outside the container) so the dry-run check reflects what the live
+    route will actually quote."""
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.get("https://openrouter.ai/api/v1/models")
     data = resp.json()["data"]
@@ -108,18 +86,27 @@ async def cheapest_model() -> str:
             continue
         priced.append((c, p, m["id"]))
     priced.sort()
-    return priced[0][2]
+    completion_price, prompt_price, model = priced[0]
+
+    prompt_tokens = 5  # "Say OK." - see the sample request this script sends
+    markup = 1.10
+    min_settle = 0.001
+    ceiling = (prompt_tokens * prompt_price + MAX_TOKENS * completion_price) * markup
+    ceiling = max(ceiling, min_settle)
+    return model, ceiling
 
 
 async def pay_chat_completion(signer, model: str) -> tuple[int, str | None, str]:
-    """Returns (http_status, tx_hash_or_None, outcome_label). Mirrors
-    bootstrap_bazaar_full.py's pay_once() shape, but for the upto scheme."""
+    """Returns (http_status, tx_hash_or_None, outcome_label). Signs against
+    the "exact" accepts[] option - x402Client.register + find_matching_
+    requirements pick it automatically since ExactEvmClientScheme is the
+    only scheme registered here (upto is deliberately not)."""
     from x402 import x402Client
     from x402.http.clients.httpx import x402HttpxClient
-    from x402.mechanisms.evm.upto.client import UptoEvmScheme as UptoEvmClientScheme
+    from x402.mechanisms.evm.exact.register import register_exact_evm_client
 
     client = x402Client()
-    client.register(NETWORK, UptoEvmClientScheme(signer))
+    register_exact_evm_client(client, signer=signer, networks=NETWORK)
 
     body = {
         "model": model,
@@ -141,13 +128,24 @@ async def pay_chat_completion(signer, model: str) -> tuple[int, str | None, str]
 
 
 async def main() -> int:
+    model, ceiling = await cheapest_model_and_ceiling()
+    bal_b = await usdc_balance(ADDRESS_B)
+
+    print(f"cheapest model: {model}")
+    print(f"computed ceiling (exact, max_tokens={MAX_TOKENS}): ${ceiling:.6f}")
+    print(f"B balance (on-chain): {bal_b:.6f} USDC")
+
+    if ceiling > MAX_EXPECTED_CEILING_USD:
+        print(
+            f"ARRET: ceiling ${ceiling:.6f} exceeds the expected ${MAX_EXPECTED_CEILING_USD} "
+            "ceiling this script was written for - B's balance may not cover it. "
+            "Re-check before running for real.",
+            file=sys.stderr,
+        )
+        return 1
+
     if DRY_RUN:
-        model = await cheapest_model()
-        bal_b = await usdc_balance(ADDRESS_B)
-        allowance_b = await check_permit2_allowance(ADDRESS_B)
-        print(f"=== DRY RUN - no real payment ===\ncheapest model: {model}\nB balance: {bal_b:.6f} USDC\nB Permit2 allowance on USDC: {allowance_b:.6f}")
-        if allowance_b <= 0:
-            print("WARNING: B has no Permit2 allowance on USDC - see module docstring before running for real.")
+        print("=== DRY RUN - no real payment ===")
         return 0
 
     key_b = (os.getenv("KEY_B") or "").strip()
@@ -166,22 +164,10 @@ async def main() -> int:
     if account_b.address.lower() != ADDRESS_B.lower():
         print(f"KEY_B ne correspond pas a B ({account_b.address} != {ADDRESS_B}) - arret.", file=sys.stderr)
         return 1
-
-    model = await cheapest_model()
-    bal_b = await usdc_balance(ADDRESS_B)
-    allowance_b = await check_permit2_allowance(ADDRESS_B)
     print(f"B confirme: {account_b.address}")
-    print(f"cheapest model: {model}")
-    print(f"solde B (lecture on-chain): {bal_b:.6f} USDC")
-    print(f"allowance Permit2 de B sur USDC: {allowance_b:.6f}")
-    if allowance_b <= 0:
-        print(
-            "ARRET: B n'a pas d'allowance Permit2 sur USDC - un paiement upto "
-            "echouera a la liquidation. Voir le docstring du module avant "
-            "de continuer (approbation ERC-20 manuelle probablement requise "
-            "en amont, jamais automatisee ici).",
-            file=sys.stderr,
-        )
+
+    if bal_b < ceiling:
+        print(f"ARRET: solde B ({bal_b:.6f}) < ceiling ({ceiling:.6f}).", file=sys.stderr)
         return 1
 
     status, tx_hash, outcome = await pay_chat_completion(account_b, model)

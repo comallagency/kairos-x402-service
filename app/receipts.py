@@ -99,6 +99,27 @@ def extract_payer_from_payment_dict(payload: dict) -> str | None:
         return None
 
 
+def extract_scheme_from_header(payment_header: str | None) -> str | None:
+    """Which of a route's multiple accepts[] entries the buyer actually
+    signed against (e.g. "exact" vs "upto" for POST /v1/chat/completions,
+    see app/handlers/llm_gateway.py) - PaymentPayload.accepted embeds the
+    full matched PaymentRequirements, including .scheme, so the payment
+    header alone already carries this; no separate re-verification needed
+    since PaymentMiddlewareASGI already verified the payload before the
+    route handler ever runs."""
+    if not payment_header:
+        return None
+    try:
+        import base64
+        import json
+
+        decoded = base64.b64decode(payment_header + "=" * (-len(payment_header) % 4))
+        payload = json.loads(decoded)
+        return payload.get("accepted", {}).get("scheme")
+    except Exception:
+        return None
+
+
 def extract_payer_from_header(payment_header: str | None) -> str | None:
     """Best-effort extraction of the paying wallet address from a raw x402
     Payment-Signature (or legacy X-Payment) header value."""
