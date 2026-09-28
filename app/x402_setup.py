@@ -1774,6 +1774,7 @@ TOKEN_RISK_SAMPLE_OUTPUT = {
         "probability": 0.62,
         "probabilities": {"acceptable": 0.31, "avoid": 0.07, "caution": 0.62},
         "confidence": 0.55,
+        "verdict_source": "jev",
     },
     "bytecode_analysis": {
         "status": "ok",
@@ -1796,7 +1797,7 @@ TOKEN_RISK_SAMPLE_OUTPUT = {
         "any_liquidity_found": True,
     },
     "holders_analysis": {"status": "skipped_established_token"},
-    "timing_ms": {"bytecode": 420, "liquidity": 890, "holders": 310, "verdict": 1240, "total": 1340},
+    "timing_ms": {"bytecode_liquidity": 420, "holders": 310, "verdict": 890, "total": 950},
 }
 
 TOKEN_RISK_OUTPUT_SCHEMA = {
@@ -1806,12 +1807,22 @@ TOKEN_RISK_OUTPUT_SCHEMA = {
         "network": {"type": "object"},
         "verdict": {
             "type": "object",
-            "description": "Jev-powered decision: avoid/caution/acceptable with a real probability.",
+            "description": (
+                "avoid/caution/acceptable. verdict_source is 'jev' (a real "
+                "Jev decision with a real probability) or 'rules' "
+                "(deterministic mint/blacklist/pause/owner/liquidity check, "
+                "probability/probabilities/confidence null) - used whenever "
+                "Jev does not answer within 2 seconds, so the route always "
+                "returns a verdict without ever waiting on an upstream with "
+                "no SLA."
+            ),
             "properties": {
                 "verdict": {"type": "string", "enum": ["avoid", "caution", "acceptable"]},
-                "probability": {"type": "number"},
-                "probabilities": {"type": "object"},
-                "confidence": {"type": "number"},
+                "probability": {"type": ["number", "null"]},
+                "probabilities": {"type": ["object", "null"]},
+                "confidence": {"type": ["number", "null"]},
+                "verdict_source": {"type": "string", "enum": ["jev", "rules"]},
+                "reason": {"type": "string", "description": "Only present when verdict_source is 'rules'."},
             },
         },
         "bytecode_analysis": {
@@ -1834,10 +1845,10 @@ TOKEN_RISK_OUTPUT_SCHEMA = {
         "timing_ms": {
             "type": "object",
             "description": (
-                "How long each stage took (bytecode, liquidity, holders, "
-                "verdict, total), in milliseconds - added 2026-09-28 after a "
-                "real payment settled for an analysis whose client had "
-                "already timed out waiting for it."
+                "How long each stage took (bytecode_liquidity - batched via "
+                "Multicall3 - holders, verdict, total), in milliseconds - "
+                "added 2026-09-28 after a real payment settled for an "
+                "analysis whose client had already timed out waiting for it."
             ),
         },
         "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
