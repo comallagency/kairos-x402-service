@@ -2567,6 +2567,24 @@ def get_resource_server() -> x402ResourceServer:
     return _resource_server_singleton
 
 
+def display_price(price) -> str:
+    """Static, human-readable price for discovery manifests
+    (/.well-known/x402, app/mpp_middleware.py's MPP challenge) - a
+    DynamicPrice callable (currently only POST /v1/chat/completions'
+    compute_ceiling_price, which needs a real request body to resolve) can't
+    be shown as-is: passing the bare function through crashed both call
+    sites with a 500 (x402/schemas/helpers.py::parse_money got a function
+    object where it expected a string - confirmed live, 2026-09-28,
+    /.well-known/x402). Substitutes the floor every ceiling is clamped to
+    ("$0.001" - app/handlers/llm_gateway.py::MIN_SETTLE_USD) as an
+    illustrative starting price; this only affects the informational
+    snapshot; the real, request-specific price is still what actually gets
+    challenged when a client POSTs for real."""
+    if isinstance(price, str):
+        return price
+    return "$0.001"
+
+
 def resolve_payment_requirements(payment_option: PaymentOption):
     """The one place scheme/network/asset/amount/payTo/maxTimeoutSeconds/extra
     are computed from a PaymentOption - calls the x402 SDK's own
@@ -2577,6 +2595,10 @@ def resolve_payment_requirements(payment_option: PaymentOption):
     amount from price - the well-known listing and the real challenge used to
     disagree (well-known dropped asset/amount entirely) because they didn't."""
     server = get_resource_server()
+    if not isinstance(payment_option.price, str):
+        from dataclasses import replace
+
+        payment_option = replace(payment_option, price=display_price(payment_option.price))
     try:
         return server.build_payment_requirements(payment_option, extensions=[])[0]
     except RuntimeError:
