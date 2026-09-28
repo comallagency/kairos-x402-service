@@ -1776,6 +1776,7 @@ TOKEN_RISK_SAMPLE_OUTPUT = {
         "confidence": 0.55,
     },
     "bytecode_analysis": {
+        "status": "ok",
         "bytecode_size": 8421,
         "flags": {"mint": False, "blacklist": False, "pause": False, "set_max_tx_amount": True},
         "any_dangerous_function": True,
@@ -1784,6 +1785,7 @@ TOKEN_RISK_SAMPLE_OUTPUT = {
         "owner_renounced": True,
     },
     "liquidity_analysis": {
+        "status": "ok",
         "uniswap_v2": {
             "pair": "0x1efdc3e6cfb3df3b7dd3e3971d5262733c52c21c",
             "reserve0": "1535891536408965785",
@@ -1794,6 +1796,7 @@ TOKEN_RISK_SAMPLE_OUTPUT = {
         "any_liquidity_found": True,
     },
     "holders_analysis": {"status": "skipped_established_token"},
+    "timing_ms": {"bytecode": 420, "liquidity": 890, "holders": 310, "verdict": 1240, "total": 1340},
 }
 
 TOKEN_RISK_OUTPUT_SCHEMA = {
@@ -1822,9 +1825,19 @@ TOKEN_RISK_OUTPUT_SCHEMA = {
         "holders_analysis": {
             "type": "object",
             "description": (
-                "Top-10 holder concentration, or {\"status\": "
-                "\"skipped_established_token\"} if the full transfer "
-                "history does not provably fit in 1-2 eth_getLogs calls."
+                "status: 'ok' (with distinct_holders/top10_pct_of_supply), "
+                "'skipped_established_token' (history too large to "
+                "reconstruct in 1-2 eth_getLogs calls), or 'unavailable' "
+                "(the 3-second per-stage budget was exceeded)."
+            ),
+        },
+        "timing_ms": {
+            "type": "object",
+            "description": (
+                "How long each stage took (bytecode, liquidity, holders, "
+                "verdict, total), in milliseconds - added 2026-09-28 after a "
+                "real payment settled for an analysis whose client had "
+                "already timed out waiting for it."
             ),
         },
         "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},

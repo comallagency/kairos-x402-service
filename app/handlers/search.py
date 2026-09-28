@@ -166,17 +166,17 @@ async def _enrich_results(
 async def _run_batch_search(
     queries: list[str], max_results: int
 ) -> tuple[list[dict], str | None]:
-    """Run each query as its own upstream call (proven, reused from the jobs
-    worker's multi-query loop), then merge and de-duplicate by URL, capped at
+    """Run each query as its own upstream call, all CONCURRENTLY (2026-09-28:
+    was a sequential for-loop - up to MAX_BATCH_QUERIES=5 upstream calls
+    back-to-back, the same architectural risk that caused a real /token-risk
+    payment to settle after its buyer had already timed out - see that
+    route's module docstring), then merge and de-duplicate by URL, capped at
     max_results overall. One call to us replaces `len(queries)` calls an agent
     would otherwise have to make - how many upstream calls that costs us
     internally isn't the buyer's concern."""
-    per_query_results: list[list[dict]] = []
-    model_served: str | None = None
-    for q in queries:
-        results, model = await run_web_search(q, max_results)
-        per_query_results.append(results)
-        model_served = model_served or model
+    per_query_results = await asyncio.gather(*(run_web_search(q, max_results) for q in queries))
+    model_served = next((model for _, model in per_query_results if model), None)
+    per_query_results = [results for results, _ in per_query_results]
 
     seen_urls: set[str] = set()
     merged: list[dict] = []

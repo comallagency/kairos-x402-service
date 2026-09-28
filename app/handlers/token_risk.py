@@ -4,10 +4,10 @@ app.upstream.evm_rpc). See BRIEF-CORRECTIONS.md / the 2026-09-28 Phase 0
 feasibility research this route is built from:
 
 - Bytecode (mint/blacklist/pause/tax-setter selectors, EIP-1967 proxy slot,
-  owner()) - always attempted, exactly 3 RPC calls, ~0.3s in testing.
+  owner()) - exactly 3 RPC calls, ~0.3-2s in testing.
 - Liquidity (Uniswap V2 pair, Uniswap V3 pools across 3 fee tiers, Aerodrome
-  pool both stable/volatile) - always attempted, on-chain pool discovery via
-  each DEX's own factory contract, no indexer.
+  pool both stable/volatile) - on-chain pool discovery via each DEX's own
+  factory contract, no indexer.
 - Holder concentration (top 10 by % of supply, from Transfer logs) - the
   public Base RPC caps eth_getLogs at ~2000 blocks/call and a busy contract's
   response blows past the payload-size limit well before that (measured:
@@ -18,10 +18,29 @@ feasibility research this route is built from:
   presenting it as if it were complete would be worse than not showing it,
   for a route whose whole point is a safety verdict.
 
-The verdict itself is a real Jev decision (typesafe/jev-1.13, the same
-mechanism as /decide, /guard, /verify, /rank - see app/upstream/jev.py), not
-a hand-rolled score: the raw signals above are handed to Jev as state, which
-returns avoid/caution/acceptable with real per-option probabilities.
+Latency incident (2026-09-28, 13:39 UTC)
+-------------------------------------------
+The first real bootstrap settlement took 8.218s server-side (db latency_ms)
+- the buyer's own HTTP client had already given up with a ReadTimeout before
+the response arrived, so a real payment settled with nobody ever receiving
+the analysis it paid for. Root-caused by re-measuring each stage standalone
+against the exact same target (USDC): _liquidity() alone took ~11s because
+the Uniswap V2 pair+reserves lookup ran BEFORE the V3/Aerodrome fan-out
+started instead of alongside it (fixed below - all three now start
+concurrently), and the Jev call itself measured anywhere from ~2s to 18s
+across repeated calls - OpenRouter's alpha Decisions API has no SLA and no
+bound of its own.
+
+Fix: every RPC-heavy stage (bytecode, liquidity, holders) now runs under its
+own _STEP_TIMEOUT_S bound - a stage that blows its budget degrades to
+{"status": "unavailable"} instead of blocking the other stages or the
+response as a whole, and the Jev verdict is explicitly told which signals it
+does and doesn't have. On top of that, the ENTIRE analysis (all three stages
+plus the Jev call) runs under one _GLOBAL_TIMEOUT_S deadline - if that fires,
+_lookup raises before any verdict is produced, _paid() returns 504, and
+because the x402 SDK never settles a >=400 response, nothing is charged. A
+real payment now only ever settles once a client could plausibly still be
+waiting for it.
 """
 
 from __future__ import annotations
@@ -54,6 +73,9 @@ _V3_FEE_TIERS = (500, 3000, 10000)
 _LOG_PAGE_BLOCKS = 2000  # measured ceiling on the public Base RPC, see module docstring
 _MAX_LOG_PAGES = 2
 _HOLDER_LOG_CAP = 500  # more than this in one page -> clearly an established/busy token
+
+_STEP_TIMEOUT_S = 3.0
+_GLOBAL_TIMEOUT_S = 10.0
 
 _CACHE_TTL_S = 300
 _cache: dict[str, tuple[float, dict]] = {}
@@ -111,15 +133,21 @@ async def _fetch_code(address: str) -> str:
 
 
 async def _analyze_bytecode(address: str, code: str) -> dict:
-    """The contract-existence check (app._lookup) already fetched the
-    bytecode with its own eth_getCode call - reused here rather than
-    re-fetched, so this stage costs exactly 2 more RPC calls (EIP-1967 slot,
-    owner()), 3 total together with that first call."""
+    """The contract-existence check (_lookup) already fetched the bytecode
+    with its own eth_getCode call - reused here rather than re-fetched, so
+    this stage costs exactly 2 more RPC calls (EIP-1967 slot, owner()), 3
+    total together with that first call."""
     impl_slot, owner_raw = await asyncio.gather(
         rpc(_NETWORK, "eth_getStorageAt", [address, _EIP1967_IMPL_SLOT, "latest"]),
         rpc(_NETWORK, "eth_call", [{"to": address, "data": _OWNER_SELECTOR}, "latest"]),
         return_exceptions=True,
     )
+    # owner() reverting just means the token isn't Ownable (very common,
+    # not an error) - only re-raise if the PROXY SLOT read itself failed,
+    # since that one has no legitimate "revert" case and its failure means
+    # the RPC call genuinely didn't work.
+    if isinstance(impl_slot, BaseException):
+        raise impl_slot
     flags = {name: sel[2:] in code for name, sel in _RISK_SELECTORS.items()}
     is_proxy = isinstance(impl_slot, str) and impl_slot.lower() != "0x" + "00" * 32
     owner = None
@@ -128,6 +156,7 @@ async def _analyze_bytecode(address: str, code: str) -> dict:
         owner = "0x" + owner_raw[-40:]
         owner_renounced = owner.lower() == _ZERO_ADDRESS
     return {
+        "status": "ok",
         "bytecode_size": max(len(code) // 2 - 1, 0),
         "flags": flags,
         "any_dangerous_function": any(flags.values()),
@@ -137,60 +166,72 @@ async def _analyze_bytecode(address: str, code: str) -> dict:
     }
 
 
+async def _v2_liquidity(token_padded: str, weth_padded: str) -> dict | None:
+    pair_raw = await rpc(
+        _NETWORK, "eth_call", [{"to": _UNISWAP_V2_FACTORY, "data": _GET_PAIR_SELECTOR + token_padded + weth_padded}, "latest"]
+    )
+    pair = "0x" + pair_raw[-40:] if isinstance(pair_raw, str) and len(pair_raw) >= 66 else None
+    if not pair or pair.lower() == _ZERO_ADDRESS:
+        return None
+    reserves_raw = await rpc(_NETWORK, "eth_call", [{"to": pair, "data": _GET_RESERVES_SELECTOR}, "latest"])
+    if not isinstance(reserves_raw, str) or len(reserves_raw) < 130:
+        return {"pair": pair}
+    return {
+        "pair": pair,
+        "reserve0": str(int(reserves_raw[2:66], 16)),
+        "reserve1": str(int(reserves_raw[66:130], 16)),
+    }
+
+
+async def _v3_pool(token_padded: str, weth_padded: str, fee: int) -> dict | None:
+    fee_hex = format(fee, "064x")
+    data = _GET_POOL_V3_SELECTOR + token_padded + weth_padded + fee_hex
+    pool_raw = await rpc(_NETWORK, "eth_call", [{"to": _UNISWAP_V3_FACTORY, "data": data}, "latest"])
+    pool = "0x" + pool_raw[-40:] if isinstance(pool_raw, str) and len(pool_raw) >= 66 else None
+    if not pool or pool.lower() == _ZERO_ADDRESS:
+        return None
+    liquidity_raw = await rpc(_NETWORK, "eth_call", [{"to": pool, "data": _LIQUIDITY_V3_SELECTOR}, "latest"])
+    liquidity = str(int(liquidity_raw, 16)) if isinstance(liquidity_raw, str) else None
+    return {"pool": pool, "fee": fee, "liquidity": liquidity}
+
+
+async def _aero_pool(token_padded: str, weth_padded: str, stable: bool) -> dict | None:
+    stable_hex = format(1 if stable else 0, "064x")
+    data = _GET_POOL_AERO_SELECTOR + token_padded + weth_padded + stable_hex
+    pool_raw = await rpc(_NETWORK, "eth_call", [{"to": _AERODROME_FACTORY, "data": data}, "latest"])
+    pool = "0x" + pool_raw[-40:] if isinstance(pool_raw, str) and len(pool_raw) >= 66 else None
+    if not pool or pool.lower() == _ZERO_ADDRESS:
+        return None
+    reserves_raw = await rpc(_NETWORK, "eth_call", [{"to": pool, "data": _GET_RESERVES_SELECTOR}, "latest"])
+    if not isinstance(reserves_raw, str) or len(reserves_raw) < 130:
+        return {"pool": pool, "stable": stable}
+    return {
+        "pool": pool,
+        "stable": stable,
+        "reserve0": str(int(reserves_raw[2:66], 16)),
+        "reserve1": str(int(reserves_raw[66:130], 16)),
+    }
+
+
 async def _liquidity(address: str) -> dict:
+    """V2, every V3 fee tier and both Aerodrome pools are all started at
+    once - none of them wait on each other. Before 2026-09-28 the V2
+    pair+reserves lookup ran to completion BEFORE the V3/Aerodrome fan-out
+    even started, adding several extra seconds serially for no reason (see
+    module docstring's incident writeup)."""
     token_padded = _pad_address(address)
     weth_padded = _pad_address(_WETH)
 
-    v2_pair_raw = await rpc(
-        _NETWORK, "eth_call", [{"to": _UNISWAP_V2_FACTORY, "data": _GET_PAIR_SELECTOR + token_padded + weth_padded}, "latest"]
-    )
-    v2_pair = "0x" + v2_pair_raw[-40:] if isinstance(v2_pair_raw, str) and len(v2_pair_raw) >= 66 else None
-    v2 = None
-    if v2_pair and v2_pair.lower() != _ZERO_ADDRESS:
-        reserves_raw = await rpc(_NETWORK, "eth_call", [{"to": v2_pair, "data": _GET_RESERVES_SELECTOR}, "latest"])
-        if isinstance(reserves_raw, str) and len(reserves_raw) >= 130:
-            v2 = {
-                "pair": v2_pair,
-                "reserve0": str(int(reserves_raw[2:66], 16)),
-                "reserve1": str(int(reserves_raw[66:130], 16)),
-            }
-
-    async def _v3_pool(fee: int):
-        fee_hex = format(fee, "064x")
-        data = _GET_POOL_V3_SELECTOR + token_padded + weth_padded + fee_hex
-        pool_raw = await rpc(_NETWORK, "eth_call", [{"to": _UNISWAP_V3_FACTORY, "data": data}, "latest"])
-        pool = "0x" + pool_raw[-40:] if isinstance(pool_raw, str) and len(pool_raw) >= 66 else None
-        if not pool or pool.lower() == _ZERO_ADDRESS:
-            return None
-        liquidity_raw = await rpc(_NETWORK, "eth_call", [{"to": pool, "data": _LIQUIDITY_V3_SELECTOR}, "latest"])
-        liquidity = str(int(liquidity_raw, 16)) if isinstance(liquidity_raw, str) else None
-        return {"pool": pool, "fee": fee, "liquidity": liquidity}
-
-    async def _aero_pool(stable: bool):
-        stable_hex = format(1 if stable else 0, "064x")
-        data = _GET_POOL_AERO_SELECTOR + token_padded + weth_padded + stable_hex
-        pool_raw = await rpc(_NETWORK, "eth_call", [{"to": _AERODROME_FACTORY, "data": data}, "latest"])
-        pool = "0x" + pool_raw[-40:] if isinstance(pool_raw, str) and len(pool_raw) >= 66 else None
-        if not pool or pool.lower() == _ZERO_ADDRESS:
-            return None
-        reserves_raw = await rpc(_NETWORK, "eth_call", [{"to": pool, "data": _GET_RESERVES_SELECTOR}, "latest"])
-        if not isinstance(reserves_raw, str) or len(reserves_raw) < 130:
-            return {"pool": pool, "stable": stable}
-        return {
-            "pool": pool,
-            "stable": stable,
-            "reserve0": str(int(reserves_raw[2:66], 16)),
-            "reserve1": str(int(reserves_raw[66:130], 16)),
-        }
-
-    v3_results, aero_results = await asyncio.gather(
-        asyncio.gather(*(_v3_pool(fee) for fee in _V3_FEE_TIERS)),
-        asyncio.gather(*(_aero_pool(stable) for stable in (False, True))),
+    v2, v3_results, aero_results = await asyncio.gather(
+        _v2_liquidity(token_padded, weth_padded),
+        asyncio.gather(*(_v3_pool(token_padded, weth_padded, fee) for fee in _V3_FEE_TIERS)),
+        asyncio.gather(*(_aero_pool(token_padded, weth_padded, stable) for stable in (False, True))),
     )
     v3_pools = [p for p in v3_results if p]
     aero_pools = [p for p in aero_results if p]
 
     return {
+        "status": "ok",
         "uniswap_v2": v2,
         "uniswap_v3_pools": v3_pools,
         "aerodrome_pools": aero_pools,
@@ -266,6 +307,20 @@ async def _holder_distribution(address: str) -> dict:
     }
 
 
+async def _with_step_timeout(name: str, coro, timing: dict) -> dict:
+    """Runs one analysis stage under _STEP_TIMEOUT_S. A timeout OR any RPC
+    error degrades to {"status": "unavailable"} - it never propagates and
+    never blocks the other stages or the response as a whole (2026-09-28
+    incident: the previous version had no such bound at all)."""
+    t0 = time.monotonic()
+    try:
+        result = await asyncio.wait_for(coro, timeout=_STEP_TIMEOUT_S)
+    except (asyncio.TimeoutError, EvmRpcError):
+        result = {"status": "unavailable"}
+    timing[name] = round((time.monotonic() - t0) * 1000)
+    return result
+
+
 _VERDICT_CRITERIA = {
     "avoid": (
         "The token has one or more of: an active mint/blacklist/pause power "
@@ -277,19 +332,29 @@ _VERDICT_CRITERIA = {
         "The token has some centralized-control powers (owner not renounced, "
         "or a tax/limit-setter function) but real liquidity exists on at "
         "least one DEX and there is no mint+blacklist combination found - a "
-        "real but bounded risk, worth a smaller position or extra scrutiny."
+        "real but bounded risk, worth a smaller position or extra scrutiny. "
+        "Also choose caution (never acceptable) if one or more signal groups "
+        "below have status 'unavailable' - an incomplete picture is never "
+        "grounds for the confident 'acceptable' verdict, even if what WAS "
+        "observed looks clean."
     ),
     "acceptable": (
         "Ownership is renounced (or no dangerous owner-only function exists "
-        "in the bytecode at all), it is not an upgradeable proxy, and real "
-        "liquidity was found on at least one DEX. No structural red flag."
+        "in the bytecode at all), it is not an upgradeable proxy, real "
+        "liquidity was found on at least one DEX, and every signal group "
+        "below has status 'ok' (none unavailable). No structural red flag "
+        "and no missing data."
     ),
 }
 _VERDICT_INSTRUCTIONS = (
     "Given these on-chain structural signals for a Base ERC-20 token "
     "(bytecode powers, proxy/ownership status, DEX liquidity, holder "
     "concentration where available), is this token safe to acquire: avoid, "
-    "caution, or acceptable?"
+    "caution, or acceptable? Some signal groups may carry status "
+    "'unavailable' (a 3-second RPC budget was exceeded) or "
+    "'skipped_established_token' (holder history too large to reconstruct "
+    "cheaply) rather than real data - factor that gap into the verdict "
+    "explicitly, never treat a missing signal as a clean one."
 )
 
 
@@ -303,6 +368,33 @@ async def _verdict(address: str, bytecode: dict, liquidity: dict, holders: dict)
         "probability": answer["probabilities"][answer["choice"]],
         "probabilities": answer["probabilities"],
         "confidence": answer.get("confidence"),
+    }
+
+
+async def _run_analysis(address: str, code: str, timing: dict) -> dict:
+    """Everything after the not-a-contract gate - the 3 signal groups (each
+    individually timeout-bounded) plus the Jev verdict. Called under
+    _GLOBAL_TIMEOUT_S as a whole by _lookup, so a slow Jev call (measured
+    2-18s across repeated real calls - OpenRouter's alpha Decisions API has
+    no SLA) can still trip the global deadline even though it has no
+    per-step bound of its own."""
+    bytecode, liquidity, holders = await asyncio.gather(
+        _with_step_timeout("bytecode", _analyze_bytecode(address, code), timing),
+        _with_step_timeout("liquidity", _liquidity(address), timing),
+        _with_step_timeout("holders", _holder_distribution(address), timing),
+    )
+    t0 = time.monotonic()
+    verdict = await _verdict(address, bytecode, liquidity, holders)
+    timing["verdict"] = round((time.monotonic() - t0) * 1000)
+
+    return {
+        "address": address,
+        "network": {"key": _NETWORK.key, "name": _NETWORK.name, "caip2": _NETWORK.caip2},
+        "verdict": verdict,
+        "bytecode_analysis": bytecode,
+        "liquidity_analysis": liquidity,
+        "holders_analysis": holders,
+        "timing_ms": timing,
     }
 
 
@@ -320,21 +412,14 @@ async def _lookup(body: dict) -> dict:
     if code in ("0x", "0x0"):
         raise EvmRpcError("not_a_contract")
 
-    bytecode, liquidity, holders = await asyncio.gather(
-        _analyze_bytecode(address, code),
-        _liquidity(address),
-        _holder_distribution(address),
-    )
-    verdict = await _verdict(address, bytecode, liquidity, holders)
+    timing: dict[str, int] = {}
+    t0 = time.monotonic()
+    try:
+        result = await asyncio.wait_for(_run_analysis(address, code, timing), timeout=_GLOBAL_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        raise EvmRpcError("timeout") from None
+    timing["total"] = round((time.monotonic() - t0) * 1000)
 
-    result = {
-        "address": address,
-        "network": {"key": _NETWORK.key, "name": _NETWORK.name, "caip2": _NETWORK.caip2},
-        "verdict": verdict,
-        "bytecode_analysis": bytecode,
-        "liquidity_analysis": liquidity,
-        "holders_analysis": holders,
-    }
     _cache[address.lower()] = (time.monotonic() + _CACHE_TTL_S, result)
     return result
 
@@ -349,6 +434,7 @@ SAMPLE_RESPONSE = {
         "confidence": 0.55,
     },
     "bytecode_analysis": {
+        "status": "ok",
         "bytecode_size": 8421,
         "flags": {"mint": False, "blacklist": False, "pause": False, "set_max_tx_amount": True},
         "any_dangerous_function": True,
@@ -357,12 +443,14 @@ SAMPLE_RESPONSE = {
         "owner_renounced": True,
     },
     "liquidity_analysis": {
+        "status": "ok",
         "uniswap_v2": {"pair": "0x1efdc3e6cfb3df3b7dd3e3971d5262733c52c21c", "reserve0": "1535891536408965785", "reserve1": "5106124266540300941199548545"},
         "uniswap_v3_pools": [],
         "aerodrome_pools": [],
         "any_liquidity_found": True,
     },
     "holders_analysis": {"status": "skipped_established_token"},
+    "timing_ms": {"bytecode": 420, "liquidity": 890, "holders": 310, "verdict": 1240, "total": 1340},
 }
 
 
@@ -384,7 +472,12 @@ async def _paid(request: Request, body: dict):
             result = await _lookup(body)
     except EvmRpcError as exc:
         reason = str(exc)
-        code = 400 if reason in {"invalid_address", "not_a_contract"} else 502
+        if reason in {"invalid_address", "not_a_contract"}:
+            code = 400
+        elif reason == "timeout":
+            code = 504
+        else:
+            code = 502
         db.log_request(
             route="token-risk", method=request.method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=reason,
