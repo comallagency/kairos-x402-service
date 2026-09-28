@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Bazaar bootstrap for POST /v1/chat/completions - PREPARED, NOT RUN.
 
-B pays for one real chat completion against the cheapest model currently
-listed by GET /v1/models (by completion price, ties broken by prompt
-price), with max_tokens=50, toward A - using the "exact" accepts[] option
+B pays for one real chat completion against the cheapest PAID model
+currently listed by GET /v1/models (by completion price, ties broken by
+prompt price; free models - price 0 or a ":free" id suffix, excluded from
+the gateway 2026-09-28 - are skipped, see _is_free_model below), with
+max_tokens=50, toward A - using the "exact" accepts[] option
 (added 2026-09-28 alongside "upto" specifically so a buyer with no ETH and
 no Permit2 allowance, like B, isn't excluded). One real settlement is
 enough to give the route a live Bazaar listing, same purpose as
@@ -66,6 +68,14 @@ async def usdc_balance(address: str) -> float:
     return int(raw, 16) / 1_000_000
 
 
+def _is_free_model(model_id: str, prompt_price: float, completion_price: float) -> bool:
+    """Mirrors app/handlers/llm_gateway.py::_is_free_model exactly (this
+    script runs standalone, outside the container, so it can't import the
+    app) - free models were excluded from the gateway on 2026-09-28, so the
+    bootstrap must pick the cheapest PAID model, not just the cheapest."""
+    return prompt_price == 0 or completion_price == 0 or model_id.endswith(":free")
+
+
 async def cheapest_model_and_ceiling() -> tuple[str, float]:
     """Fetches OpenRouter's real catalog and reimplements
     app/handlers/llm_gateway.py::_price_ceiling_usd's formula directly
@@ -83,6 +93,8 @@ async def cheapest_model_and_ceiling() -> tuple[str, float]:
         except (KeyError, TypeError, ValueError):
             continue
         if p < 0 or c < 0:
+            continue
+        if _is_free_model(m["id"], p, c):
             continue
         priced.append((c, p, m["id"]))
     priced.sort()
