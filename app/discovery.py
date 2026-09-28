@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 
 from app import config
-from app.x402_setup import KIT_TAGLINE, build_route_configs, resolve_payment_requirements
+from app.x402_setup import KIT_TAGLINE, build_route_configs, display_price, resolve_payment_requirements
 
 router = APIRouter()
 
@@ -33,7 +33,13 @@ def _route_entries() -> list[dict]:
                         "network": r.network,
                         "asset": r.asset,
                         "amount": str(r.amount),
-                        "price": a.price,
+                        # a.price can be a DynamicPrice callable (POST
+                        # /v1/chat/completions) - display_price() gives the
+                        # same illustrative static string used to resolve
+                        # asset/amount above (see resolve_payment_requirements),
+                        # rather than a raw function object jsonschema can't
+                        # serialize.
+                        "price": display_price(a.price),
                         "payTo": r.pay_to,
                         "maxTimeoutSeconds": r.max_timeout_seconds,
                         "extra": r.extra,
