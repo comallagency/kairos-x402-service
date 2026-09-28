@@ -1797,7 +1797,7 @@ TOKEN_RISK_SAMPLE_OUTPUT = {
         "any_liquidity_found": True,
     },
     "holders_analysis": {"status": "skipped_established_token"},
-    "timing_ms": {"bytecode_liquidity": 420, "holders": 310, "verdict": 890, "total": 950},
+    "timing_ms": {"signals": 420, "verdict": 890, "total": 950},
 }
 
 TOKEN_RISK_OUTPUT_SCHEMA = {
@@ -1845,10 +1845,14 @@ TOKEN_RISK_OUTPUT_SCHEMA = {
         "timing_ms": {
             "type": "object",
             "description": (
-                "How long each stage took (bytecode_liquidity - batched via "
-                "Multicall3 - holders, verdict, total), in milliseconds - "
-                "added 2026-09-28 after a real payment settled for an "
-                "analysis whose client had already timed out waiting for it."
+                "signals (bytecode+liquidity via Multicall3, and holders - "
+                "run together, sharing a 2s window), verdict, total, in "
+                "milliseconds. Total is never intended to exceed 4.0s: "
+                "signal-gathering and the Jev-or-rules verdict are each "
+                "bounded so their sum can't exceed that budget by "
+                "construction, not because anything gets cancelled at the "
+                "last moment - added 2026-09-28 after a real payment "
+                "settled for an analysis whose client had already timed out."
             ),
         },
         "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
