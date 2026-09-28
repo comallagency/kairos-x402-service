@@ -172,6 +172,10 @@ from app.x402_setup import (
     TOKEN_RISK_OUTPUT_SCHEMA,
     TOKEN_RISK_SAMPLE_INPUT,
     TOKEN_RISK_SAMPLE_OUTPUT,
+    RESEARCH_INPUT_SCHEMA,
+    RESEARCH_OUTPUT_SCHEMA,
+    RESEARCH_SAMPLE_INPUT,
+    RESEARCH_SAMPLE_OUTPUT,
     SEARCH_OUTPUT_SCHEMA,
     TRANSLATE_OUTPUT_SCHEMA,
     JOBS_OUTPUT_SCHEMA,
@@ -1224,6 +1228,7 @@ from app.handlers.agent_health import _lookup as _agent_health_lookup
 from app.handlers.wallet_balance import _lookup as _wallet_balance_lookup
 from app.handlers.wallet_intelligence import _lookup as _wallet_intelligence_lookup
 from app.handlers.token_risk import _lookup as _token_risk_lookup
+from app.handlers.research import ResearchError, _lookup as _research_lookup
 from app.upstream.evm_rpc import EvmRpcError
 
 _WALLET_BALANCE_EXTENSIONS = declare_mcp_discovery_extension(
@@ -1258,6 +1263,15 @@ _WALLET_INTELLIGENCE_EXTENSIONS = declare_mcp_discovery_extension(
             "amount_usdc": 0.001,
         },
         output=OutputConfig(example=WALLET_INTELLIGENCE_SAMPLE_OUTPUT),
+    )
+)
+_RESEARCH_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="research",
+        description=ROUTE_DESCRIPTIONS["research"],
+        input_schema=RESEARCH_INPUT_SCHEMA,
+        example=RESEARCH_SAMPLE_INPUT,
+        output=OutputConfig(example=RESEARCH_SAMPLE_OUTPUT),
     )
 )
 _TOKEN_RISK_EXTENSIONS = declare_mcp_discovery_extension(
@@ -1338,6 +1352,32 @@ async def _run_token_risk(args: dict, payer: str | None) -> dict:
     return {
         **result,
         "x402_receipt": make_receipt(None, "token-risk", timer.elapsed_ms, price),
+    }
+
+
+async def _run_research(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as timer:
+            result = await _research_lookup(args)
+    except ResearchError as exc:
+        db.log_request(
+            route="research", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+        )
+        raise ServiceError(str(exc)) from exc
+    model_served = result.pop("_model_served")
+    cost_usd = result.pop("_cost_usd")
+    price = effective_price(payer, price_float(config.PRICE_RESEARCH))
+    db.log_request(
+        route="research", method="MCP", status="paid",
+        latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+        user_agent="mcp", body_excerpt=body_excerpt,
+        upstream_cost_usd=cost_usd, margin_usd=(price - cost_usd) if cost_usd is not None else None,
+    )
+    return {
+        **result,
+        "x402_receipt": make_receipt(model_served, "research", timer.elapsed_ms, price),
     }
 
 
@@ -1466,6 +1506,28 @@ async def token_risk_tool(
         args={"address": address},
         extensions=_TOKEN_RISK_EXTENSIONS,
         run_and_log=_run_token_risk,
+    )
+
+
+@mcp.tool(
+    name="research",
+    title="Research",
+    description=ROUTE_DESCRIPTIONS["research"],
+    output_schema=RESEARCH_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+)
+async def research_tool(
+    query: Annotated[str, Field(description=RESEARCH_INPUT_SCHEMA["properties"]["query"]["description"])],
+    max_sources: Annotated[int, Field(description=RESEARCH_INPUT_SCHEMA["properties"]["max_sources"]["description"])] = 5,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="research",
+        route_key="POST /research",
+        ctx=ctx,
+        args={"query": query, "max_sources": max_sources},
+        extensions=_RESEARCH_EXTENSIONS,
+        run_and_log=_run_research,
     )
 
 
