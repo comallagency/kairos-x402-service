@@ -29,7 +29,11 @@ _QUERY_STOP_WORDS = {
     "what", "with",
 }
 
-SEARXNG_TIMEOUT_SECONDS = 15.0
+SEARXNG_TIMEOUT_SECONDS = 4.0  # 2026-09-28: tightened from 15.0 to fit the
+# overall per-search time budget - SearXNG itself was measured fast and not
+# contended (5 concurrent calls: 1.891s combined), this just bounds a
+# genuinely stuck request rather than reflecting real normal latency.
+_SEARXNG_RACE_TIMEOUT_S = 2.5  # outer bound when run alongside category sources, see _collect_raw
 
 
 class SearchError(Exception):
@@ -230,31 +234,68 @@ async def _searxng_fallback(query: str, raw_limit: int) -> list[dict[str, Any]]:
 async def _collect_raw(query: str, raw_limit: int) -> list[dict[str, Any]]:
     """search v2 routing: one Jev Choice call classifies the query into
     code/place/fact/news/price/weather/general, then the winning category's
-    specialized free source is queried (and the runner-up too, if the
-    winner's probability is under 0.6). Only "general" has no specialized
+    specialized free source races (and the runner-up category too, if the
+    winner's probability is under 0.6 - see search_sources.CATEGORY_SOURCES
+    for what races inside each category). Only "general" has no specialized
     source - Phase 0 (2026-09-27) found OSM Nominatim and Overpass both
     explicitly tell "API resellers" to self-host rather than use the public
     instance, so neither is used here; "place" uses Wikivoyage instead
-    (added 2026-09-28, same Wikimedia Foundation ToS as Wikipedia). Any
-    category whose specialized source comes back empty falls through to the
-    SearXNG general-purpose path below."""
+    (added 2026-09-28, same Wikimedia Foundation ToS as Wikipedia).
+
+    SearXNG now races ALONGSIDE the specialized categories from the start
+    (2026-09-28: previously it only ran AFTER every specialized category
+    came back empty, sequentially - now that every specialized source has
+    its own tight timeout, per-category results are typically known well
+    within a couple seconds, so there is no latency reason left to wait on
+    them before also trying SearXNG). Specialized-source hits are preferred
+    on URL collision; SearXNG only fills in the remainder up to raw_limit."""
+    # Bounded (2026-09-28): this Jev call ran with no timeout of its own,
+    # BEFORE the source race even starts - its latency (usually ~0.4s, but
+    # Jev has no SLA) stacked on top of every downstream budget uncounted.
+    # Measured live: a single collect_raw call hit 3.06s despite every
+    # raced source being individually capped at <=2.5s - this uncapped step
+    # was the missing time. Same fallback as a JevError: skip straight to
+    # "general" (SearXNG only) rather than lose the request to a slow
+    # classification.
     try:
-        probabilities = await search_sources.classify_query(query)
+        probabilities = await asyncio.wait_for(search_sources.classify_query(query), timeout=1.0)
         ranked = search_sources.ranked_categories(probabilities)
-    except JevError:
+    except (JevError, asyncio.TimeoutError):
         ranked = [("general", 1.0)]
 
     to_try = [ranked[0]]
     if len(ranked) > 1 and ranked[0][1] < search_sources._SECOND_CHOICE_THRESHOLD:
         to_try.append(ranked[1])
 
+    async def _try_category(category: str) -> list[dict[str, Any]]:
+        try:
+            return await search_sources.search_by_category(category, query, raw_limit)
+        except Exception:
+            return []
+
+    async def _try_searxng() -> list[dict[str, Any]]:
+        try:
+            return await _searxng_fallback(query, raw_limit)
+        except Exception:
+            return []
+
+    # SearXNG is STARTED concurrently with the category race (so it's ready
+    # sooner if needed) but only AWAITED if the category race alone didn't
+    # produce anything (2026-09-28: awaiting both unconditionally via one
+    # gather meant SearXNG's own latency (~0.7-1.9s measured, sometimes up
+    # to _SEARXNG_RACE_TIMEOUT_S) was paid on EVERY search even when the
+    # category race already had plenty - the same "wait for the slowest
+    # regardless" mistake _race itself just had, one layer up. Cancelling
+    # the still-running SearXNG task in the common case (category race
+    # succeeds) means most searches now never pay for it at all.
+    searxng_task = asyncio.ensure_future(
+        asyncio.wait_for(_try_searxng(), timeout=_SEARXNG_RACE_TIMEOUT_S)
+    )
+    category_results = await asyncio.gather(*(_try_category(c) for c, _ in to_try))
+
     raw: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
-    for category, _probability in to_try:
-        try:
-            specialized = await search_sources.search_by_category(category, query, raw_limit)
-        except Exception:
-            specialized = []
+    for specialized in category_results:
         for r in specialized:
             url = r.get("url")
             if not url or url in seen_urls:
@@ -262,10 +303,32 @@ async def _collect_raw(query: str, raw_limit: int) -> list[dict[str, Any]]:
             seen_urls.add(url)
             raw.append(r)
 
-    if not raw:
-        raw = await _searxng_fallback(query, raw_limit)
+    if raw:
+        searxng_task.cancel()
+        return raw[:raw_limit]
 
+    try:
+        searxng_results = await searxng_task
+    except Exception:
+        searxng_results = []
+    for r in searxng_results:
+        url = r.get("url")
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        raw.append(r)
+        if len(raw) >= raw_limit:
+            return raw
     return raw
+
+
+_RERANK_TIMEOUT_S = 1.0  # 2026-09-28: _collect_raw is itself budget-bound
+# (see its own docstring), but the Jev rerank AFTER it had no bound of its
+# own - found live: it was the reason many /search calls exceeded the
+# caller's outer SEARCH_PHASE_TIMEOUT_S and got cancelled, discarding raw
+# results _collect_raw had already gathered successfully. Same fallback as
+# a JevError: the deterministic keyword heuristic, applied to the raw
+# results already in hand rather than losing them.
 
 
 async def run_web_search(query: str, max_results: int = 5) -> tuple[list[dict[str, Any]], str | None]:
@@ -277,17 +340,18 @@ async def run_web_search(query: str, max_results: int = 5) -> tuple[list[dict[st
     for - from a specialized free source when the query fits one (see
     _collect_raw), otherwise from SearXNG - then has Jev pick and rank the
     genuinely relevant ones out of that pool. If the Jev rerank call itself
-    fails (upstream hiccup on OpenRouter's alpha decisions endpoint), falls
-    back to the previous keyword heuristic rather than failing the whole
-    search over a reranking outage."""
+    fails OR exceeds _RERANK_TIMEOUT_S (upstream hiccup or slowness on
+    OpenRouter's alpha decisions endpoint), falls back to the previous
+    keyword heuristic on the raw results already collected, rather than
+    losing them or failing the whole search over a reranking outage."""
     max_results = max(1, min(max_results, 10))
     raw = await _collect_raw(query, RAW_COLLECTION_SIZE)
     if not raw:
         return [], None
 
     try:
-        results = await _jev_rerank(query, raw, max_results)
-    except JevError:
+        results = await asyncio.wait_for(_jev_rerank(query, raw, max_results), timeout=_RERANK_TIMEOUT_S)
+    except (JevError, asyncio.TimeoutError):
         raw.sort(key=lambda result: _relevance_score(query, result), reverse=True)
         results = raw[:max_results]
     return results, None
