@@ -1,3 +1,5 @@
+import logging
+
 from cdp.x402 import create_facilitator_config
 from x402 import SettleContext, SettleResponse, SkipSettleResult
 from x402.mechanisms.evm.exact.register import register_exact_evm_server
@@ -13,6 +15,8 @@ from x402.server import x402ResourceServer
 
 from app import config, db
 from app.receipts import extract_payer_from_payment_dict
+
+logger = logging.getLogger("x402.setup")
 
 SEARCH_SAMPLE_OUTPUT = {
     "query": "best ramen restaurants in Shibuya Tokyo",
@@ -542,8 +546,19 @@ ROUTE_DESCRIPTIONS = {
     ),
 }
 
+# Non-vital startup check: a description that grew past the Bazaar limit is
+# a bug worth flagging loudly, but it must never be the reason the whole
+# service fails to boot (a crash-loop from this exact assert took /search
+# down in production on 2026-09-27). Truncate and warn instead.
+_DESCRIPTION_MAX_CHARS = 500
 for _name, _desc in ROUTE_DESCRIPTIONS.items():
-    assert len(_desc) <= 500, f"description for {_name} is {len(_desc)} chars, must be <=500"
+    if len(_desc) > _DESCRIPTION_MAX_CHARS:
+        logger.warning(
+            "ROUTE_DESCRIPTIONS[%r] is %d chars (max %d) - truncating instead of "
+            "crashing the service; fix the source text when convenient.",
+            _name, len(_desc), _DESCRIPTION_MAX_CHARS,
+        )
+        ROUTE_DESCRIPTIONS[_name] = _desc[: _DESCRIPTION_MAX_CHARS - 1].rstrip() + "\u2026"
 
 # Single source of truth for each route's input shape - consumed by the Bazaar
 # discovery extension below, by app/openapi_custom.py for the standard OpenAPI

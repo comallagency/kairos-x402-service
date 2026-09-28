@@ -25,6 +25,11 @@ CDP_WALLET_SECRET = os.getenv("CDP_WALLET_SECRET") or None
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
+# Read-only, GitHub-only scope expected - used only for POST /search v2's
+# "code" category (app/upstream/search_sources.py). Never the WSL admin
+# account's token: this one lives in a public-facing search path.
+GITHUB_SEARCH_TOKEN = os.getenv("GITHUB_SEARCH_TOKEN") or None
+
 # Gemma3:4b local (systemd ollama, VPS) - juge /fact-check sans passer
 # par OpenRouter (voir app/upstream/ollama.py). host.docker.internal:
 # resolu vers l'hote via extra_hosts dans docker-compose.yml.

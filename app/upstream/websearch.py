@@ -231,12 +231,13 @@ async def _collect_raw(query: str, raw_limit: int) -> list[dict[str, Any]]:
     """search v2 routing: one Jev Choice call classifies the query into
     code/place/fact/news/price/weather/general, then the winning category's
     specialized free source is queried (and the runner-up too, if the
-    winner's probability is under 0.6). "place" and "general" have no
-    specialized source - Phase 0 (2026-09-27) found OSM Nominatim and
-    Overpass both explicitly tell "API resellers" to self-host rather than
-    use the public instance, so neither is used here, and both categories
-    fall through to the SearXNG general-purpose path below like any other
-    category whose specialized source came back empty."""
+    winner's probability is under 0.6). Only "general" has no specialized
+    source - Phase 0 (2026-09-27) found OSM Nominatim and Overpass both
+    explicitly tell "API resellers" to self-host rather than use the public
+    instance, so neither is used here; "place" uses Wikivoyage instead
+    (added 2026-09-28, same Wikimedia Foundation ToS as Wikipedia). Any
+    category whose specialized source comes back empty falls through to the
+    SearXNG general-purpose path below."""
     try:
         probabilities = await search_sources.classify_query(query)
         ranked = search_sources.ranked_categories(probabilities)

@@ -3,16 +3,25 @@
 Phase 0 (2026-09-27) vetted six candidate free sources for commercial
 resale use. Two failed the bar outright: OSM Nominatim and Overpass both
 explicitly tell "API resellers" to self-host rather than use the public
-instance, so neither is used here - the "place" category has no
-specialized source and is routed through SearXNG exactly like "general".
-The remaining four (GitHub Search, Wikipedia/Wikimedia REST, Hacker News/
-Algolia, GDELT) explicitly permit commercial use; Stack Exchange also
-passed but has no natural slot in the seven categories below, so it is
-not wired in. GitHub Search's own docs put its unauthenticated rate limit
-at 10 requests/minute (stricter than the general API) - the WSL
-`agentindexworld` token is not a dedicated read-only token, so this stays
-unauthenticated rather than embedding a token with unrelated repo
-permissions inside a public-facing search path.
+instance, so neither is used here - "place" falls back to Wikivoyage
+(same Wikimedia Foundation ToS and CC BY-SA 4.0 license as Wikipedia,
+confirmed 2026-09-28) before SearXNG. The remaining sources (GitHub
+Search, Wikipedia/Wikivoyage REST, GDELT) explicitly permit commercial
+use; Stack Exchange and Hacker News also passed but have no natural slot
+in the seven categories below, so neither is wired in. GitHub Search's
+own docs put its unauthenticated rate limit at 10 requests/minute
+(stricter than the general API) - config.GITHUB_SEARCH_TOKEN, when set,
+raises this via the search's own per-token authenticated quota; the WSL
+`agentindexworld` token is not a dedicated read-only token, so that one
+specifically is never used here.
+
+"news" (2026-09-28, v2.1): GDELT's public API is real but was measured to
+be highly inconsistent live (see search_gdelt's own comment). Wikipedia
+is a reliable second attempt for a recent-but-now-settled fact (a
+release date, a race result once it has its own or an updated page) -
+it will not have same-day breaking news, but it usually catches up
+faster than SearXNG's blended engines get a clean hit for this kind of
+phrasing. SearXNG remains the final fallback either way.
 """
 
 import asyncio
@@ -22,6 +31,7 @@ from typing import Any
 
 import httpx
 
+from app import config
 from app.handlers import crypto as crypto_handler
 from app.handlers import weather as weather_handler
 from app.upstream.jev import ask_jev
@@ -111,14 +121,23 @@ def _shape(title, url, extract, date, source, attribution=None) -> dict[str, Any
 
 
 # --- code: GitHub repository search ---------------------------------------
+# Unauthenticated: 10 req/min. With config.GITHUB_SEARCH_TOKEN (a read-only
+# token the operator provides, never the WSL admin token - see module
+# docstring), GitHub raises this to the token's own authenticated search
+# quota (30 req/min for a classic/fine-grained PAT) - the _github_gate stays
+# at the conservative unauthenticated interval either way, since /search's
+# own traffic is nowhere near saturating even the lower limit yet.
 
 async def search_github(query: str, limit: int = 8) -> list[dict[str, Any]]:
     cached = _cache_get("github", query)
     if cached is not None:
         return cached
     await _github_gate.wait()
+    headers = {"User-Agent": USER_AGENT}
+    if config.GITHUB_SEARCH_TOKEN:
+        headers["Authorization"] = f"Bearer {config.GITHUB_SEARCH_TOKEN}"
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=headers) as client:
             resp = await client.get(
                 "https://api.github.com/search/repositories",
                 params={"q": query, "sort": "stars", "order": "desc", "per_page": limit},
@@ -161,15 +180,15 @@ def _strip_filler(query: str) -> str:
     return " ".join(tokens) or query
 
 
-async def search_wikipedia(query: str, limit: int = 5) -> list[dict[str, Any]]:
-    cached = _cache_get("wikipedia", query)
+async def _search_wikimedia_project(domain: str, source: str, project_name: str, query: str, limit: int) -> list[dict[str, Any]]:
+    cached = _cache_get(source, query)
     if cached is not None:
         return cached
     stripped = _strip_filler(query)
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
             resp = await client.get(
-                "https://en.wikipedia.org/w/rest.php/v1/search/page",
+                f"https://{domain}/w/rest.php/v1/search/page",
                 params={"q": stripped, "limit": limit},
             )
         if resp.status_code != 200:
@@ -183,16 +202,29 @@ async def search_wikipedia(query: str, limit: int = 5) -> list[dict[str, Any]]:
         title = page.get("title")
         if not title:
             continue
-        url = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
+        url = f"https://{domain}/wiki/{title.replace(' ', '_')}"
         excerpt = re.sub(r"<[^>]+>", "", page.get("excerpt") or "")
         results.append(
             _shape(
-                title, url, excerpt or None, None, "wikipedia",
-                attribution="Text available under CC BY-SA 4.0, via Wikipedia contributors.",
+                title, url, excerpt or None, None, source,
+                attribution=f"Text available under CC BY-SA 4.0, via {project_name} contributors.",
             )
         )
-    _cache_set("wikipedia", query, results)
+    _cache_set(source, query, results)
     return results
+
+
+async def search_wikipedia(query: str, limit: int = 5) -> list[dict[str, Any]]:
+    return await _search_wikimedia_project("en.wikipedia.org", "wikipedia", "Wikipedia", query, limit)
+
+
+# Wikivoyage: same Wikimedia Foundation Terms of Use, same CC BY-SA 4.0
+# license as Wikipedia (verified 2026-09-28) - no separate or stricter
+# clause found for Wikivoyage specifically. Used for "place" before SearXNG,
+# since it actually indexes named destinations/attractions/restaurants by
+# article, unlike Nominatim/Overpass (excluded, see module docstring).
+async def search_wikivoyage(query: str, limit: int = 5) -> list[dict[str, Any]]:
+    return await _search_wikimedia_project("en.wikivoyage.org", "wikivoyage", "Wikivoyage", query, limit)
 
 
 # --- news: GDELT ------------------------------------------------------------
@@ -241,6 +273,41 @@ async def search_gdelt(query: str, limit: int = 8) -> list[dict[str, Any]]:
     return results
 
 
+_NEWS_PER_SOURCE_LIMIT = 6  # not `limit` - see search_news docstring
+
+
+async def search_news(query: str, limit: int) -> list[dict[str, Any]]:
+    """Tries GDELT and Wikipedia and merges both - not a short-circuit on
+    "GDELT returned something". GDELT was measured (2026-09-28) to
+    sometimes return a non-empty but low-relevance article for a query
+    like "who won the last F1 race" rather than cleanly failing; a
+    short-circuit on non-empty would have let that noise block Wikipedia's
+    good candidates from ever reaching the final Jev rerank. Merging both
+    lets the rerank choose from the combined pool instead.
+
+    Each sub-source is capped at _NEWS_PER_SOURCE_LIMIT regardless of the
+    caller's `limit` (the overall raw-collection budget) - measured live
+    that requesting a full 20 Wikipedia hits for "who won the last F1
+    race" pulls in enough tangential same-keyword pages (a film titled
+    F1, a video game, a driver's biography, one specific Grand Prix) that
+    the final Jev rerank starts correctly judging the *diluted* pool as
+    not a direct answer and discarding everything, whereas the same
+    source capped at 6 keeps only the closest hits and reliably survives
+    rerank."""
+    gdelt_results, wiki_results = await asyncio.gather(
+        search_gdelt(query, _NEWS_PER_SOURCE_LIMIT), search_wikipedia(query, _NEWS_PER_SOURCE_LIMIT)
+    )
+    seen: set[str] = set()
+    merged: list[dict[str, Any]] = []
+    for r in gdelt_results + wiki_results:
+        url = r.get("url")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        merged.append(r)
+    return merged[:limit]
+
+
 # --- price / weather: reuse the existing paid routes' own lookup functions -
 
 _COIN_NAMES = {
@@ -273,7 +340,7 @@ def _extract_coin(query: str) -> str | None:
     return None
 
 
-async def search_price(query: str) -> list[dict[str, Any]]:
+async def search_price(query: str, limit: int = 1) -> list[dict[str, Any]]:
     coin = _extract_coin(query)
     if not coin:
         return []
@@ -310,7 +377,7 @@ def _extract_city(query: str) -> str | None:
     return city or None
 
 
-async def search_weather(query: str) -> list[dict[str, Any]]:
+async def search_weather(query: str, limit: int = 1) -> list[dict[str, Any]]:
     city = _extract_city(query)
     if not city:
         return []
@@ -341,19 +408,19 @@ async def search_weather(query: str) -> list[dict[str, Any]]:
 
 SOURCE_FOR_CATEGORY = {
     "code": search_github,
+    "place": search_wikivoyage,
     "fact": search_wikipedia,
-    "news": search_gdelt,
+    "news": search_news,
     "price": search_price,
     "weather": search_weather,
 }
 
 
 async def search_by_category(category: str, query: str, limit: int) -> list[dict[str, Any]]:
-    """place and general have no specialized source (see module docstring)
-    - callers should route those straight to SearXNG."""
+    """"general" has no specialized source - callers should route it
+    straight to SearXNG. Every entry in SOURCE_FOR_CATEGORY takes the same
+    (query, limit) signature."""
     fn = SOURCE_FOR_CATEGORY.get(category)
     if fn is None:
         return []
-    if fn in (search_github, search_wikipedia, search_gdelt):
-        return await fn(query, limit)
-    return await fn(query)
+    return await fn(query, limit)
