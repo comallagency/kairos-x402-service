@@ -97,6 +97,7 @@ from app.receipts import (
 from app.upstream.openrouter import OpenRouterError, chat_completion_raw
 from app.handlers.llm_gateway import (
     MARKUP as LLM_GATEWAY_MARKUP,
+    UPTO_ENABLED as llm_gateway_upto_enabled,
     MIN_SETTLE_USD as LLM_GATEWAY_MIN_SETTLE_USD,
     SAMPLE_REQUEST,
     SAMPLE_RESPONSE,
@@ -1854,8 +1855,13 @@ async def ask_model_tool(
     ceiling = await llm_gateway_price_ceiling_usd(model, capped_max_tokens, messages)
     ceiling_str = f"${ceiling:.6f}"
     exact_config = ResourceConfig(scheme="exact", pay_to=config.X402_PAY_TO, price=ceiling_str, network=config.X402_NETWORK)
-    upto_config = ResourceConfig(scheme="upto", pay_to=config.X402_PAY_TO, price=ceiling_str, network=config.X402_NETWORK)
-    accepts = server.build_payment_requirements(exact_config) + server.build_payment_requirements(upto_config)
+    accepts = server.build_payment_requirements(exact_config)
+    if llm_gateway_upto_enabled:
+        # See app/handlers/llm_gateway.py's module docstring - disabled
+        # 2026-09-28 (Bazaar never indexed the route with it on), code
+        # kept for a controlled retest.
+        upto_config = ResourceConfig(scheme="upto", pay_to=config.X402_PAY_TO, price=ceiling_str, network=config.X402_NETWORK)
+        accepts = accepts + server.build_payment_requirements(upto_config)
 
     meta: dict = {}
     if ctx is not None:

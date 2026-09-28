@@ -1782,7 +1782,11 @@ def _core_route_configs() -> dict[str, RouteConfig]:
     # Deferred: app.handlers.llm_gateway imports ROUTE_DESCRIPTIONS from this
     # module (same pattern every other handler file already uses), so a
     # top-of-file import here would be circular.
-    from app.handlers.llm_gateway import SAMPLE_REQUEST, SAMPLE_RESPONSE, compute_ceiling_price
+    from app.handlers.llm_gateway import SAMPLE_REQUEST, SAMPLE_RESPONSE, UPTO_ENABLED, compute_ceiling_price
+
+    _llm_gateway_accepts = [_payment_option(compute_ceiling_price)]
+    if UPTO_ENABLED:
+        _llm_gateway_accepts.append(_upto_payment_option(compute_ceiling_price))
 
     return {
         # /search reactive le 2026-09-11 : depuis le 2026-09-07, la route ne
@@ -2453,17 +2457,15 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             ),
         ),
         "POST /v1/chat/completions": RouteConfig(
-            # Two options so a buyer whose wallet/client only signs
-            # "exact" (EIP-3009, no ETH needed, no Permit2 allowance) is
-            # never excluded - both price off the SAME per-request
-            # ceiling formula (compute_ceiling_price); "exact" settles
-            # that ceiling in full, "upto" settles real usage x 1.10
-            # afterward. find_matching_requirements() (x402ResourceServer)
-            # picks whichever the buyer actually signed against.
-            accepts=[
-                _payment_option(compute_ceiling_price),
-                _upto_payment_option(compute_ceiling_price),
-            ],
+            # "exact" only while UPTO_ENABLED is False (app/handlers/llm_gateway.py
+            # module docstring has the full story: the route never appeared
+            # in Bazaar even an hour after a real, confirmed on-chain
+            # settlement, and offering a second, dynamically-priced, non-exact
+            # option was the only structural difference from every other
+            # route that does get indexed). _llm_gateway_accepts is built
+            # above from that same flag, so flipping it back on needs no
+            # change here.
+            accepts=_llm_gateway_accepts,
             resource=f"{config.BASE_URL}/v1/chat/completions",
             description=ROUTE_DESCRIPTIONS["llm-gateway"],
             mime_type="application/json",
