@@ -40,6 +40,7 @@ from app.handlers.pdf import router as pdf_router
 from app.handlers.probe import router as probe_router
 from app.handlers.search import router as search_router
 from app.handlers.summarize import router as summarize_router
+from app.handlers.token_risk import router as token_risk_router
 from app.handlers.translate import router as translate_router
 from app.handlers.weather import router as weather_router
 from app.handlers.wallet_balance import router as wallet_balance_router
@@ -113,6 +114,7 @@ inner_app.include_router(pdf_router)
 inner_app.include_router(web_read_router)
 inner_app.include_router(extract_router)
 inner_app.include_router(summarize_router)
+inner_app.include_router(token_risk_router)
 inner_app.include_router(discover_paid_router)
 inner_app.include_router(weather_router)
 inner_app.include_router(crypto_router)

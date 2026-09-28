@@ -553,6 +553,15 @@ ROUTE_DESCRIPTIONS = {
         "settle for real usage x 1.10 (min $0.001) once the call completes. "
         "Try GET /v1/chat/completions/sample."
     ),
+    "token-risk": (
+        "Base token risk scan: on-chain rug check and honeypot-style flag "
+        "detection for any ERC-20, no GoPlus, DexScreener or other vendor - "
+        "real Base token safety. Reads bytecode for mint/blacklist/pause/tax "
+        "powers, EIP-1967 proxy, renounced ownership, plus Uniswap v2/v3 and "
+        "Aerodrome liquidity. A Jev avoid/caution/acceptable verdict leads "
+        "the response, raw signals follow. Holder concentration included "
+        "only when history fits 1-2 log queries. Try GET /token-risk/sample."
+    ),
 }
 
 # Non-vital startup check: a description that grew past the Bazaar limit is
@@ -1745,6 +1754,85 @@ RANK_SAMPLE_OUTPUT = {
 }
 
 
+TOKEN_RISK_SAMPLE_INPUT = {"address": "0x532f27101965dd16442E59d40670FaF5eBB142E"}
+
+TOKEN_RISK_INPUT_SCHEMA = {
+    "properties": {
+        "address": {
+            "type": "string",
+            "description": "ERC-20 contract address on Base to analyze (0x + 40 hex chars).",
+        },
+    },
+    "required": ["address"],
+}
+
+TOKEN_RISK_SAMPLE_OUTPUT = {
+    "address": "0x532f27101965dd16442E59d40670FaF5eBB142E",
+    "network": {"key": "base", "name": "Base", "caip2": "eip155:8453"},
+    "verdict": {
+        "verdict": "caution",
+        "probability": 0.62,
+        "probabilities": {"acceptable": 0.31, "avoid": 0.07, "caution": 0.62},
+        "confidence": 0.55,
+    },
+    "bytecode_analysis": {
+        "bytecode_size": 8421,
+        "flags": {"mint": False, "blacklist": False, "pause": False, "set_max_tx_amount": True},
+        "any_dangerous_function": True,
+        "is_upgradeable_proxy": False,
+        "owner": "0x0000000000000000000000000000000000000000",
+        "owner_renounced": True,
+    },
+    "liquidity_analysis": {
+        "uniswap_v2": {
+            "pair": "0x1efdc3e6cfb3df3b7dd3e3971d5262733c52c21c",
+            "reserve0": "1535891536408965785",
+            "reserve1": "5106124266540300941199548545",
+        },
+        "uniswap_v3_pools": [],
+        "aerodrome_pools": [],
+        "any_liquidity_found": True,
+    },
+    "holders_analysis": {"status": "skipped_established_token"},
+}
+
+TOKEN_RISK_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "address": {"type": "string"},
+        "network": {"type": "object"},
+        "verdict": {
+            "type": "object",
+            "description": "Jev-powered decision: avoid/caution/acceptable with a real probability.",
+            "properties": {
+                "verdict": {"type": "string", "enum": ["avoid", "caution", "acceptable"]},
+                "probability": {"type": "number"},
+                "probabilities": {"type": "object"},
+                "confidence": {"type": "number"},
+            },
+        },
+        "bytecode_analysis": {
+            "type": "object",
+            "description": "mint/blacklist/pause/tax flags, proxy and ownership status.",
+        },
+        "liquidity_analysis": {
+            "type": "object",
+            "description": "Uniswap v2/v3 and Aerodrome pools found, with reserves.",
+        },
+        "holders_analysis": {
+            "type": "object",
+            "description": (
+                "Top-10 holder concentration, or {\"status\": "
+                "\"skipped_established_token\"} if the full transfer "
+                "history does not provably fit in 1-2 eth_getLogs calls."
+            ),
+        },
+        "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
+    },
+    "required": ["address", "verdict", "bytecode_analysis", "liquidity_analysis", "holders_analysis"],
+}
+
+
 def _payment_option(price: str) -> PaymentOption:
     return PaymentOption(
         scheme="exact",
@@ -2455,6 +2543,21 @@ def _core_route_configs() -> dict[str, RouteConfig]:
                 input_schema=RANK_INPUT_SCHEMA,
                 body_type="json",
                 output=OutputConfig(example=RANK_SAMPLE_OUTPUT, schema=RANK_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /token-risk": RouteConfig(
+            accepts=_payment_option(config.PRICE_TOKEN_RISK),
+            resource=f"{config.BASE_URL}/token-risk",
+            description=ROUTE_DESCRIPTIONS["token-risk"],
+            mime_type="application/json",
+            service_name="token-risk-scan",
+            icon_url=ICON_URL,
+            tags=["token risk", "rug check", "honeypot", "Base token safety"],
+            extensions=declare_discovery_extension(
+                input=TOKEN_RISK_SAMPLE_INPUT,
+                input_schema=TOKEN_RISK_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=TOKEN_RISK_SAMPLE_OUTPUT, schema=TOKEN_RISK_OUTPUT_SCHEMA),
             ),
         ),
         "POST /v1/chat/completions": RouteConfig(
