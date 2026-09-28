@@ -2452,7 +2452,17 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             ),
         ),
         "POST /v1/chat/completions": RouteConfig(
-            accepts=_upto_payment_option(compute_ceiling_price),
+            # Two options so a buyer whose wallet/client only signs
+            # "exact" (EIP-3009, no ETH needed, no Permit2 allowance) is
+            # never excluded - both price off the SAME per-request
+            # ceiling formula (compute_ceiling_price); "exact" settles
+            # that ceiling in full, "upto" settles real usage x 1.10
+            # afterward. find_matching_requirements() (x402ResourceServer)
+            # picks whichever the buyer actually signed against.
+            accepts=[
+                _payment_option(compute_ceiling_price),
+                _upto_payment_option(compute_ceiling_price),
+            ],
             resource=f"{config.BASE_URL}/v1/chat/completions",
             description=ROUTE_DESCRIPTIONS["llm-gateway"],
             mime_type="application/json",

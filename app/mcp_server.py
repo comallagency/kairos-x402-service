@@ -1786,17 +1786,38 @@ async def rank_tool(
     )
 
 
-# --- ask_model (LLM gateway, "upto" scheme) --------------------------------
+# --- ask_model (LLM gateway, "exact" + "upto") ------------------------------
 #
-# Not built on _paid_tool_call: that helper always settles for the full
-# payment_requirements amount it verified against, which for "exact"-scheme
-# tools (decide/guard/verify/rank) is correct - the ceiling IS the price.
-# "upto" is different by design: the buyer authorizes a ceiling and the real
-# settlement is real-cost x MARKUP. server.settle_payment() settles whatever
-# PaymentRequirements object it's given, so the reduced amount has to be
-# baked into a copy of the verified requirements before calling it - there
-# is no separate "override" parameter (that convenience exists only on the
-# HTTP side, via x402.http.middleware.fastapi.set_settlement_overrides()).
+# Not built on _paid_tool_call, for two reasons:
+#  1. That helper always settles the full verified amount - fine for
+#     decide/guard/verify/rank ("exact", fixed price), wrong for "upto"
+#     (see below).
+#  2. It also calls server.build_payment_requirements(route_config.accepts)
+#     directly - a SYNC, single-item method (x402/server_base.py) that
+#     neither resolves a callable/DynamicPrice nor accepts a list. The
+#     async equivalent that does both (_build_payment_requirements_from_
+#     options, x402/http/x402_http_server.py) needs an HTTPRequestContext,
+#     which the MCP transport doesn't have. Concretely verified
+#     (2026-09-28): calling the sync method with this route's list-of-two
+#     accepts raised AttributeError: 'list' object has no attribute
+#     'network' - this would have broken the very first version of this
+#     tool the moment anyone actually called it over MCP, even before the
+#     "exact"+"upto" split (a single DynamicPrice-priced PaymentOption
+#     would have failed the same way, at parse_price()). Since ask_model's
+#     own arguments already carry everything the price needs
+#     (model/messages/max_tokens), the ceiling is resolved directly here
+#     and both ResourceConfig entries are built with that already-resolved
+#     price string - bypassing route_config.accepts and the broken
+#     resolution path entirely, rather than fixing the shared helper for
+#     one tool.
+#
+# Settlement: PaymentPayload.accepted (embedded in the verified payload)
+# says which of the two accepts[] entries the caller actually signed -
+# "exact" settles the full ceiling as-is; "upto" gets its amount reduced to
+# real usage x MARKUP first (server.settle_payment() settles whatever
+# PaymentRequirements object it's given - there's no separate override
+# parameter, that convenience exists only on the HTTP side via
+# x402.http.middleware.fastapi.set_settlement_overrides()).
 
 _LLM_GATEWAY_EXTENSIONS = declare_mcp_discovery_extension(
     DeclareMcpDiscoveryConfig(
@@ -1822,11 +1843,18 @@ async def ask_model_tool(
     max_tokens: Annotated[int | None, Field(description=LLM_GATEWAY_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
     ctx: Context = None,
 ) -> ToolResult:
+    from x402.schemas import ResourceConfig
+
     route_key = "POST /v1/chat/completions"
     server = await _ensure_initialized()
-    route_config = _route_configs[route_key]
-    accepts = server.build_payment_requirements(route_config.accepts)
     resource_info = _resource_info("ask_model", route_key)
+
+    capped_max_tokens = llm_gateway_capped_max_tokens(max_tokens)
+    ceiling = await llm_gateway_price_ceiling_usd(model, capped_max_tokens, messages)
+    ceiling_str = f"${ceiling:.6f}"
+    exact_config = ResourceConfig(scheme="exact", pay_to=config.X402_PAY_TO, price=ceiling_str, network=config.X402_NETWORK)
+    upto_config = ResourceConfig(scheme="upto", pay_to=config.X402_PAY_TO, price=ceiling_str, network=config.X402_NETWORK)
+    accepts = server.build_payment_requirements(exact_config) + server.build_payment_requirements(upto_config)
 
     meta: dict = {}
     if ctx is not None:
@@ -1859,7 +1887,6 @@ async def ask_model_tool(
     body_excerpt = json.dumps({"model": model, "max_tokens": max_tokens})[:2000]
 
     priced = await llm_gateway_priced_models_map()
-    capped_max_tokens = llm_gateway_capped_max_tokens(max_tokens)
     if model not in priced or not isinstance(messages, list) or not messages:
         db.log_request(
             route="v1/chat/completions", method="MCP", status="error", payer=payer,
@@ -1868,8 +1895,6 @@ async def ask_model_tool(
         )
         body = {"error": {"reason": "unknown_model" if model not in priced else "invalid_request"}}
         return ToolResult(structured_content=body, is_error=True)
-
-    ceiling = await llm_gateway_price_ceiling_usd(model, capped_max_tokens, messages)
 
     try:
         with Timer() as t:
@@ -1886,13 +1911,18 @@ async def ask_model_tool(
 
     usage = data.get("usage") or {}
     real_cost = float(usage.get("cost") or 0.0)
-    settle_amount = min(max(real_cost * LLM_GATEWAY_MARKUP, LLM_GATEWAY_MIN_SETTLE_USD), ceiling)
+
+    if payment_requirements.scheme == "upto":
+        settle_amount = min(max(real_cost * LLM_GATEWAY_MARKUP, LLM_GATEWAY_MIN_SETTLE_USD), ceiling)
+        atomic_amount = str(int(round(settle_amount * 1_000_000)))
+        settle_requirements = payment_requirements.model_copy(update={"amount": atomic_amount})
+    else:
+        settle_amount = ceiling
+        settle_requirements = payment_requirements
     margin = settle_amount - real_cost
     billed = effective_price(payer, settle_amount)
-    atomic_amount = str(int(round(settle_amount * 1_000_000)))
-    reduced_requirements = payment_requirements.model_copy(update={"amount": atomic_amount})
 
-    settle_result = await server.settle_payment(payment_payload, reduced_requirements)
+    settle_result = await server.settle_payment(payment_payload, settle_requirements)
     if not settle_result.success:
         return _settlement_failed_result(accepts, resource_info, _LLM_GATEWAY_EXTENSIONS, settle_result)
 

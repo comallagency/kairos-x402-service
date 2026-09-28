@@ -2,12 +2,25 @@
 
 Reopens the OpenRouter passthrough this service used to offer before the
 account balance went negative (2026-09-07). Balance is positive again
-(~$7.95, 2026-09-28) - this is a fresh build, not a re-enable, using the
-x402 "upto" scheme (Permit2-based) instead of a fixed price: the buyer
-authorizes a ceiling upfront, and the actual settlement is the real
-OpenRouter cost x MARKUP, floored at MIN_SETTLE_USD. Every other paid route
-in this app has a single fixed price; this is the first one where what we
-pay upstream and what the buyer is billed genuinely differ per call.
+(~$7.95, 2026-09-28) - this is a fresh build, not a re-enable.
+
+Two accepts[] options, both priced off the same per-request ceiling
+(compute_ceiling_price - real prompt/completion tokens x the model's real
+rate x MARKUP, floored at MIN_SETTLE_USD):
+  - "exact" (EIP-3009): settles the full ceiling, always - the simple
+    default. No ETH, no Permit2 allowance needed from the buyer.
+  - "upto" (Permit2-based): settles the real OpenRouter cost x MARKUP
+    instead, floored the same way - cheaper for the buyer when the real
+    call costs much less than the worst-case ceiling, but needs a Permit2
+    USDC allowance and (for signing) an EVM wallet with ETH for the buyer's
+    own client to have set that up. Added 2026-09-28 after "upto"-only
+    turned out to exclude any buyer without that allowance or whose client
+    only implements "exact" (see scripts/bootstrap_llm_gateway.py's B
+    wallet - it has no ETH).
+Every other paid route in this app has a single fixed price; this is the
+first one where what we pay upstream and what the buyer is billed
+genuinely differ per call, and the first with more than one accepts[]
+option.
 
 Non-streaming only. GET /v1/models is free.
 """
@@ -22,7 +35,7 @@ from fastapi.responses import JSONResponse
 from x402.http.middleware.fastapi import set_settlement_overrides
 
 from app import config, db
-from app.receipts import Timer, effective_price, extract_payer_address, make_receipt
+from app.receipts import Timer, effective_price, extract_payer_address, extract_scheme_from_header, make_receipt
 from app.upstream.openrouter import OpenRouterError, chat_completion_raw, get_models
 from app.upstream.tokencount import count_tokens
 from app.x402_setup import ROUTE_DESCRIPTIONS
@@ -272,7 +285,20 @@ async def chat_completions(request: Request):
 
     usage = data.get("usage") or {}
     real_cost = float(usage.get("cost") or 0.0)
-    settle_amount = min(max(real_cost * MARKUP, MIN_SETTLE_USD), ceiling)
+
+    # Two accepts[] options (see app/x402_setup.py's RouteConfig for this
+    # route): "exact" settles the full declared ceiling regardless of real
+    # usage - the buyer already signed for exactly that amount, and
+    # PaymentPayload.accepted (embedded in the payment header the buyer
+    # sent) says which one they actually used, so no re-verification is
+    # needed here, the middleware already did that. Only "upto" gets a
+    # reduced settlement.
+    payment_header = request.headers.get("payment-signature") or request.headers.get("x-payment")
+    scheme = extract_scheme_from_header(payment_header)
+    if scheme == "upto":
+        settle_amount = min(max(real_cost * MARKUP, MIN_SETTLE_USD), ceiling)
+    else:
+        settle_amount = ceiling
     margin = settle_amount - real_cost
     billed = effective_price(payer, settle_amount)
 
@@ -287,5 +313,6 @@ async def chat_completions(request: Request):
         content=json.dumps({**data, "x402_receipt": receipt}),
         media_type="application/json",
     )
-    set_settlement_overrides(fast_response, {"amount": f"${settle_amount:.6f}"})
+    if scheme == "upto":
+        set_settlement_overrides(fast_response, {"amount": f"${settle_amount:.6f}"})
     return fast_response
