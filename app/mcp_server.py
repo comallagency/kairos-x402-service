@@ -168,6 +168,10 @@ from app.x402_setup import (
     LLM_GATEWAY_OUTPUT_SCHEMA,
     DISCOVER_INPUT_SCHEMA,
     DISCOVER_SAMPLE_OUTPUT,
+    TOKEN_RISK_INPUT_SCHEMA,
+    TOKEN_RISK_OUTPUT_SCHEMA,
+    TOKEN_RISK_SAMPLE_INPUT,
+    TOKEN_RISK_SAMPLE_OUTPUT,
     SEARCH_OUTPUT_SCHEMA,
     TRANSLATE_OUTPUT_SCHEMA,
     JOBS_OUTPUT_SCHEMA,
@@ -1219,6 +1223,7 @@ from app.handlers.gas_price import _lookup as _gas_price_lookup
 from app.handlers.agent_health import _lookup as _agent_health_lookup
 from app.handlers.wallet_balance import _lookup as _wallet_balance_lookup
 from app.handlers.wallet_intelligence import _lookup as _wallet_intelligence_lookup
+from app.handlers.token_risk import _lookup as _token_risk_lookup
 from app.upstream.evm_rpc import EvmRpcError
 
 _WALLET_BALANCE_EXTENSIONS = declare_mcp_discovery_extension(
@@ -1253,6 +1258,15 @@ _WALLET_INTELLIGENCE_EXTENSIONS = declare_mcp_discovery_extension(
             "amount_usdc": 0.001,
         },
         output=OutputConfig(example=WALLET_INTELLIGENCE_SAMPLE_OUTPUT),
+    )
+)
+_TOKEN_RISK_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="token_risk",
+        description=ROUTE_DESCRIPTIONS["token-risk"],
+        input_schema=TOKEN_RISK_INPUT_SCHEMA,
+        example=TOKEN_RISK_SAMPLE_INPUT,
+        output=OutputConfig(example=TOKEN_RISK_SAMPLE_OUTPUT),
     )
 )
 _X402_ECHO_EXTENSIONS = declare_mcp_discovery_extension(
@@ -1295,6 +1309,35 @@ async def _run_wallet_balance(args: dict, payer: str | None) -> dict:
     return {
         **result,
         "x402_receipt": make_receipt(None, "wallet-balance", timer.elapsed_ms, price),
+    }
+
+
+async def _run_token_risk(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as timer:
+            result = await _token_risk_lookup(args)
+    except EvmRpcError as exc:
+        db.log_request(
+            route="token-risk", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+        )
+        raise ServiceError(str(exc)) from exc
+    except JevError as exc:
+        db.log_request(
+            route="token-risk", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
+        )
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+    price = effective_price(payer, price_float(config.PRICE_TOKEN_RISK))
+    db.log_request(
+        route="token-risk", method="MCP", status="paid",
+        latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+        user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {
+        **result,
+        "x402_receipt": make_receipt(None, "token-risk", timer.elapsed_ms, price),
     }
 
 
@@ -1402,6 +1445,27 @@ async def wallet_balance_tool(
         args={"address": address, "network": network},
         extensions=_WALLET_BALANCE_EXTENSIONS,
         run_and_log=_run_wallet_balance,
+    )
+
+
+@mcp.tool(
+    name="token_risk",
+    title="Token Risk",
+    description=ROUTE_DESCRIPTIONS["token-risk"],
+    output_schema=TOKEN_RISK_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def token_risk_tool(
+    address: Annotated[str, Field(description=TOKEN_RISK_INPUT_SCHEMA["properties"]["address"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="token_risk",
+        route_key="POST /token-risk",
+        ctx=ctx,
+        args={"address": address},
+        extensions=_TOKEN_RISK_EXTENSIONS,
+        run_and_log=_run_token_risk,
     )
 
 
