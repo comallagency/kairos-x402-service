@@ -333,12 +333,29 @@ async def _handle_search(
             summary = None  # optional - skip rather than fail the whole response
 
     elapsed_ms = round((time.monotonic() - t0) * 1000)
-    price = effective_price(payer, price_float(config.PRICE_SEARCH))
-    db.log_request(
-        route="search", method=method, status="paid",
-        latency_ms=elapsed_ms, amount_usdc=price, payer=payer,
-        user_agent=user_agent, body_excerpt=body_excerpt,
-    )
+    if payer is not None:
+        price = effective_price(payer, price_float(config.PRICE_SEARCH))
+        db.log_request(
+            route="search", method=method, status="paid",
+            latency_ms=elapsed_ms, amount_usdc=price, payer=payer,
+            user_agent=user_agent, body_excerpt=body_excerpt,
+        )
+    else:
+        # A verified x402 payment always yields a payer (extract_payer_address
+        # decodes the real payment header the middleware already checked) -
+        # None here means this call did not go through that middleware at
+        # all, i.e. a direct/test invocation of this handler, not production
+        # traffic. 2026-09-28: 153 such calls from this session's own testing
+        # had been silently logged as status="paid" with payer=NULL,
+        # inflating history_7d()'s payments_real count for the day. Logged
+        # as its own "test" status instead - kept for debugging, never
+        # counted as a real payment (see history_7d()'s payer filter too).
+        price = 0.0
+        db.log_request(
+            route="search", method=method, status="test",
+            latency_ms=elapsed_ms, payer=None,
+            user_agent=user_agent, body_excerpt=body_excerpt,
+        )
     receipt = make_receipt(
         neutral_model_id(model_served), "web_search", elapsed_ms, price,
         searches_run=(len(query) if is_batch else 1), sources_read=len(results),
