@@ -23,6 +23,16 @@ genuinely differ per call, and the first with more than one accepts[]
 option.
 
 Non-streaming only. GET /v1/models is free.
+
+Free OpenRouter models (price 0 on either side, or a ":free" id suffix -
+the two don't always agree exactly, both are checked) are excluded from
+both GET /v1/models and POST /v1/chat/completions (2026-09-28): there is
+no real ceiling to size "exact" against and nothing for "upto" to settle
+beyond the MIN_SETTLE_USD floor either way, so serving them would just be
+charging a buyer for someone else's free capacity. Requesting one 400s,
+unbilled, with reason "free_model_not_supported" (distinct from
+"unknown_model", so the buyer can tell "doesn't exist" from "exists but
+excluded" apart).
 """
 
 from __future__ import annotations
@@ -55,18 +65,34 @@ class LLMGatewayError(Exception):
         super().__init__(reason)
 
 
+def _is_free_model(model_id: str, prompt_price: float, completion_price: float) -> bool:
+    """A free model has nothing for the "upto" scheme to settle (real cost
+    x MARKUP floors at MIN_SETTLE_USD regardless, i.e. we'd be charging a
+    buyer for someone else's free capacity) and no real ceiling to size
+    "exact" against either - excluded from both GET /v1/models and
+    POST /v1/chat/completions (2026-09-28). Checks both the price (0, not
+    just <=0 - a negative price is caught earlier by get_models()'s own
+    "-1 means variable/unpriced" filter, not this one) and OpenRouter's own
+    ":free" id suffix, since the two don't always agree exactly."""
+    return prompt_price == 0 or completion_price == 0 or model_id.endswith(":free")
+
+
 async def _priced_models_map() -> dict[str, tuple[float, float]]:
     """{model_id: (prompt_price_per_token, completion_price_per_token)},
-    upstream OpenRouter prices - NOT marked up (see _markup_models_payload
-    for the buyer-facing, marked-up GET /v1/models response)."""
+    upstream OpenRouter prices, free models excluded - NOT marked up (see
+    _markup_models_payload for the buyer-facing, marked-up GET /v1/models
+    response)."""
     models = await get_models()
     out = {}
     for m in models:
         pricing = m.get("pricing") or {}
         try:
-            out[m["id"]] = (float(pricing["prompt"]), float(pricing["completion"]))
+            prompt_price, completion_price = float(pricing["prompt"]), float(pricing["completion"])
         except (KeyError, TypeError, ValueError):
             continue
+        if _is_free_model(m["id"], prompt_price, completion_price):
+            continue
+        out[m["id"]] = (prompt_price, completion_price)
     return out
 
 
@@ -153,10 +179,14 @@ async def _markup_models_payload() -> dict[str, Any]:
     for m in models:
         pricing = m.get("pricing") or {}
         try:
-            prompt = float(pricing["prompt"]) * MARKUP
-            completion = float(pricing["completion"]) * MARKUP
+            raw_prompt = float(pricing["prompt"])
+            raw_completion = float(pricing["completion"])
         except (KeyError, TypeError, ValueError):
             continue
+        if _is_free_model(m["id"], raw_prompt, raw_completion):
+            continue
+        prompt = raw_prompt * MARKUP
+        completion = raw_completion * MARKUP
         data.append(
             {
                 "id": m.get("id"),
@@ -171,7 +201,7 @@ async def _markup_models_payload() -> dict[str, Any]:
 @router.get(
     "/v1/models",
     openapi_extra={"security": []},
-    description="Free. Lists every model the LLM gateway can serve, with per-token pricing (upstream cost x 1.10).",
+    description="Free. Lists every paid model the LLM gateway can serve, with per-token pricing (upstream cost x 1.10). Free OpenRouter models (price 0 or a \":free\" id suffix) are excluded - see POST /v1/chat/completions.",
 )
 async def list_models():
     payload = await _markup_models_payload()
@@ -209,6 +239,26 @@ SAMPLE_RESPONSE = {
 )
 async def chat_completions_sample():
     return {"request": SAMPLE_REQUEST, "response": SAMPLE_RESPONSE}
+
+
+async def _unpriced_model_error(model: str) -> tuple[str, str]:
+    """Distinguishes "not an OpenRouter model at all" from "it's free, and
+    free models are excluded" (2026-09-28) - both land in the same
+    `model not in priced` check, but the buyer sees a different, honest
+    reason for each rather than one generic "unknown_model" either way."""
+    all_models = await get_models()
+    for m in all_models:
+        if m.get("id") != model:
+            continue
+        pricing = m.get("pricing") or {}
+        try:
+            p, c = float(pricing["prompt"]), float(pricing["completion"])
+        except (KeyError, TypeError, ValueError):
+            break
+        if _is_free_model(model, p, c):
+            return "free_model_not_supported", f"{model!r} is a free model - this gateway only serves paid models. See GET /v1/models."
+        break
+    return "unknown_model", f"{model!r} is not in GET /v1/models."
 
 
 # --- POST /v1/chat/completions - paid, "upto" scheme ------------------------
@@ -262,14 +312,12 @@ async def chat_completions(request: Request):
             status_code=400,
         )
     if model not in priced:
+        reason, detail = await _unpriced_model_error(model)
         db.log_request(
             route="v1/chat/completions", method="POST", status="error", payer=payer,
-            user_agent=user_agent, body_excerpt=body_excerpt, error_reason="unknown_model",
+            user_agent=user_agent, body_excerpt=body_excerpt, error_reason=reason,
         )
-        return JSONResponse(
-            {"error": {"reason": "unknown_model", "detail": f"{model!r} is not in GET /v1/models."}},
-            status_code=400,
-        )
+        return JSONResponse({"error": {"reason": reason, "detail": detail}}, status_code=400)
 
     ceiling = await _price_ceiling_usd(model, capped_max_tokens, messages)
 

@@ -103,6 +103,7 @@ from app.handlers.llm_gateway import (
     _capped_max_tokens as llm_gateway_capped_max_tokens,
     _price_ceiling_usd as llm_gateway_price_ceiling_usd,
     _priced_models_map as llm_gateway_priced_models_map,
+    _unpriced_model_error as llm_gateway_unpriced_model_error,
 )
 from app.upstream.tokencount import count_tokens
 from app.upstream.jev import JevError, ask_jev
@@ -1888,13 +1889,15 @@ async def ask_model_tool(
 
     priced = await llm_gateway_priced_models_map()
     if model not in priced or not isinstance(messages, list) or not messages:
+        if model not in priced:
+            reason, detail = await llm_gateway_unpriced_model_error(model)
+        else:
+            reason, detail = "invalid_request", "messages must be a non-empty array."
         db.log_request(
             route="v1/chat/completions", method="MCP", status="error", payer=payer,
-            user_agent="mcp", body_excerpt=body_excerpt,
-            error_reason="unknown_model" if model not in priced else "invalid_request",
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=reason,
         )
-        body = {"error": {"reason": "unknown_model" if model not in priced else "invalid_request"}}
-        return ToolResult(structured_content=body, is_error=True)
+        return ToolResult(structured_content={"error": {"reason": reason, "detail": detail}}, is_error=True)
 
     try:
         with Timer() as t:
