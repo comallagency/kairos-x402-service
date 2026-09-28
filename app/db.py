@@ -1432,8 +1432,17 @@ def history_7d() -> list[dict]:
     """Per UTC day, last 7 days: total requests, distinct client IPs that are
     neither a known scanner UA nor our own VPS (config.VPS_PUBLIC_IP - our own
     curl/verification traffic against the public domain), and real payments
-    (status='paid', payer not in MECHANICAL_WALLETS - same rule as
-    chain_revenue_since(), self-funded bootstrap settlements are not revenue)."""
+    (status='paid', payer present AND not in MECHANICAL_WALLETS - same rule
+    as chain_revenue_since(), self-funded bootstrap settlements are not
+    revenue). "payer present" was added 2026-09-28: `(row["payer"] or "")`
+    turned a NULL payer into "", which is trivially "not in mechanical" and
+    so counted as real - a direct/test call to a handler (bypassing the x402
+    payment middleware entirely, so no payer was ever extracted) logs
+    status="paid" with payer=NULL in exactly the buggy way this masked.
+    Those calls are now logged with status="test" instead (see
+    app/handlers/search.py), but this filter is the actual guarantee: a row
+    with no payer at all is never a real payment, regardless of what wrote
+    it or what status it carries."""
     mechanical = _mechanical_wallets()
     with cursor() as cur:
         cur.execute(
@@ -1450,7 +1459,8 @@ def history_7d() -> list[dict]:
         ip = row["client_ip"]
         if ip and ip != config.VPS_PUBLIC_IP and not _is_scanner_ua(row["user_agent"]):
             bucket["identities"].add(ip)
-        if row["status"] == "paid" and (row["payer"] or "").lower() not in mechanical:
+        payer = (row["payer"] or "").strip().lower()
+        if row["status"] == "paid" and payer and payer not in mechanical:
             bucket["payments_real"] += 1
 
     return [
