@@ -85,7 +85,7 @@ BRICK_BLUE_PUBLIC_KEY = os.getenv("BRICK_BLUE_PUBLIC_KEY") or None
 # Public hash for https://402index.io domain claim (/.well-known/402index-verify.txt)
 INDEX_402_VERIFY_HASH = os.getenv("INDEX_402_VERIFY_HASH") or None
 
-PRICE_TRANSLATE = "$0.005"
+PRICE_TRANSLATE = "$0.002"
 PRICE_JOB = "$0.10"
 
 # 2026-09-20 conversion pricing: crawler traffic was healthy (1,421 valid 402s)

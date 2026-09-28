@@ -393,11 +393,12 @@ DISCOVER_SAMPLE_OUTPUT = {
 
 ROUTE_DESCRIPTIONS = {
     "search": (
-        "Real-time web search - up to 10 results with title, URL, snippet and "
-        "publish date, plus clean full-page Markdown for the top 3 by default. "
-        "Up to 5 queries per call, merged and de-duplicated. Each query is "
-        "routed by Jev to the best specialised source (code, facts, news, "
-        "prices, weather). No account, no API key. Try GET /search/sample. "
+        "Web search: search the web and get ranked results with page content. "
+        "Up to 10 results with title, URL, snippet and publish date, plus clean "
+        "full-page Markdown for the top 3 by default. Up to 5 queries per call, "
+        "merged and de-duplicated. Each query is routed by Jev to the best "
+        "specialised source (code, facts, news, prices, weather). No account, "
+        "no API key. Try GET /search/sample. "
         + _KIT_MENTION
     ),
     "translate": (
@@ -424,7 +425,7 @@ ROUTE_DESCRIPTIONS = {
         + _KIT_MENTION
     ),
     "web-read": (
-        "Fetch a URL and return its main article as clean markdown - navigation, "
+        "Fetch a URL and read the web page as clean Markdown - navigation, "
         "ads and boilerplate stripped, links resolved, plus a real token count. "
         "The same extraction /search uses on result pages, exposed standalone "
         "for a URL you already have. Try GET /web-read/sample. " + _KIT_MENTION
