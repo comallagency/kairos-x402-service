@@ -425,10 +425,11 @@ ROUTE_DESCRIPTIONS = {
         + _KIT_MENTION
     ),
     "web-read": (
-        "Fetch a URL and read the web page as clean Markdown - navigation, "
-        "ads and boilerplate stripped, links resolved, plus a real token count. "
-        "The same extraction /search uses on result pages, exposed standalone "
-        "for a URL you already have. Try GET /web-read/sample. " + _KIT_MENTION
+        "Fetch URL content as Markdown: read any web page and get clean "
+        "Markdown - navigation, ads and boilerplate stripped, links resolved, "
+        "plus a real token count. The same extraction /search uses on result "
+        "pages, exposed standalone for a URL you already have. Try GET "
+        "/web-read/sample. " + _KIT_MENTION
     ),
     "extract": (
         "Extract structured data from a URL or raw text into strict JSON matching "
@@ -546,11 +547,11 @@ ROUTE_DESCRIPTIONS = {
         "no OpenRouter or TypeSafe account needed. Try GET /rank/sample."
     ),
     "llm-gateway": (
-        "OpenAI-compatible chat completions (non-streaming) for any "
-        "OpenRouter model - GET /v1/models lists them free, with pricing "
-        "(upstream cost x 1.10). Pay only for what you use: sign a ceiling "
-        "based on your max_tokens, settle for real usage x 1.10 (min $0.001) "
-        "once the call completes. Try GET /v1/chat/completions/sample."
+        "OpenAI-compatible chat completion API: call 400+ LLMs (Claude, GPT, "
+        "Gemini, Llama, Mistral) per request, pay with x402, no API key. Pay "
+        "only for what you use: sign a ceiling based on your max_tokens, "
+        "settle for real usage x 1.10 (min $0.001) once the call completes. "
+        "Try GET /v1/chat/completions/sample."
     ),
 }
 
