@@ -562,6 +562,14 @@ ROUTE_DESCRIPTIONS = {
         "the response, raw signals follow. Holder concentration included "
         "only when history fits 1-2 log queries. Try GET /token-risk/sample."
     ),
+    "research": (
+        "Web research report with sources: ask a question, get a cited "
+        "answer in 5-8 sentences, each claim tagged to a numbered source, "
+        "built from real page content - no invented facts. Under 4.5s "
+        "guaranteed: search and a fast LLM (mistral-nemo/llama-3.3-70b) "
+        "always run; claim verification only when time remains, marked "
+        "plainly when skipped. Try GET /research/sample."
+    ),
 }
 
 # Non-vital startup check: a description that grew past the Bazaar limit is
@@ -1861,6 +1869,62 @@ TOKEN_RISK_OUTPUT_SCHEMA = {
 }
 
 
+RESEARCH_SAMPLE_INPUT = {"query": "What caused the 2026 Base network congestion in September?"}
+
+RESEARCH_INPUT_SCHEMA = {
+    "properties": {
+        "query": {"type": "string", "description": "The research question to answer, up to 500 characters."},
+        "max_sources": {"type": "integer", "description": "How many web sources to consider, 1-10. Default 5."},
+    },
+    "required": ["query"],
+}
+
+RESEARCH_SAMPLE_OUTPUT = {
+    "query": "What caused the 2026 Base network congestion in September?",
+    "answer": (
+        "Base experienced elevated congestion in mid-September 2026 driven by a surge in memecoin launch "
+        "activity on Uniswap V2/V3 and Aerodrome [1]. Average gas prices briefly spiked above typical levels "
+        "during peak trading windows [1][2]. The Base team noted no protocol-level incident and attributed the "
+        "load to organic demand rather than an attack [2]. Several DEX aggregators reported temporarily degraded "
+        "quote latency during the same window [3]. Network conditions normalized within about a day as launch "
+        "volume subsided [1]."
+    ),
+    "sources": [
+        {"title": "Base network activity report", "url": "https://example.com/base-report", "published_at": "2026-09-15T00:00:00Z", "source": "web"},
+        {"title": "Gas price tracker", "url": "https://example.com/gas-tracker", "published_at": "2026-09-16T00:00:00Z", "source": "web"},
+        {"title": "DEX aggregator status page", "url": "https://example.com/dex-status", "published_at": "2026-09-15T00:00:00Z", "source": "web"},
+    ],
+    "claims_verified": True,
+    "claims_verified_reason": None,
+    "timing_ms": {"search": 1450, "synthesis": 980, "verify": 720, "total": 3170},
+}
+
+RESEARCH_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string"},
+        "answer": {"type": "string", "description": "5-8 sentences, each claim cited inline as [n] referring to the sources array (1-indexed)."},
+        "sources": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "url": {"type": "string"},
+                    "published_at": {"type": ["string", "null"]},
+                    "source": {"type": "string"},
+                },
+            },
+        },
+        "claims_verified": {"type": "boolean", "description": "True only if a Jev check confirmed the answer's citations are supported. False if unsupported OR if verification was skipped/timed out - see claims_verified_reason."},
+        "claims_verified_reason": {"type": ["string", "null"], "description": "Why claims_verified is false: 'jev_found_unsupported_claim', 'verification_timed_out_or_failed', 'insufficient_time_budget_remaining', or null when verified true."},
+        "timing_ms": {"type": "object", "description": "search, synthesis, verify, total, in milliseconds."},
+        "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
+    },
+    "required": ["query", "answer", "sources", "claims_verified", "timing_ms"],
+}
+
+
 def _payment_option(price: str) -> PaymentOption:
     return PaymentOption(
         scheme="exact",
@@ -2586,6 +2650,21 @@ def _core_route_configs() -> dict[str, RouteConfig]:
                 input_schema=TOKEN_RISK_INPUT_SCHEMA,
                 body_type="json",
                 output=OutputConfig(example=TOKEN_RISK_SAMPLE_OUTPUT, schema=TOKEN_RISK_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /research": RouteConfig(
+            accepts=_payment_option(config.PRICE_RESEARCH),
+            resource=f"{config.BASE_URL}/research",
+            description=ROUTE_DESCRIPTIONS["research"],
+            mime_type="application/json",
+            service_name="cited-research",
+            icon_url=ICON_URL,
+            tags=["research report with sources", "cited answer", "web research"],
+            extensions=declare_discovery_extension(
+                input=RESEARCH_SAMPLE_INPUT,
+                input_schema=RESEARCH_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=RESEARCH_SAMPLE_OUTPUT, schema=RESEARCH_OUTPUT_SCHEMA),
             ),
         ),
         "POST /v1/chat/completions": RouteConfig(

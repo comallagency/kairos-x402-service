@@ -144,6 +144,7 @@ PRICE_GUARD = "$0.001"
 PRICE_VERIFY = "$0.001"
 PRICE_RANK = "$0.001"
 PRICE_TOKEN_RISK = "$0.005"
+PRICE_RESEARCH = "$0.005"
 # GET /discover is free by design too, and has no price constant. A
 # PRICE_DISCOVER = "$0.001" sat here from 13:29 on 2026-09-11 until it was
 # removed: a run was cut by its turn ceiling after writing the constant and
