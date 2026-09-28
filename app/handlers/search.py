@@ -73,6 +73,10 @@ SAMPLE_SEARCH_OUTPUT = {
     "x402_receipt": make_receipt(neutral_model_id(None), "web_search", 1292, 0.0, searches_run=1, sources_read=5),
 }
 MAX_BATCH_QUERIES = 5
+GLOBAL_TIMEOUT_S = 4.5  # 2026-09-28: same class of risk as /token-risk -
+# news queries measured up to ~6s, past common HTTP client default timeouts,
+# so a slow call must fail fast (unsettled) rather than eventually succeed
+# to nobody.
 MAX_CONTENT_RESULTS = 3
 DEFAULT_CONTENT_CHARS = 12_000
 
@@ -249,28 +253,39 @@ async def _handle_search(
 
     max_results = _clamp_max_results(max_results)
 
+    async def _do_search():
+        if is_batch:
+            results, model_served = await _run_batch_search(query, max_results)
+            summary_label = "; ".join(query)
+        else:
+            results, model_served = await run_web_search(query, max_results)
+            summary_label = query
+        if not results:
+            # Every configured search engine can transiently fail/rate-limit
+            # at once (run_web_search only ever raises SearchError for a
+            # request-level failure, not for a 200-with-zero-hits response) -
+            # an empty result set is exactly as useless to the buyer as an
+            # upstream error and must not be billed either.
+            raise SearchError("no_results")
+        results = await _enrich_results(
+            results,
+            include_content,
+            content_results,
+            _clamp_content_chars(content_chars),
+        )
+        summary = await _summarize(summary_label, results) if summarize else None
+        return results, model_served, summary
+
     try:
         with Timer() as t:
-            if is_batch:
-                results, model_served = await _run_batch_search(query, max_results)
-                summary_label = "; ".join(query)
-            else:
-                results, model_served = await run_web_search(query, max_results)
-                summary_label = query
-            if not results:
-                # Every configured search engine can transiently fail/rate-limit
-                # at once (run_web_search only ever raises SearchError for a
-                # request-level failure, not for a 200-with-zero-hits response) -
-                # an empty result set is exactly as useless to the buyer as an
-                # upstream error and must not be billed either.
-                raise SearchError("no_results")
-            results = await _enrich_results(
-                results,
-                include_content,
-                content_results,
-                _clamp_content_chars(content_chars),
-            )
-            summary = await _summarize(summary_label, results) if summarize else None
+            results, model_served, summary = await asyncio.wait_for(_do_search(), timeout=GLOBAL_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        db.log_request(
+            route="search", method=method, status="error", payer=payer,
+            user_agent=user_agent, body_excerpt=body_excerpt,
+            error_reason="timeout",
+        )
+        return JSONResponse({"error": {"reason": "timeout"}}, status_code=504)
     except (OpenRouterError, SearchError) as exc:
         db.log_request(
             route="search", method=method, status="error", payer=payer,
