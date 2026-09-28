@@ -395,6 +395,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass  # column already exists
 
+    # POST /v1/chat/completions (app/handlers/llm_gateway.py) is the first
+    # route where what we pay upstream and what the buyer is billed
+    # genuinely differ per call (the "upto" scheme settles for real usage,
+    # not a fixed price) - every other route's amount_usdc already covers
+    # "billed", so only the two new numbers needed are upstream_cost_usd and
+    # the margin between them.
+    for colonne in ("upstream_cost_usd REAL", "margin_usd REAL"):
+        try:
+            conn.execute(f"ALTER TABLE requests ADD COLUMN {colonne}")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
 
 def init_db() -> None:
     global _initialized
@@ -437,6 +449,8 @@ def log_request(
     mpp_attempted: bool = False,
     network: str | None = None,
     client_ip: str | None = None,
+    upstream_cost_usd: float | None = None,
+    margin_usd: float | None = None,
 ) -> None:
     if body_excerpt is not None:
         body_excerpt = body_excerpt[:2048]
@@ -447,8 +461,8 @@ def log_request(
     with cursor() as cur:
         cur.execute(
             """INSERT INTO requests
-               (ts, route, method, status, latency_ms, amount_usdc, payer, user_agent, body_excerpt, error_reason, mpp_attempted, network, client_ip)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               (ts, route, method, status, latency_ms, amount_usdc, payer, user_agent, body_excerpt, error_reason, mpp_attempted, network, client_ip, upstream_cost_usd, margin_usd)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 now_iso(),
                 route,
@@ -463,6 +477,8 @@ def log_request(
                 int(mpp_attempted),
                 network or config.X402_NETWORK,
                 client_ip,
+                upstream_cost_usd,
+                margin_usd,
             ),
         )
 

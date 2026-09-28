@@ -94,7 +94,16 @@ from app.receipts import (
     neutral_model_id,
     price_float,
 )
-from app.upstream.openrouter import OpenRouterError
+from app.upstream.openrouter import OpenRouterError, chat_completion_raw
+from app.handlers.llm_gateway import (
+    MARKUP as LLM_GATEWAY_MARKUP,
+    MIN_SETTLE_USD as LLM_GATEWAY_MIN_SETTLE_USD,
+    SAMPLE_REQUEST,
+    SAMPLE_RESPONSE,
+    _capped_max_tokens as llm_gateway_capped_max_tokens,
+    _price_ceiling_usd as llm_gateway_price_ceiling_usd,
+    _priced_models_map as llm_gateway_priced_models_map,
+)
 from app.upstream.tokencount import count_tokens
 from app.upstream.jev import JevError, ask_jev
 from app.upstream.websearch import run_web_search
@@ -153,6 +162,8 @@ from app.x402_setup import (
     RANK_OUTPUT_SCHEMA,
     RANK_SAMPLE_INPUT,
     RANK_SAMPLE_OUTPUT,
+    LLM_GATEWAY_INPUT_SCHEMA,
+    LLM_GATEWAY_OUTPUT_SCHEMA,
     DISCOVER_INPUT_SCHEMA,
     DISCOVER_SAMPLE_OUTPUT,
     SEARCH_OUTPUT_SCHEMA,
@@ -1772,6 +1783,129 @@ async def rank_tool(
         args={"query": query, "documents": documents},
         extensions=_RANK_EXTENSIONS,
         run_and_log=_run_rank,
+    )
+
+
+# --- ask_model (LLM gateway, "upto" scheme) --------------------------------
+#
+# Not built on _paid_tool_call: that helper always settles for the full
+# payment_requirements amount it verified against, which for "exact"-scheme
+# tools (decide/guard/verify/rank) is correct - the ceiling IS the price.
+# "upto" is different by design: the buyer authorizes a ceiling and the real
+# settlement is real-cost x MARKUP. server.settle_payment() settles whatever
+# PaymentRequirements object it's given, so the reduced amount has to be
+# baked into a copy of the verified requirements before calling it - there
+# is no separate "override" parameter (that convenience exists only on the
+# HTTP side, via x402.http.middleware.fastapi.set_settlement_overrides()).
+
+_LLM_GATEWAY_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="ask_model",
+        description=ROUTE_DESCRIPTIONS["llm-gateway"],
+        input_schema=LLM_GATEWAY_INPUT_SCHEMA,
+        example=SAMPLE_REQUEST,
+        output=OutputConfig(example=SAMPLE_RESPONSE),
+    )
+)
+
+
+@mcp.tool(
+    name="ask_model",
+    title="Ask Model (LLM Gateway)",
+    description=ROUTE_DESCRIPTIONS["llm-gateway"],
+    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+)
+async def ask_model_tool(
+    model: Annotated[str, Field(description=LLM_GATEWAY_INPUT_SCHEMA["properties"]["model"]["description"])],
+    messages: Annotated[list, Field(description=LLM_GATEWAY_INPUT_SCHEMA["properties"]["messages"]["description"])],
+    max_tokens: Annotated[int | None, Field(description=LLM_GATEWAY_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    route_key = "POST /v1/chat/completions"
+    server = await _ensure_initialized()
+    route_config = _route_configs[route_key]
+    accepts = server.build_payment_requirements(route_config.accepts)
+    resource_info = _resource_info("ask_model", route_key)
+
+    meta: dict = {}
+    if ctx is not None:
+        request_context = ctx.request_context
+        if request_context is not None and request_context.meta:
+            meta = request_context.meta
+
+    payment_payload = extract_payment_from_meta({"_meta": meta})
+    if payment_payload is None:
+        return await _payment_required_result(
+            server, accepts, resource_info, _LLM_GATEWAY_EXTENSIONS, "Payment required to access this tool"
+        )
+
+    payment_requirements = server.find_matching_requirements(accepts, payment_payload)
+    if payment_requirements is None:
+        return await _payment_required_result(
+            server, accepts, resource_info, _LLM_GATEWAY_EXTENSIONS, "No matching payment requirements found"
+        )
+
+    verify_result = await server.verify_payment(payment_payload, payment_requirements)
+    if not verify_result.is_valid:
+        return await _payment_required_result(
+            server, accepts, resource_info, _LLM_GATEWAY_EXTENSIONS,
+            f"Payment verification failed: {verify_result.invalid_reason}",
+        )
+
+    payer = extract_payer_from_payment_dict(
+        payment_payload.model_dump(by_alias=True, exclude_none=True)
+    )
+    body_excerpt = json.dumps({"model": model, "max_tokens": max_tokens})[:2000]
+
+    priced = await llm_gateway_priced_models_map()
+    capped_max_tokens = llm_gateway_capped_max_tokens(max_tokens)
+    if model not in priced or not isinstance(messages, list) or not messages:
+        db.log_request(
+            route="v1/chat/completions", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt,
+            error_reason="unknown_model" if model not in priced else "invalid_request",
+        )
+        body = {"error": {"reason": "unknown_model" if model not in priced else "invalid_request"}}
+        return ToolResult(structured_content=body, is_error=True)
+
+    ceiling = await llm_gateway_price_ceiling_usd(model, capped_max_tokens, messages)
+
+    try:
+        with Timer() as t:
+            data = await chat_completion_raw(model, messages, capped_max_tokens)
+    except OpenRouterError as exc:
+        db.log_request(
+            route="v1/chat/completions", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
+        )
+        return ToolResult(
+            structured_content={"error": {"reason": "upstream_error", "detail": str(exc)[:200]}},
+            is_error=True,
+        )
+
+    usage = data.get("usage") or {}
+    real_cost = float(usage.get("cost") or 0.0)
+    settle_amount = min(max(real_cost * LLM_GATEWAY_MARKUP, LLM_GATEWAY_MIN_SETTLE_USD), ceiling)
+    margin = settle_amount - real_cost
+    billed = effective_price(payer, settle_amount)
+    atomic_amount = str(int(round(settle_amount * 1_000_000)))
+    reduced_requirements = payment_requirements.model_copy(update={"amount": atomic_amount})
+
+    settle_result = await server.settle_payment(payment_payload, reduced_requirements)
+    if not settle_result.success:
+        return _settlement_failed_result(accepts, resource_info, _LLM_GATEWAY_EXTENSIONS, settle_result)
+
+    db.log_request(
+        route="v1/chat/completions", method="MCP", status="paid", latency_ms=t.elapsed_ms,
+        amount_usdc=billed, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+        upstream_cost_usd=real_cost, margin_usd=margin,
+    )
+    receipt = make_receipt(model, "llm-gateway", t.elapsed_ms, billed)
+    settle_meta = settle_result.model_dump(by_alias=True, exclude_none=True)
+    return ToolResult(
+        structured_content={**data, "x402_receipt": receipt},
+        meta={MCP_PAYMENT_RESPONSE_META_KEY: settle_meta},
     )
 
 
