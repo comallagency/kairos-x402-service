@@ -1,11 +1,12 @@
 import asyncio
 import json
+import time
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app import config, db
-from app.receipts import Timer, effective_price, extract_payer_address, make_receipt, neutral_model_id, price_float
+from app.receipts import effective_price, extract_payer_address, make_receipt, neutral_model_id, price_float
 from app.upstream.openrouter import OpenRouterError, chat_completion_with_fallback
 from app.upstream.webfetch import FetchError, extract_markdown, fetch_html
 from app.upstream.websearch import SearchError, run_web_search
@@ -73,10 +74,15 @@ SAMPLE_SEARCH_OUTPUT = {
     "x402_receipt": make_receipt(neutral_model_id(None), "web_search", 1292, 0.0, searches_run=1, sources_read=5),
 }
 MAX_BATCH_QUERIES = 5
-GLOBAL_TIMEOUT_S = 4.5  # 2026-09-28: same class of risk as /token-risk -
-# news queries measured up to ~6s, past common HTTP client default timeouts,
-# so a slow call must fail fast (unsettled) rather than eventually succeed
-# to nobody.
+# 2026-09-28: same class of risk as /token-risk - news queries measured up
+# to ~6s, past common HTTP client default timeouts. Not a single
+# all-or-nothing deadline though (see /token-risk's module-level incident
+# writeup for why that wasn't good enough either): the search phase itself
+# is bounded first, and whatever results come back by then are still
+# returned (enriched/summarized with whatever time is left) rather than
+# thrown away - 504 (unsettled) only when literally zero results exist.
+GLOBAL_TIMEOUT_S = 4.0
+SEARCH_PHASE_TIMEOUT_S = 3.0  # leaves >=1s of the total budget for enrich+summarize
 MAX_CONTENT_RESULTS = 3
 DEFAULT_CONTENT_CHARS = 12_000
 
@@ -168,19 +174,33 @@ async def _enrich_results(
 
 
 async def _run_batch_search(
-    queries: list[str], max_results: int
-) -> tuple[list[dict], str | None]:
-    """Run each query as its own upstream call, all CONCURRENTLY (2026-09-28:
-    was a sequential for-loop - up to MAX_BATCH_QUERIES=5 upstream calls
-    back-to-back, the same architectural risk that caused a real /token-risk
-    payment to settle after its buyer had already timed out - see that
-    route's module docstring), then merge and de-duplicate by URL, capped at
-    max_results overall. One call to us replaces `len(queries)` calls an agent
-    would otherwise have to make - how many upstream calls that costs us
-    internally isn't the buyer's concern."""
-    per_query_results = await asyncio.gather(*(run_web_search(q, max_results) for q in queries))
-    model_served = next((model for _, model in per_query_results if model), None)
-    per_query_results = [results for results, _ in per_query_results]
+    queries: list[str], max_results: int, timeout_s: float
+) -> tuple[list[dict], str | None, int]:
+    """Run each query as its own upstream call, all CONCURRENTLY, under a
+    shared time budget (2026-09-28: was a sequential for-loop up to
+    MAX_BATCH_QUERIES=5 calls back-to-back - fixed first; then wrapped in a
+    single all-or-nothing deadline that threw away every query's results if
+    even one was slow - the same mistake /token-risk made and fixed the same
+    way here). Whichever queries haven't answered by timeout_s are dropped
+    (not failed) - their count is returned so the caller/response can be
+    honest about it, but the queries that DID answer are still merged and
+    returned rather than discarded. Returns (merged_results, model_served,
+    dropped_query_count)."""
+    tasks = [asyncio.ensure_future(run_web_search(q, max_results)) for q in queries]
+    done, pending = await asyncio.wait(tasks, timeout=timeout_s)
+    for task in pending:
+        task.cancel()
+
+    model_served = None
+    per_query_results: list[list[dict]] = []
+    dropped = 0
+    for task in tasks:
+        if task in done and task.exception() is None:
+            results, model = task.result()
+            per_query_results.append(results)
+            model_served = model_served or model
+        else:
+            dropped += 1
 
     seen_urls: set[str] = set()
     merged: list[dict] = []
@@ -191,8 +211,8 @@ async def _run_batch_search(
             seen_urls.add(r["url"])
             merged.append(r)
             if len(merged) >= max_results:
-                return merged, model_served
-    return merged, model_served
+                return merged, model_served, dropped
+    return merged, model_served, dropped
 
 
 @router.get("/search/sample", openapi_extra={"security": []})
@@ -253,60 +273,68 @@ async def _handle_search(
 
     max_results = _clamp_max_results(max_results)
 
-    async def _do_search():
-        if is_batch:
-            results, model_served = await _run_batch_search(query, max_results)
-            summary_label = "; ".join(query)
-        else:
-            results, model_served = await run_web_search(query, max_results)
-            summary_label = query
-        if not results:
-            # Every configured search engine can transiently fail/rate-limit
-            # at once (run_web_search only ever raises SearchError for a
-            # request-level failure, not for a 200-with-zero-hits response) -
-            # an empty result set is exactly as useless to the buyer as an
-            # upstream error and must not be billed either.
-            raise SearchError("no_results")
-        results = await _enrich_results(
-            results,
-            include_content,
-            content_results,
-            _clamp_content_chars(content_chars),
-        )
-        summary = await _summarize(summary_label, results) if summarize else None
-        return results, model_served, summary
+    t0 = time.monotonic()
+    dropped_queries = 0
+    if is_batch:
+        try:
+            results, model_served, dropped_queries = await _run_batch_search(query, max_results, SEARCH_PHASE_TIMEOUT_S)
+        except SearchError:
+            results, model_served = [], None
+        summary_label = "; ".join(query)
+    else:
+        try:
+            results, model_served = await asyncio.wait_for(run_web_search(query, max_results), timeout=SEARCH_PHASE_TIMEOUT_S)
+        except (asyncio.TimeoutError, SearchError):
+            results, model_served = [], None
+        summary_label = query
 
-    try:
-        with Timer() as t:
-            results, model_served, summary = await asyncio.wait_for(_do_search(), timeout=GLOBAL_TIMEOUT_S)
-    except asyncio.TimeoutError:
+    if not results:
+        # Every configured search engine can transiently fail/rate-limit at
+        # once, or every batch query can miss the time budget - either way,
+        # an empty result set is exactly as useless to the buyer as an
+        # upstream error and must not be billed (2026-09-28: this is now the
+        # ONLY failure case for /search - anything that produced at least
+        # one real result settles and returns it, possibly un-enriched or
+        # un-summarized if the remaining budget ran out).
         db.log_request(
             route="search", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt,
-            error_reason="timeout",
+            error_reason="no_results",
         )
-        return JSONResponse({"error": {"reason": "timeout"}}, status_code=504)
-    except (OpenRouterError, SearchError) as exc:
-        db.log_request(
-            route="search", method=method, status="error", payer=payer,
-            user_agent=user_agent, body_excerpt=body_excerpt,
-            error_reason=str(exc)[:200],
-        )
-        return JSONResponse(
-            {"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, status_code=502
-        )
+        return JSONResponse({"error": {"reason": "no_results"}}, status_code=504)
 
+    remaining = GLOBAL_TIMEOUT_S - (time.monotonic() - t0)
+    if remaining > 0.2:
+        try:
+            results = await asyncio.wait_for(
+                _enrich_results(results, include_content, content_results, _clamp_content_chars(content_chars)),
+                timeout=remaining,
+            )
+        except asyncio.TimeoutError:
+            pass  # keep the un-enriched results rather than fail the whole response
+
+    summary = None
+    remaining = GLOBAL_TIMEOUT_S - (time.monotonic() - t0)
+    if summarize and remaining > 0.2:
+        try:
+            summary = await asyncio.wait_for(_summarize(summary_label, results), timeout=remaining)
+        except (asyncio.TimeoutError, OpenRouterError):
+            summary = None  # optional - skip rather than fail the whole response
+
+    elapsed_ms = round((time.monotonic() - t0) * 1000)
     price = effective_price(payer, price_float(config.PRICE_SEARCH))
     db.log_request(
         route="search", method=method, status="paid",
-        latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer,
+        latency_ms=elapsed_ms, amount_usdc=price, payer=payer,
         user_agent=user_agent, body_excerpt=body_excerpt,
     )
     receipt = make_receipt(
-        neutral_model_id(model_served), "web_search", t.elapsed_ms, price,
+        neutral_model_id(model_served), "web_search", elapsed_ms, price,
         searches_run=(len(query) if is_batch else 1), sources_read=len(results),
     )
     response = {"query": query, "results": _shape_results(results, extract), "x402_receipt": receipt}
+    if is_batch and dropped_queries:
+        response["dropped_queries"] = dropped_queries
     if summarize:
         response["summary"] = summary
     return response

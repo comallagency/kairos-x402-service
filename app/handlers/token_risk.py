@@ -4,10 +4,12 @@ app.upstream.evm_rpc). See BRIEF-CORRECTIONS.md / the 2026-09-28 Phase 0
 feasibility research this route is built from:
 
 - Bytecode (mint/blacklist/pause/tax-setter selectors, EIP-1967 proxy slot,
-  owner()) - exactly 3 RPC calls, ~0.3-2s in testing.
+  owner()) - the selector flags are pure computation on the bytecode itself
+  (no RPC beyond eth_getCode), so they are essentially always available;
+  only the proxy/owner "enrichment" (needs its own RPC calls) can degrade.
 - Liquidity (Uniswap V2 pair, Uniswap V3 pools across 3 fee tiers, Aerodrome
   pool both stable/volatile) - on-chain pool discovery via each DEX's own
-  factory contract, no indexer.
+  factory contract, no indexer, batched through Multicall3 (see below).
 - Holder concentration (top 10 by % of supply, from Transfer logs) - the
   public Base RPC caps eth_getLogs at ~2000 blocks/call and a busy contract's
   response blows past the payload-size limit well before that (measured:
@@ -18,37 +20,43 @@ feasibility research this route is built from:
   presenting it as if it were complete would be worse than not showing it,
   for a route whose whole point is a safety verdict.
 
-Latency incidents (2026-09-28)
--------------------------------
+Latency incidents (2026-09-28) and the time-budget orchestrator
+-------------------------------------------------------------------
 1st incident, 13:39 UTC: the first real bootstrap settlement took 8.218s
 server-side - the buyer's HTTP client had already given up with a
-ReadTimeout before the response arrived. Root cause: _liquidity()'s V2
-lookup ran BEFORE the V3/Aerodrome fan-out instead of alongside it, and the
-Jev call itself measured 2-18s across repeated calls with no bound. Fixed
-by parallelizing liquidity fully, capping every RPC stage at 3s
-(degrading to {"status": "unavailable"} instead of blocking), and a 10s
-global deadline before settlement.
+ReadTimeout before the response arrived. Root cause: the Uniswap V2 lookup
+ran BEFORE the V3/Aerodrome fan-out instead of alongside it, and the Jev
+call itself measured 2-18s across repeated calls with no bound.
 
-2nd incident (same day): still not fast enough - 8.2s is itself very close
-to httpx's own default request timeout (5s), so a typical client-side
-default would ALSO cut off well before an 8s response. Two more structural
-fixes:
+2nd incident (same day): a flat "cancel everything past N seconds, return
+504" fix wasn't good enough either - 8.2s is close to httpx's own default
+request timeout, and worse, an all-or-nothing deadline means a response
+that's 99% ready still gets thrown away entirely if the last signal is
+slow. Added Multicall3 (owner() + Uniswap/Aerodrome pool discovery +
+reserves batched into 1-2 eth_call round trips instead of ~9 separate
+calls - eth_getCode and eth_getStorageAt are raw state reads Multicall3
+cannot batch, they still run as their own calls) and a 2s Jev cap with a
+deterministic rules-based fallback - but still wrapped the whole thing in
+one outer all-or-nothing deadline.
 
-- Multicall3 (0xcA11bde05977b3631167028862bE2a173976CA11, verified deployed
-  on Base via eth_getCode before use): owner(), the Uniswap V2/V3/Aerodrome
-  pool-discovery calls, and their reserves/liquidity reads are now batched
-  into 1-2 eth_call round trips via aggregate3(Call3[]) instead of ~9
-  separate RPC calls - each one previously paying full network latency on
-  a shared public RPC. (eth_getCode and eth_getStorageAt are raw state
-  reads, not contract calls, so Multicall3 cannot batch those two - they
-  still run as their own calls, concurrently with the multicall.)
-- The Jev verdict call is now capped at 2s. Past that, a deterministic
-  rules-based verdict (mint/blacklist/pause/owner/liquidity) is returned
-  instead, marked "verdict_source": "rules" rather than "jev" - a real
-  answer beats no answer, but it must never be confused with one a model
-  actually reasoned about.
-- The global pre-settlement deadline is now 4.5s (was 10s), matching the
-  target and leaving headroom under common HTTP client default timeouts.
+3rd fix (this one): replaced that all-or-nothing deadline with a real
+time-budget orchestrator, t0 = when the request is received:
+- Bytecode-enrichment+liquidity (one task, since they share the same
+  Multicall3 round trips) and holder-distribution both start at t0 and
+  share a 2s window (asyncio.wait, not wait_for - nothing gets cancelled
+  just for missing that window; whichever isn't done yet degrades to
+  {"status": "unavailable"} while the other's result is still used).
+- Jev is only attempted if at least 1.5s of the 4.0s total budget remains
+  after that window; otherwise the deterministic rules-based verdict is
+  used directly, no Jev call attempted at all. When Jev IS attempted, its
+  own timeout is whatever budget remains (never more), so the total can
+  never exceed 4.0s by construction - not because something got cancelled
+  at the last moment, but because the pieces were bounded up front.
+- The response is settled (200) with whatever's ready, not thrown away -
+  UNLESS the bytecode step itself never completed or failed outright, since
+  without it (not even the selector flags) no verdict - Jev or rules - is
+  possible at all. That is now the ONLY case that returns an error (502/504,
+  unsettled); every other combination of degraded signals still settles.
 """
 
 from __future__ import annotations
@@ -83,9 +91,17 @@ _LOG_PAGE_BLOCKS = 2000  # measured ceiling on the public Base RPC, see module d
 _MAX_LOG_PAGES = 2
 _HOLDER_LOG_CAP = 500  # more than this in one page -> clearly an established/busy token
 
-_STEP_TIMEOUT_S = 3.0
-_JEV_TIMEOUT_S = 2.0
-_GLOBAL_TIMEOUT_S = 4.5
+_ENRICHMENT_TIMEOUT_S = 1.5  # inner bound on the RPC-heavy half of bytecode+liquidity
+# The bytecode+liquidity pipeline also pays for its own eth_getCode call
+# first, so it gets a bit more outer headroom than holders (whose own
+# explicit 2s cap was set by spec) - 2.5s covers fetch_code (~0.3-2s
+# measured) plus the 1.5s inner enrichment bound with some margin, while
+# still leaving exactly _JEV_MIN_BUDGET_S of the 4.0s total in the worst
+# case (4.0 - 2.5 = 1.5).
+_BYTECODE_LIQUIDITY_TIMEOUT_S = 2.5
+_HOLDERS_TIMEOUT_S = 2.0
+_JEV_MIN_BUDGET_S = 1.5   # Jev is skipped entirely (straight to rules) below this
+_GLOBAL_DEADLINE_S = 4.0  # total budget from t0; Jev's own timeout = whatever remains
 
 _CACHE_TTL_S = 300
 _cache: dict[str, tuple[float, dict]] = {}
@@ -213,10 +229,24 @@ def _addr_from_result(success: bool, data: bytes) -> str | None:
     return addr if addr.lower() != _ZERO_ADDRESS else None
 
 
-async def _bytecode_and_liquidity(address: str, code: str) -> tuple[dict, dict]:
-    """Everything readable in 1-2 Multicall3 round trips, plus the one raw
-    state read (EIP-1967 slot) Multicall3 cannot batch. Replaces what used
-    to be ~9 separate eth_call/eth_getStorageAt round trips."""
+def _bytecode_core(code: str) -> dict:
+    """Pure computation on already-fetched bytecode - no RPC call, so this
+    can never fail or time out once we have `code` at all."""
+    flags = {name: sel[2:] in code for name, sel in _RISK_SELECTORS.items()}
+    return {
+        "bytecode_size": max(len(code) // 2 - 1, 0),
+        "flags": flags,
+        "any_dangerous_function": any(flags.values()),
+    }
+
+
+async def _bytecode_enrichment_and_liquidity(address: str) -> tuple[dict, dict]:
+    """The RPC-dependent half of bytecode analysis (proxy slot, owner - the
+    "enrichment") plus liquidity, sharing the same 1-2 Multicall3 round
+    trips. Raises EvmRpcError on failure - the caller decides how to
+    degrade (enrichment fields to None, liquidity to unavailable), never
+    this function itself, since it has no fallback values of its own to
+    return."""
     token_padded = _pad_address(address)
     weth_padded = _pad_address(_WETH)
 
@@ -250,6 +280,9 @@ async def _bytecode_and_liquidity(address: str, code: str) -> tuple[dict, dict]:
         owner_renounced = raw_owner.lower() == _ZERO_ADDRESS
         owner = None if owner_renounced else raw_owner
 
+    is_proxy = isinstance(impl_slot, str) and impl_slot.lower() != "0x" + "00" * 32
+    enrichment = {"is_upgradeable_proxy": is_proxy, "owner": owner, "owner_renounced": owner_renounced}
+
     v2_pair = _addr_from_result(*batch_a[1])
     v3_pools_found = [
         {"pool": pool, "fee": fee}
@@ -261,18 +294,6 @@ async def _bytecode_and_liquidity(address: str, code: str) -> tuple[dict, dict]:
         for stable, pool in zip((False, True), (_addr_from_result(*batch_a[5 + i]) for i in range(2)))
         if pool
     ]
-
-    flags = {name: sel[2:] in code for name, sel in _RISK_SELECTORS.items()}
-    is_proxy = isinstance(impl_slot, str) and impl_slot.lower() != "0x" + "00" * 32
-    bytecode = {
-        "status": "ok",
-        "bytecode_size": max(len(code) // 2 - 1, 0),
-        "flags": flags,
-        "any_dangerous_function": any(flags.values()),
-        "is_upgradeable_proxy": is_proxy,
-        "owner": owner,
-        "owner_renounced": owner_renounced,
-    }
 
     # batch B: reserves/liquidity for whatever was actually found - skipped
     # entirely (no second round trip) if nothing was found at all
@@ -311,6 +332,44 @@ async def _bytecode_and_liquidity(address: str, code: str) -> tuple[dict, dict]:
         "aerodrome_pools": aero_pools_found,
         "any_liquidity_found": bool(v2 or v3_pools_found or aero_pools_found),
     }
+    return enrichment, liquidity
+
+
+async def _bytecode_liquidity_pipeline(address: str) -> tuple[dict, dict]:
+    """The not-a-contract gate lives here too (2026-09-28: previously it ran
+    BEFORE the orchestrator's shared time window even started, so a slow
+    eth_getCode call alone could push wall-clock past the budget with
+    nothing to show for it). Raises EvmRpcError("not_a_contract") for empty
+    code - the orchestrator re-raises that one as-is (400, distinct from a
+    genuine failure). Any other failure fetching the code propagates as a
+    plain EvmRpcError, which the orchestrator maps to "bytecode_unavailable"
+    (502/504) - the one case with no verdict possible at all. Once code is
+    in hand, bytecode's core fields (flags, size) can never fail again -
+    only the proxy/owner enrichment and liquidity can still degrade, and do
+    so independently rather than invalidating the whole bytecode result."""
+    code = await _fetch_code(address)
+    if code in ("0x", "0x0"):
+        raise EvmRpcError("not_a_contract")
+
+    bytecode_core = _bytecode_core(code)
+    try:
+        # Bounded by its OWN inner timeout, separate from the orchestrator's
+        # outer _SIGNALS_TIMEOUT_S watch on this whole pipeline. Without
+        # this, a slow/hanging enrichment call keeps this coroutine (and
+        # bytecode_core, already computed) stuck past the outer window too -
+        # making the orchestrator treat a merely-slow LIQUIDITY lookup as if
+        # bytecode itself had failed. Found exactly this bug while testing:
+        # a forced 30s enrichment hang 504'd the whole request as
+        # "bytecode_unavailable" instead of settling with liquidity marked
+        # unavailable and bytecode intact.
+        enrichment, liquidity = await asyncio.wait_for(
+            _bytecode_enrichment_and_liquidity(address), timeout=_ENRICHMENT_TIMEOUT_S
+        )
+    except (asyncio.TimeoutError, EvmRpcError):
+        enrichment = {"is_upgradeable_proxy": None, "owner": None, "owner_renounced": None}
+        liquidity = {"status": "unavailable"}
+
+    bytecode = {"status": "ok", **bytecode_core, **enrichment}
     return bytecode, liquidity
 
 
@@ -380,16 +439,6 @@ async def _holder_distribution(address: str) -> dict:
     }
 
 
-async def _with_step_timeout(name: str, coro, timing: dict, fallback: dict) -> dict:
-    t0 = time.monotonic()
-    try:
-        result = await asyncio.wait_for(coro, timeout=_STEP_TIMEOUT_S)
-    except (asyncio.TimeoutError, EvmRpcError):
-        result = fallback
-    timing[name] = round((time.monotonic() - t0) * 1000)
-    return result
-
-
 _VERDICT_CRITERIA = {
     "avoid": (
         "The token has one or more of: an active mint/blacklist/pause power "
@@ -420,18 +469,19 @@ _VERDICT_INSTRUCTIONS = (
     "(bytecode powers, proxy/ownership status, DEX liquidity, holder "
     "concentration where available), is this token safe to acquire: avoid, "
     "caution, or acceptable? Some signal groups may carry status "
-    "'unavailable' (a 3-second RPC budget was exceeded) or "
-    "'skipped_established_token' (holder history too large to reconstruct "
-    "cheaply) rather than real data - factor that gap into the verdict "
-    "explicitly, never treat a missing signal as a clean one."
+    "'unavailable' (a time budget was exceeded) or 'skipped_established_token' "
+    "(holder history too large to reconstruct cheaply) rather than real "
+    "data - factor that gap into the verdict explicitly, never treat a "
+    "missing signal as a clean one."
 )
 
 
 def _rules_verdict(bytecode: dict, liquidity: dict, holders: dict) -> dict:
-    """Deterministic fallback when Jev doesn't answer within _JEV_TIMEOUT_S -
-    mirrors the same reasoning given to Jev in _VERDICT_CRITERIA, just
-    applied mechanically. A real answer beats no answer, but it must never
-    be presented as if a model reasoned about it - see verdict_source."""
+    """Deterministic fallback when Jev either isn't attempted (less than
+    _JEV_MIN_BUDGET_S remaining) or doesn't answer in time - mirrors the
+    same reasoning given to Jev in _VERDICT_CRITERIA, just applied
+    mechanically. A real answer beats no answer, but it must never be
+    presented as if a model reasoned about it - see verdict_source."""
     bytecode_ok = bytecode.get("status") == "ok"
     liquidity_ok = liquidity.get("status") == "ok"
     dangerous = bytecode_ok and bool(bytecode.get("any_dangerous_function"))
@@ -456,13 +506,13 @@ def _rules_verdict(bytecode: dict, liquidity: dict, holders: dict) -> dict:
     }
 
 
-async def _verdict(address: str, bytecode: dict, liquidity: dict, holders: dict) -> dict:
+async def _ask_jev_verdict(address: str, bytecode: dict, liquidity: dict, holders: dict) -> dict:
+    """No internal timeout of its own - the orchestrator bounds this call to
+    whatever budget remains before _GLOBAL_DEADLINE_S, since that varies
+    call to call depending on how fast the signal-gathering phase was."""
     state = json.dumps({"address": address, "bytecode": bytecode, "liquidity": liquidity, "holders": holders})
     questions = {"verdict": {"type": "choice", "instructions": _VERDICT_INSTRUCTIONS, "criteria": _VERDICT_CRITERIA}}
-    try:
-        data = await asyncio.wait_for(ask_jev(state, questions), timeout=_JEV_TIMEOUT_S)
-    except (asyncio.TimeoutError, JevError):
-        return _rules_verdict(bytecode, liquidity, holders)
+    data = await ask_jev(state, questions)
     answer = data["answers"]["verdict"]
     return {
         "verdict": answer["choice"],
@@ -470,44 +520,6 @@ async def _verdict(address: str, bytecode: dict, liquidity: dict, holders: dict)
         "probabilities": answer["probabilities"],
         "confidence": answer.get("confidence"),
         "verdict_source": "jev",
-    }
-
-
-async def _run_analysis(address: str, timing: dict) -> dict:
-    """Everything from the not-a-contract gate onward, run under the SAME
-    _GLOBAL_TIMEOUT_S deadline as the rest of the analysis (2026-09-28: an
-    earlier version fetched the bytecode for this gate BEFORE the deadline
-    wrapper started, so a slow eth_getCode call on its own could push a
-    response past 4.5s wall-clock even though timing_ms['total'] - measured
-    only from here onward - looked fine. Measured live: 2 of 5 real
-    addresses exceeded the 4.5s target by ~1.3-2.4s purely from that gap.
-    Wrapping the getCode call itself closes it - the deadline is now
-    genuinely end-to-end."""
-    code = await _fetch_code(address)
-    if code in ("0x", "0x0"):
-        raise EvmRpcError("not_a_contract")
-
-    bytecode_liquidity, holders = await asyncio.gather(
-        _with_step_timeout(
-            "bytecode_liquidity", _bytecode_and_liquidity(address, code), timing,
-            fallback=({"status": "unavailable"}, {"status": "unavailable"}),
-        ),
-        _with_step_timeout("holders", _holder_distribution(address), timing, fallback={"status": "unavailable"}),
-    )
-    bytecode, liquidity = bytecode_liquidity
-
-    t0 = time.monotonic()
-    verdict = await _verdict(address, bytecode, liquidity, holders)
-    timing["verdict"] = round((time.monotonic() - t0) * 1000)
-
-    return {
-        "address": address,
-        "network": {"key": _NETWORK.key, "name": _NETWORK.name, "caip2": _NETWORK.caip2},
-        "verdict": verdict,
-        "bytecode_analysis": bytecode,
-        "liquidity_analysis": liquidity,
-        "holders_analysis": holders,
-        "timing_ms": timing,
     }
 
 
@@ -521,14 +533,44 @@ async def _lookup(body: dict) -> dict:
     if cached and cached[0] > time.monotonic():
         return cached[1]
 
-    timing: dict[str, int] = {}
     t0 = time.monotonic()
-    try:
-        result = await asyncio.wait_for(_run_analysis(address, timing), timeout=_GLOBAL_TIMEOUT_S)
-    except asyncio.TimeoutError:
-        raise EvmRpcError("timeout") from None
+    bl_result, holders_result = await asyncio.gather(
+        asyncio.wait_for(_bytecode_liquidity_pipeline(address), timeout=_BYTECODE_LIQUIDITY_TIMEOUT_S),
+        asyncio.wait_for(_holder_distribution(address), timeout=_HOLDERS_TIMEOUT_S),
+        return_exceptions=True,
+    )
+    timing: dict[str, int] = {"signals": round((time.monotonic() - t0) * 1000)}
+
+    if isinstance(bl_result, BaseException):
+        if isinstance(bl_result, EvmRpcError) and str(bl_result) == "not_a_contract":
+            raise bl_result
+        raise EvmRpcError("bytecode_unavailable")
+    bytecode, liquidity = bl_result
+
+    holders = {"status": "unavailable"} if isinstance(holders_result, BaseException) else holders_result
+
+    elapsed = time.monotonic() - t0
+    remaining = _GLOBAL_DEADLINE_S - elapsed
+    t0v = time.monotonic()
+    if remaining >= _JEV_MIN_BUDGET_S:
+        try:
+            verdict = await asyncio.wait_for(_ask_jev_verdict(address, bytecode, liquidity, holders), timeout=remaining)
+        except (asyncio.TimeoutError, JevError):
+            verdict = _rules_verdict(bytecode, liquidity, holders)
+    else:
+        verdict = _rules_verdict(bytecode, liquidity, holders)
+    timing["verdict"] = round((time.monotonic() - t0v) * 1000)
     timing["total"] = round((time.monotonic() - t0) * 1000)
 
+    result = {
+        "address": address,
+        "network": {"key": _NETWORK.key, "name": _NETWORK.name, "caip2": _NETWORK.caip2},
+        "verdict": verdict,
+        "bytecode_analysis": bytecode,
+        "liquidity_analysis": liquidity,
+        "holders_analysis": holders,
+        "timing_ms": timing,
+    }
     _cache[address.lower()] = (time.monotonic() + _CACHE_TTL_S, result)
     return result
 
@@ -560,7 +602,7 @@ SAMPLE_RESPONSE = {
         "any_liquidity_found": True,
     },
     "holders_analysis": {"status": "skipped_established_token"},
-    "timing_ms": {"bytecode_liquidity": 420, "holders": 310, "verdict": 890, "total": 950},
+    "timing_ms": {"signals": 420, "verdict": 890, "total": 950},
 }
 
 
@@ -584,7 +626,7 @@ async def _paid(request: Request, body: dict):
         reason = str(exc)
         if reason in {"invalid_address", "not_a_contract"}:
             code = 400
-        elif reason == "timeout":
+        elif reason == "bytecode_unavailable":
             code = 504
         else:
             code = 502
