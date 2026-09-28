@@ -22,6 +22,33 @@ release date, a race result once it has its own or an updated page) -
 it will not have same-day breaking news, but it usually catches up
 faster than SearXNG's blended engines get a clean hit for this kind of
 phrasing. SearXNG remains the final fallback either way.
+
+"racing sources" (2026-09-28, v2.2): every category's specialized
+source(s) now run under CATEGORY_SOURCES via _race() - each with its own
+timeout, none blocking the others, the slowest simply contributing
+nothing if it doesn't answer in time (see _race). Added Hacker News
+(Algolia's public hn.algolia.com search API, already vetted for
+commercial use in the Phase 0 review above, just never wired in before)
+as a third "news" source alongside GDELT and Wikipedia - HN's own content
+is tech/startup news, a good match for tech-news queries specifically.
+
+Real contention found and fixed the same day: two DIFFERENT concurrent
+search_github calls measured at 7.165s combined vs 1.892s for one call
+alone - not network variance, _github_gate's old wait() blocked the
+second call behind the first's minimum-interval lock, serializing any
+two concurrent queries that both needed GitHub (same root cause would hit
+_gdelt_gate for two concurrent news queries). Fixed by making both gates
+non-blocking (try_acquire): a call that can't get the slot right now
+returns empty immediately rather than waiting - the true rate limit is
+still respected (the gate still enforces the same minimum interval
+between calls that DO go through), but a caller under concurrent load
+degrades gracefully instead of paying someone else's wait. Verified
+searxng-kairos itself is NOT a comparable bottleneck: 5 concurrent
+_search_once calls measured at 1.891s combined, close to linear given the
+container runs only one worker process (searxng worker-1) but
+GRANIAN_BLOCKING_THREADS=4 - no fix needed there. No shared httpx client
+with a connection-pool limit was found anywhere in this module either;
+every source function opens its own short-lived client per call.
 """
 
 import asyncio
@@ -71,18 +98,28 @@ def ranked_categories(probabilities: dict[str, float]) -> list[tuple[str, float]
 # /search's own traffic is nowhere near saturating either yet. -------------
 
 class _MinIntervalGate:
+    """Non-blocking (2026-09-28, was a blocking wait() - see module
+    docstring for the real ~7s contention this caused under two concurrent
+    same-source queries). try_acquire() reserves the slot and returns True
+    only if the minimum interval has already elapsed; otherwise it returns
+    False immediately and reserves nothing, so the caller can treat this
+    source as empty for this request rather than pay another request's
+    wait. The true rate limit is still enforced - calls that DO get True
+    are still at least min_interval_seconds apart - only the "block and
+    queue" behavior is gone."""
+
     def __init__(self, min_interval_seconds: float):
         self._min_interval = min_interval_seconds
         self._lock = asyncio.Lock()
         self._last_call = 0.0
 
-    async def wait(self):
+    async def try_acquire(self) -> bool:
         async with self._lock:
             now = time.monotonic()
-            delay = self._min_interval - (now - self._last_call)
-            if delay > 0:
-                await asyncio.sleep(delay)
-            self._last_call = time.monotonic()
+            if now - self._last_call < self._min_interval:
+                return False
+            self._last_call = now
+            return True
 
 
 _github_gate = _MinIntervalGate(6.5)  # 10/min = 6s apart minimum, plus margin
@@ -132,7 +169,8 @@ async def search_github(query: str, limit: int = 8) -> list[dict[str, Any]]:
     cached = _cache_get("github", query)
     if cached is not None:
         return cached
-    await _github_gate.wait()
+    if not await _github_gate.try_acquire():
+        return []  # another call already used this interval's slot - not an error, just empty
     headers = {"User-Agent": USER_AGENT}
     if config.GITHUB_SEARCH_TOKEN:
         headers["Authorization"] = f"Bearer {config.GITHUB_SEARCH_TOKEN}"
@@ -233,16 +271,18 @@ async def search_wikivoyage(query: str, limit: int = 5) -> list[dict[str, Any]]:
 # clean ~1s response, sometimes a 429, sometimes a hang past 12s before
 # failing outright. A short, GDELT-specific timeout keeps a bad GDELT moment
 # from ever costing /search more than a few seconds - it just falls through
-# to the SearXNG general path instead, same as any other empty specialized
-# source.
-_GDELT_TIMEOUT = 5.0
+# to the other raced news sources (Wikipedia, Hacker News) or SearXNG
+# instead. Tightened 5.0 -> 2.5 on 2026-09-28 to fit the tighter overall
+# per-source race budget (see CATEGORY_SOURCES / _race).
+_GDELT_TIMEOUT = 2.5
 
 
 async def search_gdelt(query: str, limit: int = 8) -> list[dict[str, Any]]:
     cached = _cache_get("gdelt", query)
     if cached is not None:
         return cached
-    await _gdelt_gate.wait()
+    if not await _gdelt_gate.try_acquire():
+        return []  # another call already used this interval's slot - not an error, just empty
     try:
         async with httpx.AsyncClient(timeout=_GDELT_TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
             resp = await client.get(
@@ -273,39 +313,108 @@ async def search_gdelt(query: str, limit: int = 8) -> list[dict[str, Any]]:
     return results
 
 
-_NEWS_PER_SOURCE_LIMIT = 6  # not `limit` - see search_news docstring
+# --- news (tech): Hacker News via Algolia's public search API -------------
+# hn.algolia.com/api/v1/search - free, no key, already vetted for
+# commercial use in the Phase 0 review (module docstring), just never wired
+# in before 2026-09-28. HN's own content is tech/startup news, a natural
+# complement to GDELT+Wikipedia for tech-flavored news queries.
+_HN_TIMEOUT = 2.0
 
 
-async def search_news(query: str, limit: int) -> list[dict[str, Any]]:
-    """Tries GDELT and Wikipedia and merges both - not a short-circuit on
-    "GDELT returned something". GDELT was measured (2026-09-28) to
-    sometimes return a non-empty but low-relevance article for a query
-    like "who won the last F1 race" rather than cleanly failing; a
-    short-circuit on non-empty would have let that noise block Wikipedia's
-    good candidates from ever reaching the final Jev rerank. Merging both
-    lets the rerank choose from the combined pool instead.
+async def search_hackernews(query: str, limit: int = 6) -> list[dict[str, Any]]:
+    cached = _cache_get("hackernews", query)
+    if cached is not None:
+        return cached
+    try:
+        async with httpx.AsyncClient(timeout=_HN_TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
+            resp = await client.get(
+                "https://hn.algolia.com/api/v1/search",
+                params={"query": query, "tags": "story", "hitsPerPage": limit},
+            )
+        if resp.status_code != 200:
+            return []
+        hits = resp.json().get("hits") or []
+    except (httpx.HTTPError, ValueError):
+        return []
 
-    Each sub-source is capped at _NEWS_PER_SOURCE_LIMIT regardless of the
-    caller's `limit` (the overall raw-collection budget) - measured live
-    that requesting a full 20 Wikipedia hits for "who won the last F1
-    race" pulls in enough tangential same-keyword pages (a film titled
-    F1, a video game, a driver's biography, one specific Grand Prix) that
-    the final Jev rerank starts correctly judging the *diluted* pool as
-    not a direct answer and discarding everything, whereas the same
-    source capped at 6 keeps only the closest hits and reliably survives
-    rerank."""
-    gdelt_results, wiki_results = await asyncio.gather(
-        search_gdelt(query, _NEWS_PER_SOURCE_LIMIT), search_wikipedia(query, _NEWS_PER_SOURCE_LIMIT)
-    )
+    results = [
+        _shape(
+            h.get("title"),
+            h.get("url") or f"https://news.ycombinator.com/item?id={h.get('objectID')}",
+            None,
+            h.get("created_at"),
+            "hackernews",
+        )
+        for h in hits
+        if h.get("title")
+    ]
+    _cache_set("hackernews", query, results)
+    return results
+
+
+_NEWS_PER_SOURCE_LIMIT = 6  # not `limit` - see CATEGORY_SOURCES/_race docstrings
+
+
+def _dedup_merge(result_lists: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     merged: list[dict[str, Any]] = []
-    for r in gdelt_results + wiki_results:
-        url = r.get("url")
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        merged.append(r)
-    return merged[:limit]
+    for results in result_lists:
+        for r in results:
+            url = r.get("url")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            merged.append(r)
+    return merged
+
+
+async def _race(sources: list[tuple[str, float, Any]]) -> list[dict[str, Any]]:
+    """Runs every (name, timeout_s, coroutine) concurrently - a real race,
+    not "everyone gets their own timeout but we still wait for the slowest
+    one regardless" (2026-09-28: that was the first version of this
+    function, and it was NOT actually faster for "news" in practice - GDELT
+    at 2.5s made every news search take ~2.5s even when Wikipedia and
+    Hacker News (both capped at 2.0s) had already answered, because a plain
+    gather over individually-wait_for-wrapped coroutines still blocks on
+    ALL of them before returning, fast ones included. Found by direct
+    measurement: collect_raw for a news query took 3.06s despite no single
+    source being allowed to exceed 2.5s).
+
+    Two-tier wait instead: first wait only up to the SHORTEST timeout in
+    the group. If that already produced any results, return them
+    immediately and cancel whatever's still running (2026-09-28: "the
+    slowest never blocks the others" now means what it says). Only if nothing
+    useful came back in that fast tier do the remaining sources get the
+    rest of their own budget - e.g. GDELT specifically still gets its full
+    2.5s, but only when Wikipedia/HN (2.0s) came back empty first."""
+    if not sources:
+        return []
+    tasks = {name: asyncio.ensure_future(coro) for name, _timeout_s, coro in sources}
+    timeouts = {name: timeout_s for name, timeout_s, _coro in sources}
+    shortest = min(timeouts.values())
+    longest = max(timeouts.values())
+
+    done, pending = await asyncio.wait(tasks.values(), timeout=shortest)
+
+    def _results_from(task_set) -> list[list[dict[str, Any]]]:
+        out = []
+        for task in task_set:
+            if task.cancelled() or task.exception() is not None:
+                continue
+            out.append(task.result())
+        return out
+
+    early = _dedup_merge(_results_from(done))
+    if early or shortest >= longest or not pending:
+        for task in pending:
+            task.cancel()
+        return early
+
+    # Fast tier came back empty - give the slower source(s) their remaining budget.
+    done2, pending2 = await asyncio.wait(pending, timeout=longest - shortest)
+    for task in pending2:
+        task.cancel()
+    return _dedup_merge(_results_from(done | done2))
 
 
 # --- price / weather: reuse the existing paid routes' own lookup functions -
@@ -406,21 +515,40 @@ async def search_weather(query: str, limit: int = 1) -> list[dict[str, Any]]:
     return results
 
 
-SOURCE_FOR_CATEGORY = {
-    "code": search_github,
-    "place": search_wikivoyage,
-    "fact": search_wikipedia,
-    "news": search_news,
-    "price": search_price,
-    "weather": search_weather,
+# Each category lists the sources that race for it: (name, timeout_s, fn).
+# "news" is the only multi-source category (GDELT + Wikipedia + Hacker
+# News, added 2026-09-28) - every other category keeps its original single
+# source, now wrapped in the same _race mechanism so it can never exceed
+# its own budget either, for one consistent code path.
+CATEGORY_SOURCES: dict[str, list[tuple[str, float, Any]]] = {
+    "code": [("github", 2.0, search_github)],
+    "place": [("wikivoyage", 2.0, search_wikivoyage)],
+    "fact": [("wikipedia", 2.0, search_wikipedia)],
+    "news": [
+        ("gdelt", _GDELT_TIMEOUT, search_gdelt),
+        ("wikipedia", 2.0, search_wikipedia),
+        ("hackernews", _HN_TIMEOUT, search_hackernews),
+    ],
+    "price": [("price", 2.0, search_price)],
+    "weather": [("weather", 2.0, search_weather)],
 }
 
 
 async def search_by_category(category: str, query: str, limit: int) -> list[dict[str, Any]]:
     """"general" has no specialized source - callers should route it
-    straight to SearXNG. Every entry in SOURCE_FOR_CATEGORY takes the same
-    (query, limit) signature."""
-    fn = SOURCE_FOR_CATEGORY.get(category)
-    if fn is None:
+    straight to SearXNG. Every source function takes the same (query,
+    limit) signature. "news" caps each source at _NEWS_PER_SOURCE_LIMIT
+    regardless of the caller's `limit` (the overall raw-collection budget) -
+    measured live that requesting a full 20 Wikipedia hits for "who won the
+    last F1 race" pulls in enough tangential same-keyword pages (a film
+    titled F1, a video game, a driver's biography, one specific Grand Prix)
+    that the final Jev rerank starts correctly judging the *diluted* pool
+    as not a direct answer and discarding everything, whereas the same
+    source capped at 6 keeps only the closest hits and reliably survives
+    rerank."""
+    sources = CATEGORY_SOURCES.get(category)
+    if not sources:
         return []
-    return await fn(query, limit)
+    per_source_limit = _NEWS_PER_SOURCE_LIMIT if category == "news" else limit
+    merged = await _race([(name, timeout_s, fn(query, per_source_limit)) for name, timeout_s, fn in sources])
+    return merged[:limit]

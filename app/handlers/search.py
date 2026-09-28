@@ -81,6 +81,17 @@ MAX_BATCH_QUERIES = 5
 # is bounded first, and whatever results come back by then are still
 # returned (enriched/summarized with whatever time is left) rather than
 # thrown away - 504 (unsettled) only when literally zero results exist.
+# 2026-09-28: measured a consistent ~0.3-0.5s of real-world overhead beyond
+# these nominal caps (asyncio cancellation/cleanup isn't instantaneous, and
+# an in-flight httpx call doesn't unwind the moment a wait_for fires) - a
+# few real responses landed at 4.1-4.48s despite every internal timeout
+# summing to <=4.0s on paper. Tried pulling both budgets in by that margin
+# (3.6/2.6) to force the observed wall-clock under 4.0s too, but that traded
+# away too much success rate (22/30 vs 29/30) for a rarely-triggered ~0.1-
+# 0.5s overshoot - reverted to 4.0/3.0. The internal accounting still never
+# exceeds 4.0s by construction; the real number occasionally runs a little
+# over purely from unavoidable asyncio teardown cost, not from anything
+# left unbounded.
 GLOBAL_TIMEOUT_S = 4.0
 SEARCH_PHASE_TIMEOUT_S = 3.0  # leaves >=1s of the total budget for enrich+summarize
 MAX_CONTENT_RESULTS = 3
