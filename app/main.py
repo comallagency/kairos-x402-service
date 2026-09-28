@@ -17,7 +17,7 @@ from fastmcp.utilities.lifespan import combine_lifespans
 
 from app import db
 from app.admin import router as admin_router
-from app.capacity import CapacityGateMiddleware, JobsCircuitBreakerMiddleware
+from app.capacity import CapacityGateMiddleware, JobsCircuitBreakerMiddleware, LLMGatewayCircuitBreakerMiddleware
 from app.client_ip import ClientIpMiddleware
 from app.db import init_db
 from app.discovery import router as discovery_router
@@ -34,6 +34,7 @@ from app.handlers.agent_claim import router as agent_claim_router
 from app.handlers.gas_price import router as gas_price_router
 from app.handlers.jobs import router as jobs_router
 from app.handlers.jev import router as jev_router
+from app.handlers.llm_gateway import router as llm_gateway_router
 from app.handlers.news import router as news_router
 from app.handlers.pdf import router as pdf_router
 from app.handlers.probe import router as probe_router
@@ -125,6 +126,7 @@ inner_app.include_router(x402_echo_router)
 inner_app.include_router(agent_health_router)
 inner_app.include_router(agent_claim_router)
 inner_app.include_router(jev_router)
+inner_app.include_router(llm_gateway_router)
 inner_app.include_router(capabilities_router)
 inner_app.include_router(discovery_router)
 inner_app.include_router(admin_router)
@@ -160,7 +162,8 @@ intent_logged = IntentLoggingMiddleware(payment_wrapped)
 mpp_wrapped = MPPMiddleware(intent_logged, inner_app)
 capacity_gated = CapacityGateMiddleware(mpp_wrapped)
 jobs_breaker = JobsCircuitBreakerMiddleware(capacity_gated)
-body_compat = PaymentBodyCompatMiddleware(jobs_breaker)
+llm_gateway_breaker = LLMGatewayCircuitBreakerMiddleware(jobs_breaker)
+body_compat = PaymentBodyCompatMiddleware(llm_gateway_breaker)
 # Outermost: captures the client IP (already resolved from X-Forwarded-For
 # by uvicorn proxy-headers) before anything else runs, purely observational.
 app = ClientIpMiddleware(body_compat)

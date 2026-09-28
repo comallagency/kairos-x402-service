@@ -544,6 +544,13 @@ ROUTE_DESCRIPTIONS = {
         "highest first. Powered by Jev (TypeSafe System One). $0.001 per call, "
         "no OpenRouter or TypeSafe account needed. Try GET /rank/sample."
     ),
+    "llm-gateway": (
+        "OpenAI-compatible chat completions (non-streaming) for any "
+        "OpenRouter model - GET /v1/models lists them free, with pricing "
+        "(upstream cost x 1.10). Pay only for what you use: sign a ceiling "
+        "based on your max_tokens, settle for real usage x 1.10 (min $0.001) "
+        "once the call completes. Try GET /v1/chat/completions/sample."
+    ),
 }
 
 # Non-vital startup check: a description that grew past the Bazaar limit is
@@ -1335,6 +1342,38 @@ RANK_INPUT_SCHEMA = {
     "required": ["query", "documents"],
 }
 
+LLM_GATEWAY_INPUT_SCHEMA = {
+    "properties": {
+        "model": {
+            "type": "string",
+            "description": "OpenRouter model id from GET /v1/models, e.g. \"openai/gpt-4o-mini\".",
+        },
+        "messages": {
+            "type": "array",
+            "description": "OpenAI-format chat messages: [{role, content}, ...].",
+            "items": {"type": "object"},
+            "minItems": 1,
+        },
+        "max_tokens": {
+            "type": "integer",
+            "description": "Max completion tokens, capped at 4096 - also bounds the x402 upto price ceiling.",
+        },
+    },
+    "required": ["model", "messages"],
+}
+
+LLM_GATEWAY_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "model": {"type": "string"},
+        "choices": {"type": "array", "items": {"type": "object"}},
+        "usage": {"type": "object"},
+        "x402_receipt": {"type": "object"},
+    },
+    "required": ["choices", "usage"],
+}
+
 RANK_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1713,6 +1752,18 @@ def _payment_option(price: str) -> PaymentOption:
     )
 
 
+def _upto_payment_option(price) -> PaymentOption:
+    """price is a DynamicPrice callable (async, takes an HTTPRequestContext,
+    returns a dollar-string ceiling) - only POST /v1/chat/completions uses
+    this, see app/handlers/llm_gateway.py::compute_ceiling_price."""
+    return PaymentOption(
+        scheme="upto",
+        pay_to=config.X402_PAY_TO,
+        price=price,
+        network=config.X402_NETWORK,
+    )
+
+
 def build_route_configs() -> dict[str, RouteConfig]:
     # The 3 hand-built core routes, plus anything the usine (Prospecteur/
     # Ouvrier/Crieur - see usine/) has added to app/generated/routes_registry.yaml.
@@ -1727,6 +1778,11 @@ def build_route_configs() -> dict[str, RouteConfig]:
 
 
 def _core_route_configs() -> dict[str, RouteConfig]:
+    # Deferred: app.handlers.llm_gateway imports ROUTE_DESCRIPTIONS from this
+    # module (same pattern every other handler file already uses), so a
+    # top-of-file import here would be circular.
+    from app.handlers.llm_gateway import SAMPLE_REQUEST, SAMPLE_RESPONSE, compute_ceiling_price
+
     return {
         # /search reactive le 2026-09-11 : depuis le 2026-09-07, la route ne
         # depend plus d'OpenRouter (app/upstream/websearch.py interroge
@@ -2395,6 +2451,21 @@ def _core_route_configs() -> dict[str, RouteConfig]:
                 output=OutputConfig(example=RANK_SAMPLE_OUTPUT, schema=RANK_OUTPUT_SCHEMA),
             ),
         ),
+        "POST /v1/chat/completions": RouteConfig(
+            accepts=_upto_payment_option(compute_ceiling_price),
+            resource=f"{config.BASE_URL}/v1/chat/completions",
+            description=ROUTE_DESCRIPTIONS["llm-gateway"],
+            mime_type="application/json",
+            service_name="llm-gateway",
+            icon_url=ICON_URL,
+            tags=["llm", "inference", "openai-compatible"],
+            extensions=declare_discovery_extension(
+                input=SAMPLE_REQUEST,
+                input_schema=LLM_GATEWAY_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=SAMPLE_RESPONSE, schema=LLM_GATEWAY_OUTPUT_SCHEMA),
+            ),
+        ),
     }
 
 
@@ -2456,6 +2527,13 @@ def build_resource_server() -> x402ResourceServer:
 
     server = x402ResourceServer(facilitator_client)
     register_exact_evm_server(server, networks=config.X402_NETWORK)
+    from x402.mechanisms.evm.upto.server import UptoEvmScheme as UptoEvmServerScheme
+
+    # POST /v1/chat/completions (app/handlers/llm_gateway.py) is the only
+    # route using "upto" (Permit2-based): the buyer authorizes a ceiling,
+    # the route settles for real usage x 1.10 afterward via
+    # set_settlement_overrides(). Every other route stays on "exact".
+    server.register(config.X402_NETWORK, UptoEvmServerScheme())
     server.register_extension(bazaar_resource_server_extension)
     server.on_before_settle(_first_call_free_hook)
     return server

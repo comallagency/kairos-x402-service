@@ -140,3 +140,55 @@ class JobsCircuitBreakerMiddleware:
             }
         )
         await send({"type": "http.response.body", "body": body})
+
+
+class LLMGatewayCircuitBreakerMiddleware:
+    """Pure-ASGI middleware, wrapped OUTSIDE the x402 payment middleware -
+    same placement and reasoning as JobsCircuitBreakerMiddleware.
+
+    POST /v1/chat/completions uses the x402 "upto" scheme: the buyer
+    authorizes a ceiling, and app/handlers/llm_gateway.py settles for the
+    real OpenRouter cost afterward. If our own OpenRouter balance can't
+    cover even one call, that settlement would still be attempted after an
+    upstream failure the buyer already saw as a 502 - better to fail before
+    ever quoting a price. Fixed floor rather than per-request (the ceiling
+    itself is request-specific, computed in compute_ceiling_price(), but an
+    ASGI middleware here would need to buffer and re-inject the body to peek
+    at it, which every other capacity gate in this file also avoids)."""
+
+    MIN_BALANCE_USD = 1.00
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] != "POST" or scope["path"] != "/v1/chat/completions":
+            await self.app(scope, receive, send)
+            return
+
+        if await has_sufficient_balance(self.MIN_BALANCE_USD):
+            await self.app(scope, receive, send)
+            return
+
+        db.log_request(
+            route="v1/chat/completions",
+            method="POST",
+            status="circuit_breaker_open",
+            error_reason="openrouter_balance_below_floor",
+        )
+        body = json.dumps(
+            {
+                "error": {
+                    "reason": "temporarily_unavailable",
+                    "detail": "The LLM gateway is temporarily disabled (upstream credit low). Other routes are unaffected.",
+                }
+            }
+        ).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 503,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})

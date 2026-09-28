@@ -11,6 +11,7 @@ from app import config
 CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 KEY_URL = "https://openrouter.ai/api/v1/key"
 CREDITS_URL = "https://openrouter.ai/api/v1/credits"
+MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 
 class OpenRouterError(Exception):
@@ -172,6 +173,98 @@ async def has_sufficient_balance(min_usd: float) -> bool:
     except Exception:
         return False
     return balance >= min_usd
+
+
+# --- model catalog, for POST /v1/models and the LLM gateway's per-request
+# pricing (app/handlers/llm_gateway.py). Cached for _MODELS_CACHE_TTL_SECONDS
+# since OpenRouter's catalog barely changes minute to minute and this can be
+# read on every /v1/chat/completions price quote.
+
+_MODELS_CACHE_TTL_SECONDS = 3600.0
+_models_cache: dict[str, Any] = {}
+_models_lock = asyncio.Lock()
+
+
+async def get_models() -> list[dict[str, Any]]:
+    """Raw OpenRouter model catalog, filtered to models with real per-token
+    pricing - a handful of models (e.g. typesafe/jev-router) report
+    pricing.prompt/completion as "-1" (variable/router pricing that can't be
+    quoted upfront), which the gateway can't offer a fixed-formula ceiling
+    for, so those are dropped here rather than in every caller."""
+    now = time.monotonic()
+    cached = _models_cache.get("value")
+    cached_at = _models_cache.get("at")
+    if cached is not None and cached_at is not None and now - cached_at < _MODELS_CACHE_TTL_SECONDS:
+        return cached
+
+    async with _models_lock:
+        now = time.monotonic()
+        cached = _models_cache.get("value")
+        cached_at = _models_cache.get("at")
+        if cached is not None and cached_at is not None and now - cached_at < _MODELS_CACHE_TTL_SECONDS:
+            return cached
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(MODELS_URL)
+            resp.raise_for_status()
+            data = resp.json()["data"]
+
+        models = []
+        for m in data:
+            pricing = m.get("pricing") or {}
+            try:
+                prompt_price = float(pricing.get("prompt", -1))
+                completion_price = float(pricing.get("completion", -1))
+            except (TypeError, ValueError):
+                continue
+            if prompt_price < 0 or completion_price < 0:
+                continue
+            models.append(m)
+
+        _models_cache["value"] = models
+        _models_cache["at"] = now
+        return models
+
+
+async def chat_completion_raw(
+    model: str,
+    messages: list[dict[str, str]],
+    max_tokens: int,
+    timeout: float = 60.0,
+) -> dict[str, Any]:
+    """Single-model call for the LLM gateway (app/handlers/llm_gateway.py) -
+    deliberately separate from chat_completion(): the gateway passes through
+    exactly the model the buyer paid for (no multi-model fallback list, no
+    opinionated "empty content is an error" retry-worthy failure - the buyer
+    sees the real upstream response either way), and always requests
+    usage:{include:true} so the real per-call cost is available to compute
+    the "upto" settlement amount."""
+    if not config.OPENROUTER_API_KEY:
+        raise OpenRouterError("OPENROUTER_API_KEY is not set")
+
+    await rate_limiter.acquire()
+
+    body = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "usage": {"include": True},
+        "provider": {"data_collection": "deny"},
+    }
+    headers = {
+        "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(CHAT_URL, json=body, headers=headers)
+        if resp.status_code >= 400:
+            raise OpenRouterError(f"OpenRouter error {resp.status_code}: {resp.text[:300]}")
+        data = resp.json()
+
+    if "error" in data:
+        raise OpenRouterError(f"OpenRouter error: {data['error']}")
+
+    return data
 
 
 async def get_key_info() -> dict[str, Any]:
