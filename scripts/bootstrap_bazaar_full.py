@@ -109,6 +109,7 @@ TARGET_SLUGS = [
     "weather", "crypto",
     "decide", "guard", "verify", "rank",
     "extract", "summarize",
+    "translate",  # missing from every prior bootstrap run - added 2026-09-28
 ]
 BASE_URL = "https://x402.agentindex.world"
 NETWORK = "eip155:8453"
