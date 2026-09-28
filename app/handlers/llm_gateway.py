@@ -4,23 +4,27 @@ Reopens the OpenRouter passthrough this service used to offer before the
 account balance went negative (2026-09-07). Balance is positive again
 (~$7.95, 2026-09-28) - this is a fresh build, not a re-enable.
 
-Two accepts[] options, both priced off the same per-request ceiling
-(compute_ceiling_price - real prompt/completion tokens x the model's real
-rate x MARKUP, floored at MIN_SETTLE_USD):
-  - "exact" (EIP-3009): settles the full ceiling, always - the simple
-    default. No ETH, no Permit2 allowance needed from the buyer.
-  - "upto" (Permit2-based): settles the real OpenRouter cost x MARKUP
-    instead, floored the same way - cheaper for the buyer when the real
-    call costs much less than the worst-case ceiling, but needs a Permit2
-    USDC allowance and (for signing) an EVM wallet with ETH for the buyer's
-    own client to have set that up. Added 2026-09-28 after "upto"-only
-    turned out to exclude any buyer without that allowance or whose client
-    only implements "exact" (see scripts/bootstrap_llm_gateway.py's B
-    wallet - it has no ETH).
-Every other paid route in this app has a single fixed price; this is the
-first one where what we pay upstream and what the buyer is billed
-genuinely differ per call, and the first with more than one accepts[]
-option.
+accepts[] currently offers "exact" (EIP-3009) only, priced at the
+per-request ceiling (compute_ceiling_price - real prompt/completion tokens
+x the model's real rate x MARKUP, floored at MIN_SETTLE_USD). No ETH, no
+Permit2 allowance needed from the buyer.
+
+"upto" (Permit2-based - settles real OpenRouter cost x MARKUP instead of
+the full ceiling, cheaper for the buyer when the real call costs much less
+than the worst case) was added 2026-09-28 alongside "exact" as a second
+accepts[] option, then disabled the same day (UPTO_ENABLED = False below):
+the route never appeared in Bazaar even an hour after a real, confirmed
+on-chain settlement, and the only structural difference from every other
+route that does get indexed was this second, dynamically-priced, non-exact
+option - Bazaar's own SDK-side code (x402/extensions/bazaar,
+x402/http/middleware/_bazaar_utils.py) never mentions "upto" at all,
+suggesting that path was only ever built and tested against "exact". Not
+proven (CDP's indexer is closed), but the leading hypothesis, and the
+UPTO_ENABLED gate exists so this can be flipped back on for a controlled
+retest, or once CDP confirms/denies the hypothesis, without re-deriving any
+of the settlement logic below - compute_ceiling_price, the settle-amount
+clamp, and the scheme-branch in chat_completions()/ask_model_tool all
+already handle both schemes correctly and are unchanged.
 
 Non-streaming only. GET /v1/models is free.
 
@@ -56,6 +60,14 @@ MARKUP = 1.10
 MIN_SETTLE_USD = 0.001
 MAX_TOKENS_CAP = 4096
 DEFAULT_MAX_TOKENS = 1024
+
+# See module docstring: flip to True to re-offer "upto" as a second
+# accepts[] option (app/x402_setup.py's RouteConfig and mcp_server.py's
+# ask_model_tool both read this). Everything else - compute_ceiling_price,
+# the settle-amount clamp, the scheme branch in chat_completions() and
+# ask_model_tool - already handles both schemes and needs no change either
+# way.
+UPTO_ENABLED = False
 
 
 class LLMGatewayError(Exception):

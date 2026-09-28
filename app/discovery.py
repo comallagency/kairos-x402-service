@@ -357,6 +357,7 @@ def _llms_catalog() -> str:
         f"- [Web Read]({base}/web-read): POST `{{\"url\":\"https://...\"}}` — main content as clean Markdown ($0.002)",
         f"- [Structured Extract]({base}/extract): POST URL/text plus JSON schema ($0.002)",
         f"- [Summarize]({base}/summarize): POST URL/text/HTML ($0.002)",
+        f"- [Translate]({base}/translate): POST `{{\"text\":\"...\",\"target_lang\":\"en\"}}` \u2014 up to 200 segments in one call ($0.002, GET /translate/sample)",
         "",
         "## Decision and judgment tools ($0.001 USDC)",
         "",
