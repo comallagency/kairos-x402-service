@@ -33,6 +33,9 @@ def _live_html() -> str:
 def _missions_html() -> str:
     return (_TEMPLATES / "missions.html").read_text(encoding="utf-8")
 
+def _daily_html() -> str:
+    return (_TEMPLATES / "daily.html").read_text(encoding="utf-8")
+
 # The only other network this deployment has ever run on. Payments settled
 # there must never be counted as mainnet revenue - see BRIEF-CORRECTIONS.md
 # (2026-09-05 dashboard network-mixing bug).
@@ -285,6 +288,31 @@ async def collect_dashboard_data() -> dict:
 @router.get("/admin/data.json", include_in_schema=False)
 async def admin_data(_: None = Depends(check_auth)):
     return await collect_dashboard_data()
+
+
+# Read-only on all data below (no route this touches is payable, no write
+# happens here) - GET /admin/daily, built 2026-09-29 from the
+# agenteconomy.report "56% uptime" thread. See app/db.py's "GET /admin/daily
+# support" section and scripts/ingest_daily_nginx_stats.py +
+# scripts/daily_reputation_check.py for where the underlying data comes from.
+
+@router.get("/admin/daily", response_class=HTMLResponse, include_in_schema=False)
+async def admin_daily_page(_: None = Depends(check_auth)):
+    return _daily_html()
+
+
+@router.get("/admin/daily.json", include_in_schema=False)
+async def admin_daily_json(_: None = Depends(check_auth)):
+    return {
+        "summary": db.daily_top_summary(),
+        "days": db.daily_overview(days=30),
+        "reputation": db.reputation_history(days=30),
+    }
+
+
+@router.get("/admin/daily/detail.json", include_in_schema=False)
+async def admin_daily_detail_json(date: str, _: None = Depends(check_auth)):
+    return db.day_detail(date)
 
 
 MIN_AGE_DAYS_BEFORE_KILL = 30

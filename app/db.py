@@ -318,6 +318,60 @@ CREATE TABLE IF NOT EXISTS route_repair_attempts (
     last_attempt_at TEXT,
     last_result TEXT
 );
+
+-- Everything below feeds GET /admin/daily - see scripts/ingest_daily_nginx_stats.py
+-- and scripts/daily_reputation_check.py (2026-09-29). requests/chain_payments
+-- above only ever get a row for a MATCHED route (see IntentLoggingMiddleware) -
+-- a genuine unmatched-path 404 or a backend-unreachable 502 during an outage
+-- never reaches them at all. daily_route_stats is nginx-log-derived
+-- specifically to close that gap; everything else on /admin/daily still reads
+-- requests/chain_payments directly (see daily_overview() below).
+CREATE TABLE IF NOT EXISTS daily_route_stats (
+    date TEXT NOT NULL,
+    route TEXT NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    c_2xx INTEGER NOT NULL DEFAULT 0,
+    c_402 INTEGER NOT NULL DEFAULT 0,
+    c_404 INTEGER NOT NULL DEFAULT 0,
+    c_4xx_other INTEGER NOT NULL DEFAULT 0,
+    c_5xx INTEGER NOT NULL DEFAULT 0,
+    distinct_ips INTEGER NOT NULL DEFAULT 0,
+    p50_ms REAL,
+    p95_ms REAL,
+    PRIMARY KEY (date, route)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_route_stats_date ON daily_route_stats(date);
+
+CREATE TABLE IF NOT EXISTS daily_visitors (
+    date TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    user_agent TEXT,
+    request_count INTEGER NOT NULL DEFAULT 0,
+    class TEXT NOT NULL,       -- buyer | prober | indexer | unknown
+    prober_name TEXT,          -- set when class='prober': AgentEconomyReport / Lumiere / vet402 / ApisTrust / Nitrograph
+    is_new INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (date, ip)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_visitors_date ON daily_visitors(date);
+
+CREATE TABLE IF NOT EXISTS reputation_snapshots (
+    date TEXT NOT NULL,
+    source TEXT NOT NULL,      -- agenteconomy (lumiere later)
+    raw_json TEXT,
+    score REAL,
+    uptime_pct REAL,
+    tier TEXT,
+    PRIMARY KEY (date, source)
+);
+
+CREATE TABLE IF NOT EXISTS bazaar_rank_history (
+    date TEXT NOT NULL,
+    query TEXT NOT NULL,
+    rank INTEGER,              -- NULL if not found in the results returned
+    resource_url TEXT,
+    total_results INTEGER,
+    PRIMARY KEY (date, query)
+);
 """
 
 
@@ -1472,3 +1526,298 @@ def history_7d() -> list[dict]:
         }
         for day, bucket in sorted(by_day.items())
     ]
+
+
+# --- GET /admin/daily support (2026-09-29) --------------------------------
+
+def record_daily_route_stats(date: str, rows: list[dict]) -> None:
+    """Bulk upsert from scripts/ingest_daily_nginx_stats.py - one row per
+    (date, route) seen in that day's nginx access log. INSERT OR REPLACE so a
+    cron retry after a partial failure never double-counts."""
+    with cursor() as cur:
+        for r in rows:
+            cur.execute(
+                """INSERT OR REPLACE INTO daily_route_stats
+                   (date, route, requests, c_2xx, c_402, c_404, c_4xx_other, c_5xx,
+                    distinct_ips, p50_ms, p95_ms)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    date, r["route"], r["requests"], r["c_2xx"], r["c_402"], r["c_404"],
+                    r["c_4xx_other"], r["c_5xx"], r["distinct_ips"],
+                    r.get("p50_ms"), r.get("p95_ms"),
+                ),
+            )
+
+
+def record_daily_visitors(date: str, rows: list[dict]) -> None:
+    """Bulk upsert from scripts/ingest_daily_nginx_stats.py - one row per
+    distinct IP seen that day, already classified (buyer/prober/indexer/
+    unknown) and flagged is_new by the ingestion script itself (it queries
+    MIN(date) per ip across this same table before writing today's rows)."""
+    with cursor() as cur:
+        for r in rows:
+            cur.execute(
+                """INSERT OR REPLACE INTO daily_visitors
+                   (date, ip, user_agent, request_count, class, prober_name, is_new)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    date, r["ip"], r.get("user_agent"), r["request_count"],
+                    r["class"], r.get("prober_name"), int(r["is_new"]),
+                ),
+            )
+
+
+def first_seen_dates_for_ips(ips: list[str]) -> dict[str, str]:
+    """Earliest date already on record (in daily_visitors) for each of the
+    given IPs - used by the ingestion script to decide is_new for today
+    BEFORE writing today's rows (a self-join on the same table you're about
+    to insert into would otherwise see today's own not-yet-committed rows)."""
+    if not ips:
+        return {}
+    placeholders = ",".join("?" for _ in ips)
+    with cursor() as cur:
+        cur.execute(
+            f"SELECT ip, MIN(date) AS first_date FROM daily_visitors "
+            f"WHERE ip IN ({placeholders}) GROUP BY ip",
+            ips,
+        )
+        return {r["ip"]: r["first_date"] for r in cur.fetchall()}
+
+
+def record_reputation_snapshot(
+    date: str, source: str, raw_json: str,
+    score: float | None, uptime_pct: float | None, tier: str | None,
+) -> None:
+    with cursor() as cur:
+        cur.execute(
+            """INSERT OR REPLACE INTO reputation_snapshots
+               (date, source, raw_json, score, uptime_pct, tier)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (date, source, raw_json, score, uptime_pct, tier),
+        )
+
+
+def record_bazaar_rank(date: str, query: str, rank: int | None, resource_url: str | None, total_results: int) -> None:
+    with cursor() as cur:
+        cur.execute(
+            """INSERT OR REPLACE INTO bazaar_rank_history
+               (date, query, rank, resource_url, total_results)
+               VALUES (?, ?, ?, ?, ?)""",
+            (date, query, rank, resource_url, total_results),
+        )
+
+
+def daily_overview(days: int = 30) -> list[dict]:
+    """Per UTC day, last `days` days - the /admin/daily main table. Same
+    source and exclusions as history_7d() (payer present AND not in
+    MECHANICAL_WALLETS = real payment; scanner-UA/our-own-IP excluded from
+    distinct_visitors), widened from a single payments_real number into the
+    full funnel, plus nginx-derived c_404/c_5xx (daily_route_stats - the
+    genuine unmatched-path/backend-down cases requests can never see)."""
+    mechanical = _mechanical_wallets()
+    since = _since(24 * days)
+    with cursor() as cur:
+        cur.execute(
+            "SELECT ts, client_ip, user_agent, status, payer FROM requests WHERE ts >= ?",
+            (since,),
+        )
+        rows = cur.fetchall()
+
+    by_day: dict[str, dict] = {}
+    for row in rows:
+        day = row["ts"][:10]
+        b = by_day.setdefault(day, {
+            "requests_total": 0, "identities": set(), "c_402": 0,
+            "payment_attempts": 0, "payments_success": 0, "payment_failures": 0,
+        })
+        b["requests_total"] += 1
+        ip = row["client_ip"]
+        if ip and ip != config.VPS_PUBLIC_IP and not _is_scanner_ua(row["user_agent"]):
+            b["identities"].add(ip)
+        status = row["status"]
+        if status in ("unpaid", "capacity_reached"):
+            b["c_402"] += 1
+        elif status == "paid":
+            b["payment_attempts"] += 1
+            payer = (row["payer"] or "").strip().lower()
+            if payer and payer not in mechanical:
+                b["payments_success"] += 1
+        elif status == "payment_failed":
+            b["payment_attempts"] += 1
+            b["payment_failures"] += 1
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT block_time, amount_usdc, from_address FROM chain_payments "
+            "WHERE block_time >= ? AND is_mechanical=0",
+            (since,),
+        )
+        chain_rows = cur.fetchall()
+    revenue_by_day: dict[str, float] = {}
+    payers_by_day: dict[str, set] = {}
+    for r in chain_rows:
+        day = (r["block_time"] or "")[:10]
+        if not day:
+            continue
+        revenue_by_day[day] = revenue_by_day.get(day, 0.0) + r["amount_usdc"]
+        payers_by_day.setdefault(day, set()).add((r["from_address"] or "").lower())
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT from_address, MIN(block_time) AS first_seen FROM chain_payments "
+            "WHERE is_mechanical=0 GROUP BY from_address"
+        )
+        first_seen = {r["from_address"].lower(): (r["first_seen"] or "")[:10] for r in cur.fetchall()}
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT date, SUM(c_404) AS c_404, SUM(c_5xx) AS c_5xx, SUM(requests) AS requests "
+            "FROM daily_route_stats WHERE date >= ? GROUP BY date",
+            (since[:10],),
+        )
+        nginx_by_day = {r["date"]: dict(r) for r in cur.fetchall()}
+
+    result = []
+    all_days = set(by_day) | set(nginx_by_day)
+    for day in sorted(all_days):
+        b = by_day.get(day, {
+            "requests_total": 0, "identities": set(), "c_402": 0,
+            "payment_attempts": 0, "payments_success": 0, "payment_failures": 0,
+        })
+        payers = payers_by_day.get(day, set())
+        new_buyers = sum(1 for p in payers if first_seen.get(p) == day)
+        nginx = nginx_by_day.get(day, {})
+        result.append({
+            "day": day,
+            "requests_total": b["requests_total"],
+            "nginx_requests_total": nginx.get("requests"),
+            "distinct_visitors": len(b["identities"]),
+            "c_402": b["c_402"],
+            "payment_attempts": b["payment_attempts"],
+            "payments_success": b["payments_success"],
+            "payment_failures": b["payment_failures"],
+            "revenue_usdc": round(revenue_by_day.get(day, 0.0), 6),
+            "buyers_total": len(payers),
+            "buyers_new": new_buyers,
+            "buyers_returning": len(payers) - new_buyers,
+            "c_404": nginx.get("c_404", 0),
+            "c_5xx": nginx.get("c_5xx", 0),
+        })
+    return result
+
+
+def day_detail(date: str) -> dict:
+    """Drill-down for one UTC day (/admin/daily, click a row): real buyers
+    (wallet/route/amount/UA), failed payment attempts (wallet/route/exact
+    reason), per-route stats from the nginx ingestion, and classified
+    visitors for that day."""
+    mechanical = _mechanical_wallets()
+    day_start = f"{date}T00:00:00"
+    day_end = f"{date}T23:59:59.999999"
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT payer, route, amount_usdc, user_agent, ts FROM requests "
+            "WHERE ts >= ? AND ts <= ? AND status='paid' ORDER BY ts",
+            (day_start, day_end),
+        )
+        paid_rows = cur.fetchall()
+    buyers = []
+    for r in paid_rows:
+        payer = (r["payer"] or "").strip().lower()
+        if not payer or payer in mechanical:
+            continue
+        buyers.append({
+            "wallet": payer, "route": r["route"], "amount_usdc": r["amount_usdc"],
+            "user_agent": r["user_agent"], "ts": r["ts"],
+        })
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT payer, route, error_reason, user_agent, ts FROM requests "
+            "WHERE ts >= ? AND ts <= ? AND status='payment_failed' ORDER BY ts",
+            (day_start, day_end),
+        )
+        failures = [dict(r) for r in cur.fetchall()]
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT route, requests, c_2xx, c_402, c_404, c_4xx_other, c_5xx, "
+            "distinct_ips, p50_ms, p95_ms FROM daily_route_stats WHERE date=? "
+            "ORDER BY requests DESC",
+            (date,),
+        )
+        route_stats = [dict(r) for r in cur.fetchall()]
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT ip, user_agent, request_count, class, prober_name, is_new "
+            "FROM daily_visitors WHERE date=? ORDER BY request_count DESC",
+            (date,),
+        )
+        visitors = [dict(r) for r in cur.fetchall()]
+
+    return {
+        "date": date, "buyers": buyers, "failures": failures,
+        "route_stats": route_stats, "visitors": visitors,
+    }
+
+
+def reputation_history(days: int = 30) -> dict:
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    with cursor() as cur:
+        cur.execute(
+            "SELECT date, source, score, uptime_pct, tier FROM reputation_snapshots "
+            "WHERE date >= ? ORDER BY date",
+            (since,),
+        )
+        snapshots = [dict(r) for r in cur.fetchall()]
+    with cursor() as cur:
+        cur.execute(
+            "SELECT date, query, rank, resource_url, total_results FROM bazaar_rank_history "
+            "WHERE date >= ? ORDER BY date, query",
+            (since,),
+        )
+        bazaar = [dict(r) for r in cur.fetchall()]
+    return {"snapshots": snapshots, "bazaar": bazaar}
+
+
+def daily_top_summary() -> dict:
+    """The 4 headline numbers for the top of /admin/daily: today's revenue,
+    today's buyers, 7-day revenue (all on-chain networks combined, excluding
+    MECHANICAL_WALLETS - same rule as everywhere else on this page), and the
+    latest agenteconomy.report rating we've recorded."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT amount_usdc, from_address FROM chain_payments "
+            "WHERE block_time LIKE ? AND is_mechanical=0",
+            (f"{today}%",),
+        )
+        today_rows = cur.fetchall()
+    revenue_today = sum(r["amount_usdc"] for r in today_rows)
+    buyers_today = len({(r["from_address"] or "").lower() for r in today_rows})
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT COALESCE(SUM(amount_usdc), 0) AS total FROM chain_payments "
+            "WHERE block_time >= ? AND is_mechanical=0",
+            (_since(24 * 7),),
+        )
+        revenue_7d = cur.fetchone()["total"]
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT score, uptime_pct, tier, date FROM reputation_snapshots "
+            "WHERE source='agenteconomy' ORDER BY date DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+    rating = dict(row) if row else None
+
+    return {
+        "revenue_today_usdc": round(revenue_today, 6),
+        "buyers_today": buyers_today,
+        "revenue_7d_usdc": round(revenue_7d, 6),
+        "agenteconomy_rating": rating,
+    }

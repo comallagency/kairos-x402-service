@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Daily — AgentIndex x402</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080B10; --card:#10151E; --card2:#161D29; --line:#243044;
+  --text:#F4F7FB; --muted:#8B9BB0; --faint:#5A6A82;
+  --green:#2EE59D; --green-dim:rgba(46,229,157,.12);
+  --amber:#FFB020; --amber-dim:rgba(255,176,32,.12);
+  --blue:#5EB1FF; --blue-dim:rgba(94,177,255,.12);
+  --slate:#7B8BA3; --slate-dim:rgba(123,139,163,.12);
+  --red:#FF5C7A; --red-dim:rgba(255,92,122,.12);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:"Instrument Sans",system-ui,sans-serif;font-size:15px;line-height:1.4}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1280px;margin:0 auto;padding:18px 16px 48px}
+.crumbs{font-size:13px;color:var(--muted);margin-bottom:16px}
+.crumbs .current{color:var(--text);font-weight:600}
+.head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 20px;margin-bottom:16px}
+.head h1{margin:0;font-size:28px;font-weight:700;letter-spacing:-.03em}
+.meta{margin-left:auto;text-align:right;color:var(--muted);font-size:12.5px}
+
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
+@media (max-width:800px){.kpis{grid-template-columns:1fr 1fr}}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi .n{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.kpi .l{font-size:12.5px;color:var(--muted);margin-top:2px}
+.kpi .n.tier-C,.kpi .n.tier-D{color:var(--amber)}
+.kpi .n.tier-A,.kpi .n.tier-AA,.kpi .n.tier-AAA,.kpi .n.tier-B,.kpi .n.tier-BB,.kpi .n.tier-BBB{color:var(--green)}
+
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:16px 18px;margin-bottom:16px}
+section h2{margin:0 0 4px;font-size:16px;font-weight:700}
+section .sub{font-size:12.5px;color:var(--muted);margin-bottom:12px}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+tbody tr:hover{background:var(--card2)}
+tbody tr.dayrow{cursor:pointer}
+tbody tr.dayrow.open{background:var(--blue-dim)}
+.tablewrap{overflow-x:auto}
+
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;
+  letter-spacing:.03em;text-transform:uppercase;padding:2px 7px;border-radius:999px}
+.pill.buyer{background:var(--green-dim);color:var(--green)}
+.pill.prober{background:var(--blue-dim);color:var(--blue)}
+.pill.indexer{background:var(--slate-dim);color:var(--slate)}
+.pill.unknown{background:var(--card2);color:var(--faint)}
+.pill.new{background:var(--amber-dim);color:var(--amber);margin-left:5px}
+.num-bad{color:var(--red)}
+.num-warn{color:var(--amber)}
+.num-good{color:var(--green)}
+.muted{color:var(--muted)}
+.faint{color:var(--faint)}
+
+.detail{display:none;margin-top:14px;border-top:1px dashed var(--line);padding-top:14px}
+.detail.show{display:block}
+.detail h3{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);
+  margin:16px 0 6px}
+.detail h3:first-child{margin-top:0}
+.empty{color:var(--faint);font-style:italic;padding:8px 0;font-size:13px}
+.loading{color:var(--faint);font-size:13px;padding:8px 0}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:900px){.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="crumbs">
+    <a href="/admin">Admin</a> · <a href="/admin/live">Poste d'écoute</a> ·
+    <a href="/admin/missions">Missions</a> · <a href="/admin/usine">Usine</a> ·
+    <span class="current">Daily</span>
+  </nav>
+  <div class="head">
+    <h1>Daily</h1>
+    <div class="meta">Lecture seule · rafraîchi au chargement · <span id="stamp">—</span></div>
+  </div>
+
+  <div class="kpis" id="kpis">
+    <div class="kpi"><div class="n mono" id="k-revenue-today">—</div><div class="l">Revenu aujourd'hui (USDC)</div></div>
+    <div class="kpi"><div class="n mono" id="k-buyers-today">—</div><div class="l">Acheteurs aujourd'hui</div></div>
+    <div class="kpi"><div class="n mono" id="k-revenue-7d">—</div><div class="l">Revenu 7 jours (USDC)</div></div>
+    <div class="kpi"><div class="n mono" id="k-rating">—</div><div class="l" id="k-rating-l">Note agenteconomy.report</div></div>
+  </div>
+
+  <section>
+    <h2>Vue par jour (30 derniers jours)</h2>
+    <div class="sub">Clique une ligne pour le détail du jour. Requêtes/visiteurs/402/paiements/échecs viennent de nos logs applicatifs (requests) ; revenu vient des règlements on-chain (chain_payments, hors wallets mécaniques et hors tests) ; 404/5xx viennent du log nginx (seule source qui voit aussi les chemins inconnus et les pannes backend).</div>
+    <div class="tablewrap">
+      <table id="days-table">
+        <thead><tr>
+          <th>Jour</th><th>Requêtes</th><th>Visiteurs</th><th>402</th>
+          <th>Tentatives paiement</th><th>Réussis</th><th>Échecs</th>
+          <th>Revenu $</th><th>Acheteurs</th><th>404</th><th>5xx</th>
+        </tr></thead>
+        <tbody id="days-tbody"><tr><td colspan="11" class="loading">Chargement…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="detail" id="day-detail"></div>
+  </section>
+
+  <div class="grid2">
+    <section>
+      <h2>Réputation externe</h2>
+      <div class="sub">Relevée une fois par jour (scripts/daily_reputation_check.py). Lumière pas encore intégrée (API non fournie).</div>
+      <h3>agenteconomy.report — historique</h3>
+      <div class="tablewrap"><table id="rep-table">
+        <thead><tr><th>Jour</th><th>Note</th><th>Uptime</th></tr></thead>
+        <tbody id="rep-tbody"><tr><td colspan="3" class="loading">Chargement…</td></tr></tbody>
+      </table></div>
+      <h3>Position Bazaar (10 requêtes fixes)</h3>
+      <div class="tablewrap"><table id="bazaar-table">
+        <thead><tr><th>Requête</th><th>Rang</th><th>Sur</th><th>Historique récent</th></tr></thead>
+        <tbody id="bazaar-tbody"><tr><td colspan="4" class="loading">Chargement…</td></tr></tbody>
+      </table></div>
+    </section>
+
+    <section>
+      <h2>Disponibilité vue de chez nous</h2>
+      <div class="sub">Part des réponses 404/5xx sur le total nginx, par jour (30 derniers jours). Détail par route dans le panneau du jour ci-dessus.</div>
+      <div class="tablewrap"><table id="avail-table">
+        <thead><tr><th>Jour</th><th>Requêtes nginx</th><th>% 404</th><th>% 5xx</th></tr></thead>
+        <tbody id="avail-tbody"><tr><td colspan="4" class="loading">Chargement…</td></tr></tbody>
+      </table></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const fmtUsd = (n) => (n === null || n === undefined) ? '—' : '$' + Number(n).toFixed(4);
+const fmtNum = (n) => (n === null || n === undefined) ? '—' : Number(n).toLocaleString('fr-FR');
+const fmtPct = (n) => (n === null || n === undefined) ? '—' : (Number(n) * 100).toFixed(1) + '%';
+const esc = (s) => (s === null || s === undefined) ? '' : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let DAYS = [];
+let openDate = null;
+
+function pctColor(pct, warnAt, badAt) {
+  if (pct === null || pct === undefined) return '';
+  if (pct >= badAt) return 'num-bad';
+  if (pct >= warnAt) return 'num-warn';
+  return '';
+}
+
+function renderDaysTable() {
+  const tbody = document.getElementById('days-tbody');
+  if (!DAYS.length) { tbody.innerHTML = '<tr><td colspan="11" class="empty">Aucune donnée pour l\\'instant.</td></tr>'; return; }
+  tbody.innerHTML = DAYS.slice().reverse().map(d => {
+    const errRate5xx = d.nginx_requests_total ? d.c_5xx / d.nginx_requests_total : null;
+    const errRate404 = d.nginx_requests_total ? d.c_404 / d.nginx_requests_total : null;
+    const cls5xx = pctColor(errRate5xx, 0.01, 0.05);
+    const cls404 = pctColor(errRate404, 0.05, 0.15);
+    return `<tr class="dayrow${d.day===openDate?' open':''}" data-day="${d.day}">
+      <td class="mono">${d.day}</td>
+      <td>${fmtNum(d.requests_total)}</td>
+      <td>${fmtNum(d.distinct_visitors)}</td>
+      <td>${fmtNum(d.c_402)}</td>
+      <td>${fmtNum(d.payment_attempts)}</td>
+      <td class="num-good">${fmtNum(d.payments_success)}</td>
+      <td class="${d.payment_failures ? 'num-warn' : ''}">${fmtNum(d.payment_failures)}</td>
+      <td class="mono">${fmtUsd(d.revenue_usdc)}</td>
+      <td>${fmtNum(d.buyers_total)} <span class="faint">(${fmtNum(d.buyers_new)} new)</span></td>
+      <td class="${cls404}">${fmtNum(d.c_404)}</td>
+      <td class="${cls5xx}">${fmtNum(d.c_5xx)}</td>
+    </tr>`;
+  }).join('');
+  tbody.querySelectorAll('tr.dayrow').forEach(tr => {
+    tr.addEventListener('click', () => toggleDay(tr.dataset.day));
+  });
+}
+
+function renderAvailTable() {
+  const tbody = document.getElementById('avail-tbody');
+  if (!DAYS.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">Aucune donnée.</td></tr>'; return; }
+  tbody.innerHTML = DAYS.slice().reverse().map(d => {
+    const p5 = d.nginx_requests_total ? d.c_5xx / d.nginx_requests_total : null;
+    const p4 = d.nginx_requests_total ? d.c_404 / d.nginx_requests_total : null;
+    return `<tr>
+      <td class="mono">${d.day}</td>
+      <td>${fmtNum(d.nginx_requests_total)}</td>
+      <td class="${pctColor(p4,0.05,0.15)}">${fmtPct(p4)}</td>
+      <td class="${pctColor(p5,0.01,0.05)}">${fmtPct(p5)}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function toggleDay(day) {
+  const panel = document.getElementById('day-detail');
+  if (openDate === day) {
+    openDate = null;
+    panel.classList.remove('show');
+    panel.innerHTML = '';
+    renderDaysTable();
+    return;
+  }
+  openDate = day;
+  renderDaysTable();
+  panel.classList.add('show');
+  panel.innerHTML = '<div class="loading">Chargement du détail…</div>';
+  panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  try {
+    const r = await fetch(`/admin/daily/detail.json?date=${encodeURIComponent(day)}`, {credentials: 'same-origin', cache: 'no-store'});
+    const detail = await r.json();
+    panel.innerHTML = renderDetail(detail);
+  } catch (e) {
+    panel.innerHTML = `<div class="empty">Erreur de chargement: ${esc(e)}</div>`;
+  }
+}
+
+function renderDetail(d) {
+  const buyers = d.buyers || [];
+  const failures = d.failures || [];
+  const routeStats = d.route_stats || [];
+  const visitors = d.visitors || [];
+
+  const buyersHtml = buyers.length ? `<table><thead><tr><th>Wallet</th><th>Route</th><th>Montant</th><th>User-Agent</th><th>Heure</th></tr></thead><tbody>${
+    buyers.map(b => `<tr><td class="mono">${esc(b.wallet)}</td><td>${esc(b.route)}</td><td class="mono">${fmtUsd(b.amount_usdc)}</td><td class="faint">${esc(b.user_agent)}</td><td class="mono">${esc((b.ts||'').slice(11,19))}</td></tr>`).join('')
+  }</tbody></table>` : '<div class="empty">Aucun acheteur ce jour.</div>';
+
+  const failuresHtml = failures.length ? `<table><thead><tr><th>Wallet</th><th>Route</th><th>Raison</th><th>Heure</th></tr></thead><tbody>${
+    failures.map(f => `<tr><td class="mono">${esc(f.payer || '—')}</td><td>${esc(f.route)}</td><td class="num-warn">${esc(f.error_reason || '—')}</td><td class="mono">${esc((f.ts||'').slice(11,19))}</td></tr>`).join('')
+  }</tbody></table>` : '<div class="empty">Aucun échec ce jour.</div>';
+
+  const routesHtml = routeStats.length ? `<table><thead><tr><th>Route</th><th>Visites</th><th>402</th><th>2xx</th><th>4xx autres</th><th>404</th><th>5xx</th><th>IPs</th><th>p50</th><th>p95</th></tr></thead><tbody>${
+    routeStats.map(r => `<tr><td class="mono">${esc(r.route)}</td><td>${fmtNum(r.requests)}</td><td>${fmtNum(r.c_402)}</td><td>${fmtNum(r.c_2xx)}</td><td>${fmtNum(r.c_4xx_other)}</td><td class="${r.c_404?'num-warn':''}">${fmtNum(r.c_404)}</td><td class="${r.c_5xx?'num-bad':''}">${fmtNum(r.c_5xx)}</td><td>${fmtNum(r.distinct_ips)}</td><td class="mono">${r.p50_ms!=null?r.p50_ms+'ms':'—'}</td><td class="mono">${r.p95_ms!=null?r.p95_ms+'ms':'—'}</td></tr>`).join('')
+  }</tbody></table>` : '<div class="empty">Pas de données nginx pour ce jour (log déjà tourné - au-delà de ~14 jours en arrière).</div>';
+
+  const byClass = {buyer: [], prober: [], indexer: [], unknown: []};
+  visitors.forEach(v => (byClass[v.class] || byClass.unknown).push(v));
+  const classLabel = {buyer: 'Acheteurs', prober: 'Notateurs / sondes', indexer: 'Indexeurs', unknown: 'Inconnus'};
+  const visitorsHtml = visitors.length ? Object.keys(classLabel).map(cls => {
+    const list = byClass[cls];
+    if (!list.length) return '';
+    return `<div style="margin-bottom:10px"><span class="pill ${cls}">${classLabel[cls]} · ${list.length}</span><table style="margin-top:6px"><thead><tr><th>IP</th><th>User-Agent</th><th>Sonde</th><th>Requêtes</th><th></th></tr></thead><tbody>${
+      list.map(v => `<tr><td class="mono">${esc(v.ip)}</td><td class="faint">${esc(v.user_agent)}</td><td>${esc(v.prober_name || '—')}</td><td>${fmtNum(v.request_count)}</td><td>${v.is_new ? '<span class="pill new">nouveau</span>' : ''}</td></tr>`).join('')
+    }</tbody></table></div>`;
+  }).join('') : '<div class="empty">Pas de données de classification pour ce jour (log déjà tourné).</div>';
+
+  return `
+    <h3>Acheteurs — ${esc(d.date)}</h3>${buyersHtml}
+    <h3>Tentatives échouées</h3>${failuresHtml}
+    <h3>Par route</h3>${routesHtml}
+    <h3>Visiteurs classés</h3>${visitorsHtml}
+  `;
+}
+
+function renderReputation(rep) {
+  const snapshots = (rep.snapshots || []).filter(s => s.source === 'agenteconomy');
+  const repTbody = document.getElementById('rep-tbody');
+  repTbody.innerHTML = snapshots.length ? snapshots.slice().reverse().map(s =>
+    `<tr><td class="mono">${esc(s.date)}</td><td>${esc(s.tier || '—')} <span class="faint">(${s.score != null ? s.score : '—'})</span></td><td>${fmtPct(s.uptime_pct)}</td></tr>`
+  ).join('') : '<tr><td colspan="3" class="empty">Pas encore de relevé (cron pas encore lancé).</td></tr>';
+
+  const latest = snapshots[snapshots.length - 1];
+  if (latest) {
+    document.getElementById('k-rating').textContent = latest.tier || '—';
+    document.getElementById('k-rating').className = 'n mono tier-' + (latest.tier || '');
+    document.getElementById('k-rating-l').textContent = `Note agenteconomy.report · uptime ${fmtPct(latest.uptime_pct)}`;
+  }
+
+  const byQuery = {};
+  (rep.bazaar || []).forEach(b => { (byQuery[b.query] = byQuery[b.query] || []).push(b); });
+  const bazaarTbody = document.getElementById('bazaar-tbody');
+  const queries = Object.keys(byQuery);
+  bazaarTbody.innerHTML = queries.length ? queries.map(q => {
+    const hist = byQuery[q].slice().sort((a,b) => a.date < b.date ? -1 : 1);
+    const latestEntry = hist[hist.length - 1];
+    const trail = hist.slice(-7).map(h => h.rank == null ? '—' : h.rank).join(' → ');
+    return `<tr><td>${esc(q)}</td><td class="mono">${latestEntry.rank != null ? '#' + latestEntry.rank : 'hors top 20'}</td><td>${fmtNum(latestEntry.total_results)}</td><td class="mono faint">${esc(trail)}</td></tr>`;
+  }).join('') : '<tr><td colspan="4" class="empty">Pas encore de relevé (cron pas encore lancé).</td></tr>';
+}
+
+async function load() {
+  try {
+    const r = await fetch('/admin/daily.json', {credentials: 'same-origin', cache: 'no-store'});
+    const data = await r.json();
+    DAYS = data.days || [];
+    const s = data.summary || {};
+    document.getElementById('k-revenue-today').textContent = fmtUsd(s.revenue_today_usdc);
+    document.getElementById('k-buyers-today').textContent = fmtNum(s.buyers_today);
+    document.getElementById('k-revenue-7d').textContent = fmtUsd(s.revenue_7d_usdc);
+    if (s.agenteconomy_rating) {
+      document.getElementById('k-rating').textContent = s.agenteconomy_rating.tier || '—';
+      document.getElementById('k-rating').className = 'n mono tier-' + (s.agenteconomy_rating.tier || '');
+    }
+    renderDaysTable();
+    renderAvailTable();
+    renderReputation(data.reputation || {});
+    document.getElementById('stamp').textContent = new Date().toLocaleString('fr-FR');
+  } catch (e) {
+    document.getElementById('days-tbody').innerHTML = `<tr><td colspan="11" class="empty">Erreur: ${esc(e)}</td></tr>`;
+  }
+}
+load();
+</script>
+</body>
+</html>
