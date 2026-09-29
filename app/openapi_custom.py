@@ -368,6 +368,25 @@ def build_custom_openapi(app):
                 "content": {"application/json": success_json},
             }
 
+        # /token-risk, /research and /v1/chat/completions are hand-built
+        # routes with no entry in _INPUT_SCHEMAS/_OUTPUT_SCHEMAS and no
+        # generated-routes RouteSpec - the loop above never reaches them
+        # (its own `security` default is gated behind BOTH schemas being
+        # found, since it also builds requestBody/200-response from them).
+        # agentcash discover flagged exactly these three as
+        # L2/L3_AUTH_MODE_MISSING (2026-09-29). Setting `security: []`
+        # directly here - the same value every other operation gets -
+        # doesn't require inventing a fake input/output schema pair for
+        # routes that were never built around one.
+        for _path, _method in (
+            ("/token-risk", "post"),
+            ("/research", "post"),
+            ("/v1/chat/completions", "post"),
+        ):
+            _operation = ((schema.get("paths") or {}).get(_path) or {}).get(_method)
+            if _operation is not None:
+                _operation.setdefault("security", [])
+
         _enrich_free_discover_operations(schema)
 
         # This document is a paid-service sales surface, not an application
