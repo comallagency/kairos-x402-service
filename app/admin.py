@@ -166,6 +166,9 @@ _last_chain_sync_at: float = 0.0
 _CHAIN_SYNC_MIN_INTERVAL_S = 300.0  # live page polls every 3s — don't hammer RPC
 
 
+MAX_LIVE_EVENTS = 500  # /admin/live's raw feed cap - see events_payload below
+
+
 async def collect_dashboard_data() -> dict:
     global _last_chain_sync_at
     now = time.monotonic()
@@ -202,7 +205,7 @@ async def collect_dashboard_data() -> dict:
     main = _network_block(network)
     generated_at = db.now_iso()
 
-    from app.x402_setup import build_route_configs
+    from app.x402_setup import build_route_configs, display_price
 
     route_configs = build_route_configs()
     routes_map: dict[str, dict] = {}
@@ -216,7 +219,7 @@ async def collect_dashboard_data() -> dict:
         route = routes_map.setdefault(
             slug,
             {
-                "price": payment.price,
+                "price": display_price(payment.price),
                 "methods": [],
                 "service_name": route_config.service_name,
             },
@@ -262,7 +265,8 @@ async def collect_dashboard_data() -> dict:
         "mpp_attempts_24h": db.count_mpp_attempts_since(24),
         "payment_failures_recent": db.recent_payment_failures(limit=10, hours=24),
         "routes": routes_map,
-        "events": events_payload,
+        "events": events_payload[-MAX_LIVE_EVENTS:],
+        "events_total_24h": len(events_payload),
         "stats_24h": _activity_stats(recent),
         "history_7d": db.history_7d(),
         "commercial": {

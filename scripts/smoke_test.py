@@ -15,17 +15,30 @@ introduced, several deploys earlier; every one of those deploys was
 verified only by curling whatever route had just changed, which never
 included this one. This script exists so an unrelated route breaking is
 caught the same way a changed one already was.
+
+Extended 2026-09-29 with a real headless-render check for GET /admin/live
+(see check_admin_live() below): that page went blank after a deploy while
+still returning HTTP 200 the whole time - a plain status check could never
+have caught it. Root cause was a swallowed JS exception in live.html; see
+scripts/live_render_check/check.js and live.html's render()/renderInner()
+split from the same fix.
 """
 
+import os
+import subprocess
 import sys
+from pathlib import Path
 
 import httpx
 
 BASE_URL = "https://x402.agentindex.world"
 CHECKS = ["/.well-known/x402", "/openapi.json", "/llms.txt", "/"]
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+LIVE_RENDER_CHECK_JS = _SCRIPT_DIR / "live_render_check" / "check.js"
 
-def main() -> int:
+
+def check_status_codes() -> list[str]:
     failed = []
     with httpx.Client(timeout=15.0) as client:
         for path in CHECKS:
@@ -39,6 +52,34 @@ def main() -> int:
             print(f"{status} {path}: {resp.status_code}")
             if resp.status_code != 200:
                 failed.append(path)
+    return failed
+
+
+def check_admin_live() -> list[str]:
+    """Headless render check (jsdom, see check.js's own docstring for why
+    not a full browser) - does GET /admin/live actually populate itself, or
+    does it silently stay stuck on its pre-render placeholder while still
+    returning HTTP 200?"""
+    user = os.getenv("ADMIN_BASIC_AUTH_USER")
+    password = os.getenv("ADMIN_BASIC_AUTH_PASS")
+    if not user or not password:
+        print("SKIP /admin/live render check: ADMIN_BASIC_AUTH_USER/PASS not set in this environment")
+        return []
+
+    result = subprocess.run(
+        ["node", str(LIVE_RENDER_CHECK_JS), f"{BASE_URL}/admin/live", user, password],
+        capture_output=True, text=True, timeout=30,
+    )
+    print(result.stdout.strip())
+    if result.returncode != 0:
+        print(result.stderr.strip(), file=sys.stderr)
+        return ["/admin/live (render)"]
+    return []
+
+
+def main() -> int:
+    failed = check_status_codes()
+    failed += check_admin_live()
 
     if failed:
         print(f"\n{len(failed)} check(s) failed: {failed}", file=sys.stderr)

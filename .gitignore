@@ -13,3 +13,4 @@ logs/
 *.bak-*
 .ruff_cache/
 .secrets/
+node_modules/

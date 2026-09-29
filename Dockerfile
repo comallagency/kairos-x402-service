@@ -33,6 +33,20 @@ COPY app ./app
 COPY scripts ./scripts
 COPY chain_payments.py send_daily_report.py ./
 
+# jsdom for scripts/live_render_check/check.js (headless JS-execution check
+# for GET /admin/live, run by scripts/smoke_test.py on every deploy) - not
+# a full browser on purpose: Playwright+Chromium adds ~300-400MB and a long
+# apt dependency list to every build (measured ad-hoc while fixing the
+# 2026-09-29 /admin/live regression) for a check whose only job is "did the
+# page's own JS throw," which jsdom already catches without a rendering
+# engine. Pinned to the 25.x line, not "latest": jsdom 30.1.1 (whatever
+# was current when this was first written) requires an undici newer than
+# this image's Node 20.19 bundles - `require('jsdom')` crashed outright
+# with "webidl.util.markAsUncloneable is not a function" before ever
+# reaching a page. 25.x was verified working against this exact image
+# (node:20-slim base) before pinning it here.
+RUN npm install --prefix /app/scripts/live_render_check jsdom@25
+
 # Bakes tiktoken's cl100k_base encoding into the image at build time - without
 # this, tiktoken.get_encoding() downloads it from OpenAI's CDN on first use in
 # production, a runtime network dependency this project has no other reason
