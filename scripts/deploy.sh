@@ -88,6 +88,16 @@ fi
 systemctl reload nginx
 echo "nginx now proxying to $target_service."
 
+# A graceful reload isn't instant for the very next request or two - found
+# 2026-09-29 by hand: the /admin/live headless render check failed twice in
+# a row when smoke_test.py fired immediately after reload, but passed
+# reliably every time it was run even a couple seconds later (direct-to-
+# container access was never affected, only through-nginx-right-after-
+# reload). Cheap fix, real cause: give nginx's new workers a moment to
+# settle before the very first real request they see is also the one
+# deciding whether this deploy is good.
+sleep 2
+
 echo "== running post-cutover smoke test (scripts/smoke_test.py) against $target_service, live through nginx =="
 if ! docker exec "$target_container" python3 scripts/smoke_test.py; then
     echo "DEPLOY FAILED: smoke test did not pass after cutover - rolling nginx back to $live_service (port $live_port)." >&2
