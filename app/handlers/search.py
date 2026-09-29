@@ -80,7 +80,7 @@ MAX_BATCH_QUERIES = 5
 # writeup for why that wasn't good enough either): the search phase itself
 # is bounded first, and whatever results come back by then are still
 # returned (enriched/summarized with whatever time is left) rather than
-# thrown away - 504 (unsettled) only when literally zero results exist.
+# thrown away - 422 (unsettled) only when literally zero results exist.
 # 2026-09-28: measured a consistent ~0.3-0.5s of real-world overhead beyond
 # these nominal caps (asyncio cancellation/cleanup isn't instantaneous, and
 # an in-flight httpx call doesn't unwind the moment a wait_for fires) - a
@@ -312,7 +312,11 @@ async def _handle_search(
             user_agent=user_agent, body_excerpt=body_excerpt,
             error_reason="no_results",
         )
-        return JSONResponse({"error": {"reason": "no_results"}}, status_code=504)
+        # 422, not 502/504: x402's own settlement rule skips any status >= 400
+        # regardless, and 422 (a client-facing 'nothing to give you', not an
+        # infra failure) is neither 404 nor 5xx - does not count as panne for
+        # uptime monitors that use that rule (2026-09-29).
+        return JSONResponse({"error": {"reason": "no_results"}}, status_code=422)
 
     remaining = GLOBAL_TIMEOUT_S - (time.monotonic() - t0)
     if remaining > 0.2:
