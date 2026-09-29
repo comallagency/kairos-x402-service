@@ -300,6 +300,28 @@ def build_custom_openapi(app):
         # operation there carries an explicit `security: []`, ours had none).
         schema["x-agentcash-guidance"] = {"llmsTxtUrl": f"{config.BASE_URL}/llms.txt"}
 
+        # AgentCash's discovery spec (agentcash.dev/discovery) requires
+        # x-discovery.ownershipProofs to consider a listing's origin
+        # verified: an EIP-191 personal_sign of the bare origin URL (no
+        # trailing slash, no path) by a private key controlling one of our
+        # payTo addresses - AgentCash recovers the signer and matches it
+        # against payTo. Signed once by hand (2026-09-29, A =
+        # config.X402_PAY_TO) via scripts/sign_ownership_proof.py (run
+        # locally, key never touched this codebase or any log). Emitted
+        # under both keys on purpose: the documented/canonical name is
+        # x-discovery, but at least one independent source describes
+        # AgentCash's actual reader checking x-agentcash-provenance first -
+        # a wrong key here fails silently (no error, just treated as
+        # unverified), so there's no cost to covering both instead of
+        # guessing which is authoritative today.
+        ownership_proof = {
+            "ownershipProofs": [
+                "0x9f7bebd594a66719221fdb098fcd8ddf050f75306e3690aa1a05376c1be7c6e37d0c9005024a6e767c59d05bba0db286ae3c92260b7aae3a76481e793c45f32e1c"
+            ]
+        }
+        schema["x-discovery"] = ownership_proof
+        schema["x-agentcash-provenance"] = ownership_proof
+
         generated_specs = {spec.slug: spec for spec in live_routes()}
 
         for route_key, route_config in build_route_configs().items():
