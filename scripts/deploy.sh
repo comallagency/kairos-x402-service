@@ -88,14 +88,18 @@ fi
 systemctl reload nginx
 echo "nginx now proxying to $target_service."
 
-# A graceful reload isn't instant for the very next request or two - found
-# 2026-09-29 by hand: the /admin/live headless render check failed twice in
-# a row when smoke_test.py fired immediately after reload, but passed
-# reliably every time it was run even a couple seconds later (direct-to-
-# container access was never affected, only through-nginx-right-after-
-# reload). Cheap fix, real cause: give nginx's new workers a moment to
-# settle before the very first real request they see is also the one
-# deciding whether this deploy is good.
+# GET /admin/data.json is a real DB-aggregation endpoint (not a static
+# file), and its first call against a just-started container is slow
+# enough (measured ~5s, cold caches/connections) that the /admin/live
+# headless render check's own request timed out - visible in nginx's
+# access log as the check's fetch getting a 499 (client closed the
+# connection) twice in a row when smoke_test.py fired immediately after
+# cutover, 2026-09-29. Confirmed nginx itself was never at fault (every
+# other real request in both failed windows got a normal 200/402; direct-
+# to-container access was never affected either) - this is a cold-start
+# latency on our own aggregation query, not an nginx reload artifact. The
+# sleep gives that first real hit somewhere to land before it's also the
+# one deciding whether this deploy is good.
 sleep 2
 
 echo "== running post-cutover smoke test (scripts/smoke_test.py) against $target_service, live through nginx =="
