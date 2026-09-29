@@ -53,8 +53,9 @@ a:hover{text-decoration:underline}
 .meta b{color:var(--green);font-weight:600}
 
 /* HERO — one glance */
-.hero{display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:10px;margin-bottom:12px}
-@media (max-width:800px){.hero{grid-template-columns:1fr}}
+.hero{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+@media (max-width:1000px){.hero{grid-template-columns:1fr 1fr}}
+@media (max-width:600px){.hero{grid-template-columns:1fr}}
 .hero > *{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 18px 16px}
 .hero .big{font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1.15;margin:6px 0 8px}
 .hero .lbl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
@@ -368,7 +369,12 @@ function normalise(j){
     chain: j.chain || {},
     routeStats: j.calls_by_route || {},
     paymentFailures: j.payment_failures_recent || [],
-    routes: {}, events: [], stats: j.stats_24h || null
+    routes: {}, events: [], stats: j.stats_24h || null,
+    agg24h: j.agg_24h || null,
+    eventsTotal24h: j.events_total_24h ?? null,
+    lastPaymentDetail: j.last_payment || null,
+    revenueToday: Number(j.revenue_today_usdc) || 0,
+    buyersToday: Number(j.buyers_today) || 0
   };
   const rt = j.routes || j.calls_by_route || {};
   if (Array.isArray(rt)) rt.forEach(r => out.routes[r.route||r.name] = {price:r.price,methods:r.methods||[]});
@@ -442,14 +448,27 @@ function renderInner(d, demo){
   const usdc24 = Number.isFinite(Number(st.paid_usdc)) ? Number(st.paid_usdc) : 0;
   const hasPay = paidN > 0 || d.revenue > 0;
 
-  const scanN = all.filter(e => classify(e).k==='scan').length;
-  const interestN = all.filter(e => classify(e).k==='wait').length;
-  const visitN = all.filter(e => classify(e).k==='visit').length;
-  const failedN = all.filter(e => classify(e).k==='err').length;
-  const qualifiedN = interestN + visitN + paidN + failedN;
-  const attemptedN = paidN + all.filter(e => e.status==='payment_failed').length;
+  // 2026-09-29: these used to be computed by filtering `all` (the raw
+  // event array) client-side - correct back when that array held the full
+  // 24h, wrong ever since it got capped to the last 500 (a 3.9MB payload
+  // otherwise). agg24h is computed server-side over the FULL 24h set
+  // (see app/admin.py::_compute_agg_24h) - `all` below is now only used
+  // for the event feed itself and the "Routes actives" visual tick spread,
+  // both fine to sample from the capped 500.
+  const agg = d.agg24h || {};
+  const scanN = agg.scan_n || 0;
+  const interestN = agg.interest_n || 0;
+  const visitN = agg.visit_n || 0;
+  const failedN = agg.failed_n || 0;
+  const qualifiedN = agg.qualified_n || 0;
+  const attemptedN = agg.attempted_n || 0;
   const conversion = pct(paidN, interestN + attemptedN);
-  const scanShare = pct(scanN, all.length);
+  const scanShare = pct(scanN, (d.eventsTotal24h ?? all.length));
+
+  const lp = d.lastPaymentDetail;
+  const lastPaymentLine = lp
+    ? `${short(lp.payer)} · /${esc(lp.route)} · $${money(lp.amount_usdc)} · ${ago(Date.now()-new Date(lp.ts))}`
+    : 'jamais';
 
   // hero
   document.getElementById('hero').innerHTML = `
@@ -461,6 +480,11 @@ function renderInner(d, demo){
         : `${interestN} intention${interestN===1?'':'s'} non-scanner ont vu un 402. L’offre d’entrée commence à $${money(d.commercial.minimum_price_usdc||.0001)}.`}</div>
     </div>
     <div>
+      <div class="lbl">Aujourd'hui</div>
+      <div class="num ${d.revenueToday>0?'':'zero'} mono">$${money(d.revenueToday)}</div>
+      <div class="hint" style="margin-top:8px">${d.buyersToday} acheteur${d.buyersToday===1?'':'s'} · dernier ${esc(lastPaymentLine)}</div>
+    </div>
+    <div>
       <div class="lbl">Revenu 30 jours</div>
       <div class="num ${d.revenues.d30>0?'':'zero'} mono">$${money(d.revenues.d30)}</div>
       <div class="hint" style="margin-top:8px">24 h $${money(d.revenues.d1)} · 7 j $${money(d.revenues.d7)}</div>
@@ -468,7 +492,7 @@ function renderInner(d, demo){
     <div>
       <div class="lbl">Acheteurs on-chain</div>
       <div class="num ${d.buyers>0?'':'zero'} mono">${d.buyers}</div>
-      <div class="hint" style="margin-top:8px">${d.returning} récurrent${d.returning===1?'':'s'} · dernier ${d.lastPayment?ago(Date.now()-new Date(d.lastPayment)):'jamais'}</div>
+      <div class="hint" style="margin-top:8px">${d.returning} récurrent${d.returning===1?'':'s'}</div>
     </div>`;
 
   document.getElementById('kpis').innerHTML = `
@@ -609,35 +633,26 @@ function renderInner(d, demo){
     else { SEL_EV=null; document.getElementById('detail').hidden=true; }
   } else document.getElementById('detail').hidden = true;
 
-  // agents — prefer non-scanners on top
-  const by = {};
-  all.forEach(e => {
-    const a = (by[e.ua] = by[e.ua] || {n:0, first:e.t, last:e.t, routes:new Set(), paid:0, unpaid:0, ua:e.ua, failed:0});
-    a.n++; a.last = e.t; if (+e.t < +a.first) a.first = e.t;
-    a.routes.add(e.route);
-    if (e.paid) a.paid++;
-    if (e.failed) a.failed++;
-    if (e.status==='unpaid') a.unpaid++;
-  });
-  const list = Object.values(by).sort((a,b) => {
-    const as = isScanner(a.ua)?0:1, bs = isScanner(b.ua)?0:1;
-    if (as !== bs) return bs - as;
-    return (b.paid-a.paid) || (b.n-a.n);
-  });
+  // agents — server-computed over the full 24h (agg.agents), not just the
+  // capped 500-event feed (`all`) - see app/admin.py::_compute_agg_24h.
+  // Already sorted (non-scanners first, then paid desc, then n desc) and
+  // capped to the top 40 for display; agents_total* below are the true
+  // full-24h counts computed BEFORE that cap.
+  const agentList = agg.agents || [];
   const box = document.getElementById('agents');
-  box.innerHTML = list.length ? list.slice(0,40).map(a => {
+  box.innerHTML = agentList.length ? agentList.map(a => {
     const c = classify({ua:a.ua, paid:a.paid, failed:a.failed, status:a.paid?'paid':'unpaid'});
-    const routes = [...a.routes].slice(0,3).map(r=>'/'+r).join(' ');
+    const routes = (a.routes||[]).slice(0,3).map(r=>'/'+r).join(' ');
     return `<div class="agent" data-ua="${esc(a.ua)}">
       <div class="agent-top"><span class="agent-name mono">${esc(a.ua)}</span><span class="cnt">${a.n}</span></div>
       <div class="agent-sub"><span class="badge ${c.badge}">${esc(c.label)}</span>
-        &nbsp;${a.paid?a.paid+' payé · ':''}${esc(routes)} · ${fmtT(a.last)}</div>
+        &nbsp;${a.paid?a.paid+' payé · ':''}${esc(routes)} · ${fmtT(new Date(a.last))}</div>
     </div>`;
   }).join('') : '<div class="empty">Personne.</div>';
 
-  document.getElementById('f1').textContent = list.length;
-  document.getElementById('f2').textContent = list.filter(a => !isScanner(a.ua)).length;
-  document.getElementById('f3').textContent = list.filter(a => a.paid>0).length;
+  document.getElementById('f1').textContent = agg.agents_total ?? agentList.length;
+  document.getElementById('f2').textContent = agg.agents_total_non_scanner ?? 0;
+  document.getElementById('f3').textContent = agg.agents_total_payers ?? 0;
 
   box.querySelectorAll('.agent').forEach(el => {
     el.onclick = () => select(el.dataset.ua === SEL ? null : el.dataset.ua);
@@ -658,11 +673,12 @@ function renderInner(d, demo){
         const col = c.k==='paid'?'var(--green)':c.k==='wait'?'var(--amber)':c.k==='visit'?'var(--blue)':c.k==='err'?'var(--red)':'var(--slate)';
         return `<i class="tick" data-ua="${esc(e.ua)}" style="left:${x.toFixed(2)}%;height:${h}%;background:${col}"></i>`;
       }).join('');
+      const total24h = (agg.route_totals || {})[name] ?? mine.length;
       return `<div class="lane">
         <div><div class="name mono">/${esc(name)}</div>
           <div class="price mono">${esc((d.routes[name]||{}).price||'')}</div></div>
         <div class="track">${ticks}</div>
-        <div class="n">${mine.length}</div>
+        <div class="n">${total24h}</div>
       </div>`;
     }).join('');
     lanes.querySelectorAll('.tick').forEach(t => {
@@ -671,29 +687,22 @@ function renderInner(d, demo){
     });
   }
 
-  // Commercial performance table — all services, not only noisy routes.
-  const perfRows = routeOrder(d.routes).map(name => {
-    const mine = all.filter(e => e.route === name);
-    const scans = mine.filter(e => classify(e).k === 'scan').length;
-    const qualified = mine.length - scans;
-    const waits = mine.filter(e => classify(e).k === 'wait').length;
-    const paid = mine.filter(e => e.paid).length;
-    const errors = mine.filter(e => classify(e).k === 'err').length;
-    const latencies = mine.map(e => Number(e.latency)).filter(Number.isFinite);
-    const avg = latencies.length ? Math.round(latencies.reduce((a,b)=>a+b,0)/latencies.length) : null;
-    return {name,mine:mine.length,qualified,waits,paid,errors,avg,conv:pct(paid,waits+paid)};
-  }).sort((a,b) => (b.paid-a.paid) || (b.qualified-a.qualified) || (b.mine-a.mine));
+  // Commercial performance table — server-computed over the full 24h
+  // (agg.route_perf), including real per-route p50 latency from nginx's
+  // own $request_time (requests.latency_ms is NULL for every HTTP call,
+  // only ever set for MCP tool calls - see app/admin.py::_route_p50_latency_24h).
+  const perfRows = (agg.route_perf || []).filter(r => d.routes[r.route]);
   document.getElementById('routePerf').innerHTML = perfRows.map(r => `
     <tr>
-      <td><span class="route-name mono">/${esc(r.name)}</span><br><span style="color:var(--faint)">${esc((d.routes[r.name].methods||[]).join(' + '))}</span></td>
-      <td class="mono">${esc(d.routes[r.name].price||'—')}</td>
-      <td>${r.mine}</td>
+      <td><span class="route-name mono">/${esc(r.route)}</span><br><span style="color:var(--faint)">${esc((d.routes[r.route].methods||[]).join(' + '))}</span></td>
+      <td class="mono">${esc(d.routes[r.route].price||'—')}</td>
+      <td>${r.traffic}</td>
       <td class="${r.qualified?'hot':''}">${r.qualified}</td>
       <td class="${r.waits?'hot':''}">${r.waits}</td>
       <td class="${r.paid?'won':''}">${r.paid}</td>
       <td class="${r.errors?'bad':''}">${r.errors}</td>
-      <td class="${r.paid?'won':''}">${r.conv}</td>
-      <td class="mono">${r.avg==null?'—':r.avg+' ms'}</td>
+      <td class="${r.paid?'won':''}">${r.conv_pct==null?'—':r.conv_pct+'%'}</td>
+      <td class="mono">${r.p50_ms==null?'—':r.p50_ms+' ms'}</td>
     </tr>`).join('');
   const routeErrors = perfRows.reduce((n,r)=>n+r.errors,0);
   document.getElementById('healthline').innerHTML = `
