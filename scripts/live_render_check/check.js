@@ -83,7 +83,11 @@ async function main() {
 
   // live.html's own poll interval is 3s; give the first load() a bit of
   // margin to actually complete (real network round-trip to /admin/data.json).
-  await new Promise((resolve) => setTimeout(resolve, 5000));
+  // Bumped 5s->9s 2026-09-29 alongside GET /admin/data.json's new 24h
+  // server-side aggregation (app/admin.py::_compute_agg_24h) - a real,
+  // heavier cost on every request, not a fluke to paper over with a
+  // shorter-lived fix.
+  await new Promise((resolve) => setTimeout(resolve, 9000));
 
   const doc = dom.window.document;
   // #ticker starts with the static "En attente d'événements..." placeholder

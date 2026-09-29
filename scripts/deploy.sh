@@ -99,8 +99,12 @@ echo "nginx now proxying to $target_service."
 # to-container access was never affected either) - this is a cold-start
 # latency on our own aggregation query, not an nginx reload artifact. The
 # sleep gives that first real hit somewhere to land before it's also the
-# one deciding whether this deploy is good.
-sleep 2
+# one deciding whether this deploy is good. Bumped 2s->3s the same day
+# GET /admin/data.json grew a second expensive computation (the 24h
+# funnel/agents/per-route aggregation moved server-side, see
+# app/admin.py::_compute_agg_24h) - same root cause, same fix, just more
+# margin needed since there's more real work on that first hit now.
+sleep 3
 
 echo "== running post-cutover smoke test (scripts/smoke_test.py) against $target_service, live through nginx =="
 if ! docker exec "$target_container" python3 scripts/smoke_test.py; then

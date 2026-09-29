@@ -15,6 +15,15 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      # Read-only, for GET /admin/live's real per-route p50 latency (2026-09-29) -
+      # nginx's own $request_time, the same field scripts/ingest_daily_nginx_stats.py
+      # already uses for the daily dashboard. group_add below (GID 4 = adm on
+      # the host) is needed because these files are www-data:adm mode 640 -
+      # appuser has no read access otherwise, and adding it wasn't going to
+      # happen by loosening host permissions.
+      - /var/log/nginx:/var/log/nginx-host:ro
+    group_add:
+      - "4"  # adm, see the nginx log mount above
     ports:
       - "127.0.0.1:18402:8000"
     healthcheck:
@@ -42,6 +51,15 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      # Read-only, for GET /admin/live's real per-route p50 latency (2026-09-29) -
+      # nginx's own $request_time, the same field scripts/ingest_daily_nginx_stats.py
+      # already uses for the daily dashboard. group_add below (GID 4 = adm on
+      # the host) is needed because these files are www-data:adm mode 640 -
+      # appuser has no read access otherwise, and adding it wasn't going to
+      # happen by loosening host permissions.
+      - /var/log/nginx:/var/log/nginx-host:ro
+    group_add:
+      - "4"  # adm, see the nginx log mount above
     ports:
       - "127.0.0.1:18403:8000"
     healthcheck:

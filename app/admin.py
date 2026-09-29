@@ -1,10 +1,11 @@
 import asyncio
 import json
 import logging
+import re
 import secrets
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -169,6 +170,204 @@ _CHAIN_SYNC_MIN_INTERVAL_S = 300.0  # live page polls every 3s — don't hammer 
 MAX_LIVE_EVENTS = 500  # /admin/live's raw feed cap - see events_payload below
 
 
+# Same classification as app/templates/live.html::classify()/SCAN_RE/GENERIC -
+# kept in sync by hand, no shared module between the JS dashboard and this
+# backend (same convention as db.py's _SCANNER_UA_PATTERNS). Needed because
+# GET /admin/live's funnel/agents/per-route counts moved server-side
+# 2026-09-29 once the raw event feed got capped to the last 500 (a 3.9MB,
+# ever-growing payload otherwise) - those counts must still reflect the
+# FULL 24h, not just whatever's in the capped feed.
+_LIVE_SCAN_RE = [
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"x402-list", r"forgemesh", r"x402scan|poncho", r"402index",
+        r"autonomous-directory", r"directory.?probe", r"ampersend",
+        r"nohumans", r"uptime|pingdom|healthcheck|monitor",
+        r"\bprobe\b", r"\bscanner\b", r"\bcrawler\b", r"\bbot\b",
+        r"AgentIndex-probe", r"circle.*scan", r"coinbase.*crawl",
+        r"^node$", r"^conform/", r"^ops-check/", r"^post-cut/",
+        r"^live-dashboard-smoke/", r"^discover-post-probe/",
+        r"^hermes-contact-discovery/", r"^x402watch/",
+    )
+]
+_LIVE_GENERIC_RE = re.compile(
+    r"^(go-http-client|python-httpx|python-requests|curl/|node-fetch|axios|okhttp|got/|undici)",
+    re.IGNORECASE,
+)
+
+
+def _live_is_scanner(ua: str) -> bool:
+    ua = ua or ""
+    return any(p.search(ua) for p in _LIVE_SCAN_RE)
+
+
+def _live_classify(status: str, ua: str, paid: bool, failed: bool) -> str:
+    ua = ua or ""
+    if failed or status == "payment_failed":
+        return "err"
+    if _live_is_scanner(ua):
+        return "scan"
+    if status in ("error", "capacity_reached"):
+        return "err"
+    if paid or status == "paid":
+        return "paid"
+    if status == "unpaid":
+        return "wait"
+    if _LIVE_GENERIC_RE.search(ua):
+        return "visit"
+    return "visit"
+
+
+# Mounted read-only in docker-compose.yml (2026-09-29) specifically for this -
+# `requests.latency_ms` is NULL for every HTTP call (only ever set for MCP
+# tool calls, see app/mcp_server.py), and backfilling it means touching
+# every paid route's handler, not happening during a route freeze for an
+# admin-only page. nginx's own $request_time is the real number, same field
+# scripts/ingest_daily_nginx_stats.py already uses for the daily dashboard -
+# this just reads it for a rolling 24h window instead of a calendar day.
+_NGINX_LOG_PATHS = [
+    Path("/var/log/nginx-host/x402.kairos.log"),
+    Path("/var/log/nginx-host/x402.kairos.log.1"),
+]
+
+
+_LATENCY_CACHE: dict = {}
+_LATENCY_CACHE_TTL_S = 60.0  # /admin/live polls every 3s - measured this
+# parse at ~2.3s against ~71k combined log lines (today's + yesterday's
+# rotated file), and it only gets bigger until the next midnight rotation -
+# recomputing it on every single poll is what made the post-cutover smoke
+# test start failing (2026-09-29), not a cold-start fluke this time.
+
+
+def _route_p50_latency_24h() -> dict[str, float]:
+    now = time.monotonic()
+    cached_at = _LATENCY_CACHE.get("at")
+    if cached_at is not None and now - cached_at < _LATENCY_CACHE_TTL_S:
+        return _LATENCY_CACHE["value"]
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    by_route: dict[str, list[float]] = {}
+    for log_path in _NGINX_LOG_PATHS:
+        if not log_path.exists():
+            continue
+        try:
+            with open(log_path, "r", errors="replace") as f:
+                for line in f:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) < 9:
+                        continue
+                    ts, host, _ip, _method, uri, _status, _bytes, req_time, _ua = parts[:9]
+                    if host != "x402.agentindex.world":
+                        continue
+                    try:
+                        ts_dt = datetime.fromisoformat(ts)
+                    except ValueError:
+                        continue
+                    if ts_dt < cutoff:
+                        continue
+                    route = uri.split("?", 1)[0].lstrip("/")
+                    try:
+                        by_route.setdefault(route, []).append(float(req_time))
+                    except ValueError:
+                        pass
+        except OSError:
+            continue
+
+    result: dict[str, float] = {}
+    for route, values in by_route.items():
+        values.sort()
+        idx = min(len(values) - 1, int(round(0.50 * (len(values) - 1))))
+        result[route] = round(values[idx] * 1000, 1)
+    _LATENCY_CACHE["value"] = result
+    _LATENCY_CACHE["at"] = now
+    return result
+
+
+def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> dict:
+    scan_n = interest_n = visit_n = paid_n = failed_n = 0
+    by_ua: dict[str, dict] = {}
+    by_route: dict[str, dict] = {}
+
+    for row in recent:
+        status = row.get("status") or ""
+        ua = (row.get("user_agent") or "").strip()
+        paid = status == "paid"
+        failed = status == "payment_failed"
+        k = _live_classify(status, ua, paid, failed)
+        if k == "scan":
+            scan_n += 1
+        elif k == "wait":
+            interest_n += 1
+        elif k == "visit":
+            visit_n += 1
+        elif k == "paid":
+            paid_n += 1
+        elif k == "err":
+            failed_n += 1
+
+        ts = row.get("ts") or ""
+        agent_key = ua or "\u2014"
+        a = by_ua.setdefault(
+            agent_key,
+            {"ua": agent_key, "n": 0, "first": ts, "last": ts, "routes": {}, "paid": 0, "failed": 0, "unpaid": 0},
+        )
+        a["n"] += 1
+        if ts > a["last"]:
+            a["last"] = ts
+        if ts < a["first"]:
+            a["first"] = ts
+        route = (row.get("route") or "").lstrip("/")
+        a["routes"][route] = a["routes"].get(route, 0) + 1
+        if paid:
+            a["paid"] += 1
+        if failed:
+            a["failed"] += 1
+        if status == "unpaid":
+            a["unpaid"] += 1
+
+        r = by_route.setdefault(
+            route, {"route": route, "traffic": 0, "qualified": 0, "waits": 0, "paid": 0, "errors": 0}
+        )
+        r["traffic"] += 1
+        if k != "scan":
+            r["qualified"] += 1
+        if k == "wait":
+            r["waits"] += 1
+        if k == "paid":
+            r["paid"] += 1
+        if k == "err":
+            r["errors"] += 1
+
+    qualified_n = interest_n + visit_n + paid_n + failed_n
+    attempted_n = paid_n + sum(1 for row in recent if row.get("status") == "payment_failed")
+
+    agents_full = list(by_ua.values())
+    for a in agents_full:
+        a["is_scanner"] = _live_is_scanner(a["ua"])
+        top_routes = sorted(a["routes"].items(), key=lambda kv: -kv[1])[:3]
+        a["routes"] = [route for route, _ in top_routes]
+    agents_full.sort(key=lambda a: (a["is_scanner"], -a["paid"], -a["n"]))
+
+    route_perf = []
+    for route, r in by_route.items():
+        denom = r["waits"] + r["paid"]
+        conv_pct = round(100 * r["paid"] / denom, 1) if denom else None
+        route_perf.append({**r, "conv_pct": conv_pct, "p50_ms": latency_by_route.get(route)})
+    route_perf.sort(key=lambda r: (-r["paid"], -r["qualified"], -r["traffic"]))
+
+    return {
+        "scan_n": scan_n, "interest_n": interest_n, "visit_n": visit_n,
+        "paid_n": paid_n, "failed_n": failed_n,
+        "qualified_n": qualified_n, "attempted_n": attempted_n,
+        "agents": agents_full[:40],
+        "agents_total": len(agents_full),
+        "agents_total_non_scanner": sum(1 for a in agents_full if not a["is_scanner"]),
+        "agents_total_payers": sum(1 for a in agents_full if a["paid"] > 0),
+        "route_perf": route_perf,
+        "route_totals": {route: r["traffic"] for route, r in by_route.items()},
+    }
+
+
 async def collect_dashboard_data() -> dict:
     global _last_chain_sync_at
     now = time.monotonic()
@@ -231,6 +430,9 @@ async def collect_dashboard_data() -> dict:
             pass
 
     recent = db.recent_events(24)
+    agg_24h = _compute_agg_24h(recent, _route_p50_latency_24h())
+    last_payment = db.last_real_payment()
+    today_summary = db.daily_top_summary()
     events_payload = [
         {
             "ts": row["ts"],
@@ -268,6 +470,10 @@ async def collect_dashboard_data() -> dict:
         "events": events_payload[-MAX_LIVE_EVENTS:],
         "events_total_24h": len(events_payload),
         "stats_24h": _activity_stats(recent),
+        "agg_24h": agg_24h,
+        "last_payment": last_payment,
+        "revenue_today_usdc": today_summary["revenue_today_usdc"],
+        "buyers_today": today_summary["buyers_today"],
         "history_7d": db.history_7d(),
         "commercial": {
             "unique_services": len(routes_map),

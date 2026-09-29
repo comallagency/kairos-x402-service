@@ -1821,3 +1821,27 @@ def daily_top_summary() -> dict:
         "revenue_7d_usdc": round(revenue_7d, 6),
         "agenteconomy_rating": rating,
     }
+
+
+def last_real_payment() -> dict | None:
+    """Most recent real payment (payer present, not in MECHANICAL_WALLETS -
+    same rule as everywhere else) for GET /admin/live's 'dernier paiement'
+    card. Reads `requests` directly rather than chain_payments +
+    route_chain_stats()'s nearest-match logic: this table's own row already
+    carries route+payer+amount together for a 'paid' status, no on-chain
+    attribution needed for a single most-recent lookup."""
+    mechanical = _mechanical_wallets()
+    with cursor() as cur:
+        cur.execute(
+            "SELECT ts, route, payer, amount_usdc FROM requests "
+            "WHERE status='paid' AND payer IS NOT NULL ORDER BY ts DESC LIMIT 20"
+        )
+        rows = cur.fetchall()
+    for row in rows:
+        payer = (row["payer"] or "").strip().lower()
+        if payer and payer not in mechanical:
+            return {
+                "ts": row["ts"], "route": row["route"],
+                "payer": payer, "amount_usdc": row["amount_usdc"],
+            }
+    return None
