@@ -187,6 +187,7 @@ a:hover{text-decoration:underline}
 .empty{padding:28px 14px;color:var(--faint);font-size:13.5px;text-align:center}
 .banner{background:var(--amber-dim);border:1px solid rgba(255,176,32,.35);
   color:var(--text);padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:12px}
+.banner.err{background:var(--red-dim);border-color:rgba(255,92,122,.35)}
 .tip{position:fixed;pointer-events:none;background:var(--card);border:1px solid var(--line);
   border-radius:8px;padding:8px 11px;font-size:12px;z-index:9;opacity:0;max-width:320px;
   box-shadow:0 12px 32px rgba(0,0,0,.5)}
@@ -416,6 +417,15 @@ let DATA=null, SEL=null, ROUTE=null, KIND='interesting', SEL_EV=null;
 let SEEN=new Set(), LAST_FETCH=0, OK=true;
 
 function render(d, demo){
+  try {
+    renderInner(d, demo);
+  } catch (e) {
+    console.error('live.html: render() threw - showing an error banner instead of freezing silently', e, d);
+    const b = document.getElementById('banner');
+    if (b) b.innerHTML = '<div class="banner err">Erreur d\'affichage (voir la console du navigateur) - les derniers chiffres valides restent affichés.</div>';
+  }
+}
+function renderInner(d, demo){
   document.getElementById('net').textContent = d.network;
   LAST_FETCH = Date.now();
   tickClock();
@@ -745,6 +755,7 @@ async function load(){
     DATA = next; OK = true;
     render(DATA, false);
   } catch (_) {
+    console.error('live.html: load() failed (network or JSON parse)', _);
     OK = false; tickClock();
     if (!DATA) {
       DATA = normalise({
