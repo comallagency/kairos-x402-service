@@ -497,6 +497,16 @@ def _agent_card() -> dict:
             "stateTransitionHistory": False,
         },
         "capabilitiesUrl": f"{base}/capabilities",
+        # Third-party trust rating (agenteconomy.report scores organic paying
+        # agents, real settlement and network centrality) - linked here so
+        # any agent/crawler reading this card can find and verify the score
+        # itself rather than take our word for it.
+        "trustBadges": {
+            "provider": "agenteconomy.report",
+            "profile": "https://agenteconomy.report/s/x402.agentindex.world",
+            "rating_svg": "https://agenteconomy.report/s/x402.agentindex.world.svg",
+            "verified_svg": "https://agenteconomy.report/s/x402.agentindex.world.verified.svg",
+        },
         "skills": skills,
     }
 
