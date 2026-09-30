@@ -71,6 +71,40 @@ services:
       retries: 3
       start_period: 20s
 
+  # Read-only analytics dashboard (2026-09-30) - a fully separate
+  # container, no modification to x402-app itself. requests.db is mounted
+  # :ro (whole ./data dir, not just the file, so WAL's companion -wal/-shm
+  # files stay visible for a correct read - db.py already runs in WAL
+  # mode, which is what lets this read concurrently with x402-app's own
+  # writes without ever blocking either side - see grafana/README or the
+  # 2026-09-30 batch commit for the real concurrent-load verification).
+  # frser-sqlite-datasource is a community (unsigned) plugin, hence the
+  # explicit allow-unsigned env var below - without it Grafana refuses to
+  # load it at all.
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: x402-grafana
+    restart: unless-stopped
+    env_file:
+      - .env.grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: https://x402.agentindex.world/admin/analytics/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_INSTALL_PLUGINS: frser-sqlite-datasource
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: frser-sqlite-datasource
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 5s
+    volumes:
+      - ./data:/var/lib/grafana-data:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-storage:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+
 networks:
   x402_net:
     external: true
+
+volumes:
+  grafana-storage:

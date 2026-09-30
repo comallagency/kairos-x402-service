@@ -1,0 +1,497 @@
+{
+  "id": null,
+  "uid": "x402-overview",
+  "title": "AgentIndex x402 - Vue d'ensemble",
+  "tags": [
+    "x402",
+    "agentindex"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "route",
+        "type": "query",
+        "datasource": {
+          "type": "frser-sqlite-datasource",
+          "uid": "requests-db"
+        },
+        "query": "SELECT DISTINCT route FROM requests ORDER BY route",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": "All",
+        "multi": false,
+        "current": {
+          "text": "All",
+          "value": "All"
+        },
+        "options": [],
+        "definition": "SELECT DISTINCT route FROM requests ORDER BY route",
+        "regex": ""
+      },
+      {
+        "name": "visitor_type",
+        "type": "custom",
+        "query": "All,buyer,prober,indexer,unknown",
+        "current": {
+          "text": "All",
+          "value": "All"
+        },
+        "options": [
+          {
+            "text": "All",
+            "value": "All",
+            "selected": true
+          },
+          {
+            "text": "buyer",
+            "value": "buyer",
+            "selected": false
+          },
+          {
+            "text": "prober",
+            "value": "prober",
+            "selected": false
+          },
+          {
+            "text": "indexer",
+            "value": "indexer",
+            "selected": false
+          },
+          {
+            "text": "unknown",
+            "value": "unknown",
+            "selected": false
+          }
+        ],
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Requetes par heure",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT strftime('%Y-%m-%dT%H:00:00Z', ts) AS time, COUNT(*) AS requests FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route') GROUP BY time ORDER BY time",
+          "queryType": "time_series",
+          "rawQueryText": "SELECT strftime('%Y-%m-%dT%H:00:00Z', ts) AS time, COUNT(*) AS requests FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route') GROUP BY time ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 2,
+      "title": "Visiteurs distincts par jour (hors sondes, indexeurs, nous)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT date AS time, COUNT(DISTINCT ip) AS distinct_visitors FROM daily_visitors WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND class NOT IN ('prober', 'indexer') AND ip != '169.58.121.36' GROUP BY date ORDER BY date",
+          "queryType": "time_series",
+          "rawQueryText": "SELECT date AS time, COUNT(DISTINCT ip) AS distinct_visitors FROM daily_visitors WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND class NOT IN ('prober', 'indexer') AND ip != '169.58.121.36' GROUP BY date ORDER BY date",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 3,
+      "title": "Entonnoir: demandes de prix (402)",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 4,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT SUM(CASE WHEN status = 'unpaid' THEN 1 ELSE 0 END) AS value FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route')",
+          "queryType": "table",
+          "rawQueryText": "SELECT SUM(CASE WHEN status = 'unpaid' THEN 1 ELSE 0 END) AS value FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route')",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 4,
+      "title": "Entonnoir: tentatives de paiement",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 8,
+        "w": 4,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT SUM(CASE WHEN status IN ('paid','payment_failed') THEN 1 ELSE 0 END) AS value FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route')",
+          "queryType": "table",
+          "rawQueryText": "SELECT SUM(CASE WHEN status IN ('paid','payment_failed') THEN 1 ELSE 0 END) AS value FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route')",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "title": "Entonnoir: paiements reels",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 8,
+        "w": 4,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT SUM(CASE WHEN status = 'paid' AND payer IS NOT NULL AND lower(payer) NOT IN ('0xb3f32bdfe8d07825bc0d7387295ab1d7559ba69d','0x3cedc3cba49c3809ee46b9bf60da75d6607b45ec') AND (user_agent IS NULL OR lower(user_agent) NOT LIKE 'python-httpx%') THEN 1 ELSE 0 END) AS value FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route')",
+          "queryType": "table",
+          "rawQueryText": "SELECT SUM(CASE WHEN status = 'paid' AND payer IS NOT NULL AND lower(payer) NOT IN ('0xb3f32bdfe8d07825bc0d7387295ab1d7559ba69d','0x3cedc3cba49c3809ee46b9bf60da75d6607b45ec') AND (user_agent IS NULL OR lower(user_agent) NOT LIKE 'python-httpx%') THEN 1 ELSE 0 END) AS value FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route')",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 6,
+      "title": "Revenu reel par jour (USDC, on-chain)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 16,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT date(block_time) AS time, SUM(amount_usdc) AS revenue_day FROM chain_payments WHERE is_mechanical = 0 AND block_time >= '${__from:date:iso}' AND block_time <= '${__to:date:iso}' GROUP BY time ORDER BY time",
+          "queryType": "time_series",
+          "rawQueryText": "SELECT date(block_time) AS time, SUM(amount_usdc) AS revenue_day FROM chain_payments WHERE is_mechanical = 0 AND block_time >= '${__from:date:iso}' AND block_time <= '${__to:date:iso}' GROUP BY time ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 7,
+      "title": "Nouveaux acheteurs par jour",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT date AS time, COUNT(*) AS new_buyers FROM daily_visitors WHERE class = 'buyer' AND is_new = 1 AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') GROUP BY date ORDER BY date",
+          "queryType": "time_series",
+          "rawQueryText": "SELECT date AS time, COUNT(*) AS new_buyers FROM daily_visitors WHERE class = 'buyer' AND is_new = 1 AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') GROUP BY date ORDER BY date",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 8,
+      "title": "Top routes (vues, paiements reels, conversion)",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT route, COUNT(*) AS vues, SUM(CASE WHEN status = 'paid' AND payer IS NOT NULL AND lower(payer) NOT IN ('0xb3f32bdfe8d07825bc0d7387295ab1d7559ba69d','0x3cedc3cba49c3809ee46b9bf60da75d6607b45ec') AND (user_agent IS NULL OR lower(user_agent) NOT LIKE 'python-httpx%') THEN 1 ELSE 0 END) AS paiements_reels, ROUND(100.0 * SUM(CASE WHEN status = 'paid' AND payer IS NOT NULL AND lower(payer) NOT IN ('0xb3f32bdfe8d07825bc0d7387295ab1d7559ba69d','0x3cedc3cba49c3809ee46b9bf60da75d6607b45ec') AND (user_agent IS NULL OR lower(user_agent) NOT LIKE 'python-httpx%') THEN 1 ELSE 0 END) / COUNT(*), 2) AS conversion_pct FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' GROUP BY route ORDER BY paiements_reels DESC, vues DESC",
+          "queryType": "table",
+          "rawQueryText": "SELECT route, COUNT(*) AS vues, SUM(CASE WHEN status = 'paid' AND payer IS NOT NULL AND lower(payer) NOT IN ('0xb3f32bdfe8d07825bc0d7387295ab1d7559ba69d','0x3cedc3cba49c3809ee46b9bf60da75d6607b45ec') AND (user_agent IS NULL OR lower(user_agent) NOT LIKE 'python-httpx%') THEN 1 ELSE 0 END) AS paiements_reels, ROUND(100.0 * SUM(CASE WHEN status = 'paid' AND payer IS NOT NULL AND lower(payer) NOT IN ('0xb3f32bdfe8d07825bc0d7387295ab1d7559ba69d','0x3cedc3cba49c3809ee46b9bf60da75d6607b45ec') AND (user_agent IS NULL OR lower(user_agent) NOT LIKE 'python-httpx%') THEN 1 ELSE 0 END) / COUNT(*), 2) AS conversion_pct FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' GROUP BY route ORDER BY paiements_reels DESC, vues DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 9,
+      "title": "Top visiteurs (acheteurs, notateurs, indexeurs, inconnus)",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT ip, user_agent, class, prober_name, SUM(request_count) AS requetes FROM daily_visitors WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ip != '169.58.121.36' AND ('$visitor_type' = 'All' OR class = '$visitor_type') GROUP BY ip, user_agent, class, prober_name ORDER BY requetes DESC LIMIT 50",
+          "queryType": "table",
+          "rawQueryText": "SELECT ip, user_agent, class, prober_name, SUM(request_count) AS requetes FROM daily_visitors WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ip != '169.58.121.36' AND ('$visitor_type' = 'All' OR class = '$visitor_type') GROUP BY ip, user_agent, class, prober_name ORDER BY requetes DESC LIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 10,
+      "title": "Erreurs 4xx/5xx par route",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT route, SUM(c_4xx_other) AS c_4xx, SUM(c_5xx) AS c_5xx, SUM(c_404) AS c_404 FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ('$route' = 'All' OR route = '$route') GROUP BY route ORDER BY c_5xx DESC, c_4xx DESC",
+          "queryType": "table",
+          "rawQueryText": "SELECT route, SUM(c_4xx_other) AS c_4xx, SUM(c_5xx) AS c_5xx, SUM(c_404) AS c_404 FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ('$route' = 'All' OR route = '$route') GROUP BY route ORDER BY c_5xx DESC, c_4xx DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 11,
+      "title": "Latence p50/p95 par route (ms)",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT route, ROUND(AVG(p50_ms), 1) AS p50_ms, ROUND(AVG(p95_ms), 1) AS p95_ms FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ('$route' = 'All' OR route = '$route') GROUP BY route ORDER BY p95_ms DESC",
+          "queryType": "table",
+          "rawQueryText": "SELECT route, ROUND(AVG(p50_ms), 1) AS p50_ms, ROUND(AVG(p95_ms), 1) AS p95_ms FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ('$route' = 'All' OR route = '$route') GROUP BY route ORDER BY p95_ms DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 12,
+      "title": "Note AgentEconomyReport dans le temps",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT date AS time, score, uptime_pct * 100 AS uptime_pct FROM reputation_snapshots WHERE source = 'agenteconomy' AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date",
+          "queryType": "time_series",
+          "rawQueryText": "SELECT date AS time, score, uptime_pct * 100 AS uptime_pct FROM reputation_snapshots WHERE source = 'agenteconomy' AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 13,
+      "title": "Positions Bazaar dans le temps (par requete)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT date AS time, query, rank FROM bazaar_rank_history WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date, query",
+          "queryType": "time_series",
+          "rawQueryText": "SELECT date AS time, query, rank FROM bazaar_rank_history WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date, query",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    }
+  ]
+}
