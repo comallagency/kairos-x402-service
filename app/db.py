@@ -1477,6 +1477,18 @@ def _mechanical_wallets() -> set[str]:
     return {w.strip().lower() for w in raw.split(",") if w.strip()}
 
 
+def mechanical_wallets() -> set[str]:
+    """Public wrapper for app/admin.py's GET /admin/live aggregation
+    (2026-09-30) - _compute_agg_24h()/_live_classify() were the one place
+    on this whole dashboard that never applied this exclusion (found via a
+    real query: 36 of 45 "paid" rows in the last 24h, 111 of 127 in the
+    last 7d, were mechanical-wallet or our own bootstrap script traffic,
+    not real buyers - every OTHER admin page/card already excludes this,
+    see history_7d(), daily_overview(), daily_top_summary(),
+    last_real_payment(), chain_revenue_since())."""
+    return _mechanical_wallets()
+
+
 def _is_scanner_ua(user_agent: str | None) -> bool:
     ua = user_agent or ""
     return any(pattern.search(ua) for pattern in _SCANNER_UA_PATTERNS)
