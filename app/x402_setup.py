@@ -667,6 +667,43 @@ ROUTE_DESCRIPTIONS = {
         "is slow or unavailable - under 4.5s guaranteed. Try GET "
         "/pii-check/sample."
     ),
+    "llm-claude-sonnet": (
+        "Claude Sonnet API - pay per call, no API key. OpenAI-format chat "
+        "completions on anthropic/claude-sonnet-5.5, pinned to Anthropic's "
+        "own OpenRouter endpoint for reliability. You sign a fixed price "
+        "computed from your max_tokens; unused tokens are not refunded. "
+        "Try GET /llm/claude-sonnet/sample."
+    ),
+    "llm-gpt-mini": (
+        "GPT Mini API - pay per call, no API key. OpenAI-format chat "
+        "completions on openai/gpt-5.4-mini, pinned to OpenAI's own "
+        "OpenRouter endpoint for reliability. You sign a fixed price "
+        "computed from your max_tokens; unused tokens are not refunded. "
+        "Try GET /llm/gpt-mini/sample."
+    ),
+    "llm-gemini-flash": (
+        "Gemini Flash API - pay per call, no API key. OpenAI-format chat "
+        "completions on google/gemini-3.8-flash, pinned to Google AI "
+        "Studio for reliability. This model spends hidden reasoning "
+        "tokens even on simple prompts - pass a realistic max_tokens "
+        "(50+) or you may get an empty response. You sign a fixed price "
+        "computed from your max_tokens; unused tokens are not refunded. "
+        "Try GET /llm/gemini-flash/sample."
+    ),
+    "llm-llama": (
+        "Llama API - pay per call, no API key. OpenAI-format chat "
+        "completions on meta-llama/llama-4-maverick, pinned to DeepInfra "
+        "for reliability. You sign a fixed price computed from your "
+        "max_tokens; unused tokens are not refunded. Try GET "
+        "/llm/llama/sample."
+    ),
+    "llm-deepseek": (
+        "DeepSeek API - pay per call, no API key. OpenAI-format chat "
+        "completions on deepseek/deepseek-v4-pro, pinned to Reka for "
+        "reliability (the fastest of 3 measured providers). You sign a "
+        "fixed price computed from your max_tokens; unused tokens are not "
+        "refunded. Try GET /llm/deepseek/sample."
+    ),
 }
 
 # Non-vital startup check: a description that grew past the Bazaar limit is
@@ -1605,6 +1642,11 @@ ROUTE_SUMMARIES = {
     "toxicity": "Detect toxic text (hate speech, harassment, threats) with a confidence score - Jev-powered.",
     "language": "Detect which of 20 common languages a text is written in - Jev-powered.",
     "pii-check": "Detect personally identifiable information in text - Jev-powered.",
+    "llm-claude-sonnet": "Claude Sonnet, pay per call, no API key - pinned to Anthropic's own endpoint.",
+    "llm-gpt-mini": "GPT Mini, pay per call, no API key - pinned to OpenAI's own endpoint.",
+    "llm-gemini-flash": "Gemini Flash, pay per call, no API key - pinned to Google AI Studio.",
+    "llm-llama": "Llama 4 Maverick, pay per call, no API key - pinned to DeepInfra.",
+    "llm-deepseek": "DeepSeek V4 Pro, pay per call, no API key - pinned to Reka.",
 }
 
 ROUTE_USE_CASES = {
@@ -2042,6 +2084,27 @@ CLASSIFY_INPUT_SCHEMA = {
 }
 CLASSIFY_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
 CLASSIFY_SAMPLE_OUTPUT = {"label": "billing", "probability": 0.81, "alternate_label": "technical", "alternate_probability": 0.14, "engine": "jev"}
+
+
+# Pack 2 (2026-09-30): shared input schema for the 5 pinned per-model LLM
+# routes - same shape as LLM_GATEWAY_INPUT_SCHEMA minus "model" (fixed per
+# route, not caller-supplied). Output reuses LLM_GATEWAY_OUTPUT_SCHEMA
+# as-is - identical response shape.
+LLM_PER_MODEL_INPUT_SCHEMA = {
+    "properties": {
+        "messages": {
+            "type": "array",
+            "description": "OpenAI-format chat messages: [{role, content}, ...].",
+            "items": {"type": "object"},
+            "minItems": 1,
+        },
+        "max_tokens": {
+            "type": "integer",
+            "description": "Max completion tokens, capped at 4096 - also bounds the price ceiling.",
+        },
+    },
+    "required": ["messages"],
+}
 
 
 RESEARCH_SAMPLE_INPUT = {"query": "What are the main features of the Rust programming language?"}
@@ -3001,6 +3064,94 @@ def _core_route_configs() -> dict[str, RouteConfig]:
         _routes.pop("POST /language", None)
     if not PII_CHECK_ENABLED:
         _routes.pop("POST /pii-check", None)
+
+    # Pack 2 (2026-09-30): 5 pinned per-model LLM routes, same engine as
+    # POST /v1/chat/completions, each with its own fixed model+provider pin
+    # and its own real captured /sample (single source of truth - the
+    # sample IS what GET /*/sample serves, not a separate hand-maintained
+    # copy - see the /token-risk and /weather duplicate-sample bug found
+    # and fixed in the 2026-09-30 conformity batch).
+    from app.handlers.llm_claude_sonnet import price_fn as _claude_sonnet_price_fn, SAMPLE_REQUEST as _CLAUDE_SONNET_SAMPLE_REQUEST, SAMPLE_RESPONSE as _CLAUDE_SONNET_SAMPLE_RESPONSE
+    from app.handlers.llm_gpt_mini import price_fn as _gpt_mini_price_fn, SAMPLE_REQUEST as _GPT_MINI_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GPT_MINI_SAMPLE_RESPONSE
+    from app.handlers.llm_gemini_flash import price_fn as _gemini_flash_price_fn, SAMPLE_REQUEST as _GEMINI_FLASH_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GEMINI_FLASH_SAMPLE_RESPONSE
+    from app.handlers.llm_llama import price_fn as _llama_price_fn, SAMPLE_REQUEST as _LLAMA_SAMPLE_REQUEST, SAMPLE_RESPONSE as _LLAMA_SAMPLE_RESPONSE
+    from app.handlers.llm_deepseek import price_fn as _deepseek_price_fn, SAMPLE_REQUEST as _DEEPSEEK_SAMPLE_REQUEST, SAMPLE_RESPONSE as _DEEPSEEK_SAMPLE_RESPONSE
+
+    _routes["POST /llm/claude-sonnet"] = RouteConfig(
+        accepts=_payment_option(_claude_sonnet_price_fn),
+        resource=f"{config.BASE_URL}/llm/claude-sonnet",
+        description=ROUTE_DESCRIPTIONS["llm-claude-sonnet"],
+        mime_type="application/json",
+        service_name="claude-sonnet-api",
+        icon_url=ICON_URL,
+        tags=["Claude Sonnet API", "claude api", "anthropic api", "pay per call llm"],
+        extensions=declare_discovery_extension(
+            input=_CLAUDE_SONNET_SAMPLE_REQUEST,
+            input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+            body_type="json",
+            output=OutputConfig(example=_CLAUDE_SONNET_SAMPLE_RESPONSE, schema=LLM_GATEWAY_OUTPUT_SCHEMA),
+        ),
+    )
+    _routes["POST /llm/gpt-mini"] = RouteConfig(
+        accepts=_payment_option(_gpt_mini_price_fn),
+        resource=f"{config.BASE_URL}/llm/gpt-mini",
+        description=ROUTE_DESCRIPTIONS["llm-gpt-mini"],
+        mime_type="application/json",
+        service_name="gpt-mini-api",
+        icon_url=ICON_URL,
+        tags=["GPT Mini API", "gpt api", "openai api", "pay per call llm"],
+        extensions=declare_discovery_extension(
+            input=_GPT_MINI_SAMPLE_REQUEST,
+            input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+            body_type="json",
+            output=OutputConfig(example=_GPT_MINI_SAMPLE_RESPONSE, schema=LLM_GATEWAY_OUTPUT_SCHEMA),
+        ),
+    )
+    _routes["POST /llm/gemini-flash"] = RouteConfig(
+        accepts=_payment_option(_gemini_flash_price_fn),
+        resource=f"{config.BASE_URL}/llm/gemini-flash",
+        description=ROUTE_DESCRIPTIONS["llm-gemini-flash"],
+        mime_type="application/json",
+        service_name="gemini-flash-api",
+        icon_url=ICON_URL,
+        tags=["Gemini Flash API", "gemini api", "google api", "pay per call llm"],
+        extensions=declare_discovery_extension(
+            input=_GEMINI_FLASH_SAMPLE_REQUEST,
+            input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+            body_type="json",
+            output=OutputConfig(example=_GEMINI_FLASH_SAMPLE_RESPONSE, schema=LLM_GATEWAY_OUTPUT_SCHEMA),
+        ),
+    )
+    _routes["POST /llm/llama"] = RouteConfig(
+        accepts=_payment_option(_llama_price_fn),
+        resource=f"{config.BASE_URL}/llm/llama",
+        description=ROUTE_DESCRIPTIONS["llm-llama"],
+        mime_type="application/json",
+        service_name="llama-api",
+        icon_url=ICON_URL,
+        tags=["Llama API", "llama 4 api", "meta llama api", "pay per call llm"],
+        extensions=declare_discovery_extension(
+            input=_LLAMA_SAMPLE_REQUEST,
+            input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+            body_type="json",
+            output=OutputConfig(example=_LLAMA_SAMPLE_RESPONSE, schema=LLM_GATEWAY_OUTPUT_SCHEMA),
+        ),
+    )
+    _routes["POST /llm/deepseek"] = RouteConfig(
+        accepts=_payment_option(_deepseek_price_fn),
+        resource=f"{config.BASE_URL}/llm/deepseek",
+        description=ROUTE_DESCRIPTIONS["llm-deepseek"],
+        mime_type="application/json",
+        service_name="deepseek-api",
+        icon_url=ICON_URL,
+        tags=["DeepSeek API", "deepseek v4 api", "pay per call llm"],
+        extensions=declare_discovery_extension(
+            input=_DEEPSEEK_SAMPLE_REQUEST,
+            input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+            body_type="json",
+            output=OutputConfig(example=_DEEPSEEK_SAMPLE_RESPONSE, schema=LLM_GATEWAY_OUTPUT_SCHEMA),
+        ),
+    )
     return _routes
 
 

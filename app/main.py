@@ -17,7 +17,7 @@ from fastmcp.utilities.lifespan import combine_lifespans
 
 from app import db
 from app.admin import router as admin_router
-from app.capacity import CapacityGateMiddleware, JobsCircuitBreakerMiddleware, LLMGatewayCircuitBreakerMiddleware
+from app.capacity import CapacityGateMiddleware, JobsCircuitBreakerMiddleware, LLMGatewayCircuitBreakerMiddleware, PinnedModelCircuitBreakerMiddleware
 from app.client_ip import ClientIpMiddleware
 from app.db import init_db
 from app.discovery import router as discovery_router
@@ -49,6 +49,11 @@ from app.handlers.spam_check import router as spam_check_router
 from app.handlers.toxicity import router as toxicity_router
 from app.handlers.language import router as language_router
 from app.handlers.pii_check import router as pii_check_router
+from app.handlers.llm_claude_sonnet import router as llm_claude_sonnet_router
+from app.handlers.llm_gpt_mini import router as llm_gpt_mini_router
+from app.handlers.llm_gemini_flash import router as llm_gemini_flash_router
+from app.handlers.llm_llama import router as llm_llama_router
+from app.handlers.llm_deepseek import router as llm_deepseek_router
 from app.handlers.translate import router as translate_router
 from app.handlers.weather import router as weather_router
 from app.handlers.wallet_balance import router as wallet_balance_router
@@ -131,6 +136,11 @@ inner_app.include_router(spam_check_router)
 inner_app.include_router(toxicity_router)
 inner_app.include_router(language_router)
 inner_app.include_router(pii_check_router)
+inner_app.include_router(llm_claude_sonnet_router)
+inner_app.include_router(llm_gpt_mini_router)
+inner_app.include_router(llm_gemini_flash_router)
+inner_app.include_router(llm_llama_router)
+inner_app.include_router(llm_deepseek_router)
 inner_app.include_router(discover_paid_router)
 inner_app.include_router(weather_router)
 inner_app.include_router(crypto_router)
@@ -181,7 +191,8 @@ mpp_wrapped = MPPMiddleware(intent_logged, inner_app)
 capacity_gated = CapacityGateMiddleware(mpp_wrapped)
 jobs_breaker = JobsCircuitBreakerMiddleware(capacity_gated)
 llm_gateway_breaker = LLMGatewayCircuitBreakerMiddleware(jobs_breaker)
-body_compat = PaymentBodyCompatMiddleware(llm_gateway_breaker)
+pinned_model_breaker = PinnedModelCircuitBreakerMiddleware(llm_gateway_breaker)
+body_compat = PaymentBodyCompatMiddleware(pinned_model_breaker)
 # Outermost: captures the client IP (already resolved from X-Forwarded-For
 # by uvicorn proxy-headers) before anything else runs, purely observational.
 app = ClientIpMiddleware(body_compat)
