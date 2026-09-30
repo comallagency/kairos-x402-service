@@ -576,7 +576,7 @@ async def _lookup(body: dict) -> dict:
 
 
 SAMPLE_RESPONSE = {
-    "address": "0x532f27101965dd16442E59d40670FaF5eBB142E",
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",  # USDC on Base - real, valid, verified via a live call 2026-09-30
     "network": {"key": "base", "name": "Base", "caip2": "eip155:8453"},
     "verdict": {
         "verdict": "caution",

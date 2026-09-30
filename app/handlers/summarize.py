@@ -1,4 +1,5 @@
 import json
+import re
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -23,8 +24,29 @@ _LENGTH_TARGETS = {
 
 SYSTEM_PROMPT_TEMPLATE = (
     "Summarize the following content, neutral and factual. Do not invent "
-    "facts beyond what is given. Target length: {length_desc}."
+    "facts beyond what is given. Target length: {length_desc}. Output ONLY "
+    "the summary itself - no preamble, no meta-commentary such as 'Here is "
+    "a summary' or 'Sure, here's...', no closing remarks."
 )
+
+# Belt-and-suspenders cleanup (2026-09-30): the prompt instruction above
+# reduces but does not eliminate preamble leakage from smaller free-tier
+# models - caught live in the delivery audit ("Here is a 2-3 sentence
+# summary of the content:" prefixing a correct, otherwise-clean summary).
+# Strips a single leading line that announces the summary rather than
+# being part of it - deliberately narrow (anchored to the start of the
+# string, common announcement verbs only) so it can never eat into a
+# summary that legitimately starts with one of these words as its own
+# first sentence.
+_PREAMBLE_RE = re.compile(
+    r"^(?:here'?s|here is|sure,?|certainly,?|of course,?)\b.*:\s*\n*",
+    re.IGNORECASE,
+)
+
+
+def _strip_preamble(summary: str) -> str:
+    cleaned = _PREAMBLE_RE.sub("", summary, count=1).strip()
+    return cleaned or summary
 
 SAMPLE_TEXT = (
     "Photosynthesis is the process by which green plants, algae, and some "
@@ -79,7 +101,7 @@ async def _summarize_content(content: str, length: str) -> tuple[str, str | None
         )
     except OpenRouterError as exc:
         raise SummarizeError("upstream_error", str(exc)[:200])
-    summary = data["choices"][0]["message"]["content"].strip()
+    summary = _strip_preamble(data["choices"][0]["message"]["content"].strip())
     model_served = data.get("model")
     fallback_used = used_last_resort or (model_served is not None and model_served != config.OPENROUTER_TRANSLATE_MODELS[0])
     return summary, model_served, fallback_used

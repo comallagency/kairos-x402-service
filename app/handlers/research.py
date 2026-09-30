@@ -45,6 +45,27 @@ from app.x402_setup import ROUTE_DESCRIPTIONS
 
 router = APIRouter()
 
+# Diagnosed 2026-09-30 (10 live end-to-end calls, no payment, direct handler
+# invocation): 3/10 succeeded within the 4.2s internal budget. Of the 7
+# failures, 2 were the search phase missing SEARCH_TIMEOUT_S (2.7s) and 5 -
+# the majority - were synthesis alone hitting the remaining budget, every
+# time landing at essentially the full GLOBAL_DEADLINE_S (4.20-4.21s
+# observed). Search itself is largely fine (9/10 standalone, most under
+# 1.5s) - the real bottleneck is free-tier LLM latency variance
+# (mistral-nemo/llama-3.3-70b measured 1.4-11.7s across repeated identical
+# calls at build time, see the module docstring above and the original
+# commit) that no internal budget reshuffling between search and synthesis
+# can fix: even giving synthesis the entire 4.2s outright would still miss
+# on the slow end of that range. The only real fixes are a paid faster
+# model (changes the cost structure) or loosening the <4.5s guarantee
+# (changes the product promise) - neither is "simple and safe" enough to
+# bundle into a description-accuracy pass, so the route is withdrawn from
+# discovery (see build_route_configs() in x402_setup.py and the MCP tool
+# guard in mcp_server.py) until one of those is deliberately decided.
+# Failures below use 422 (never 5xx) either way - a voluntary "couldn't
+# produce a result in time", not an infrastructure fault.
+RESEARCH_ENABLED = False
+
 MAX_QUERY_CHARS = 500
 DEFAULT_MAX_SOURCES = 5
 RESEARCH_CONTENT_CHARS = 3000  # per source, into the synthesis prompt - kept
@@ -291,9 +312,14 @@ async def _paid(request: Request, body: dict):
         reason = str(exc)
         if reason == "missing_query":
             code = 400
-        elif reason == "no_results":
-            code = 504
-        else:  # synthesis_failed
+        elif reason in ("no_results", "synthesis_failed"):
+            # 422, not 5xx (2026-09-30): both are "couldn't produce a
+            # result within budget", not an infrastructure fault - same
+            # reasoning as /search's own no_results fix, and x402's own
+            # settlement rule already skips settlement on any status >= 400
+            # regardless, so this changes nothing about "aucun règlement".
+            code = 422
+        else:
             code = 502
         if payer is not None:
             db.log_request(

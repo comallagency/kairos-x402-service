@@ -1228,7 +1228,7 @@ from app.handlers.agent_health import _lookup as _agent_health_lookup
 from app.handlers.wallet_balance import _lookup as _wallet_balance_lookup
 from app.handlers.wallet_intelligence import _lookup as _wallet_intelligence_lookup
 from app.handlers.token_risk import _lookup as _token_risk_lookup
-from app.handlers.research import ResearchError, _lookup as _research_lookup
+from app.handlers.research import RESEARCH_ENABLED, ResearchError, _lookup as _research_lookup
 from app.upstream.evm_rpc import EvmRpcError
 
 _WALLET_BALANCE_EXTENSIONS = declare_mcp_discovery_extension(
@@ -1509,26 +1509,33 @@ async def token_risk_tool(
     )
 
 
-@mcp.tool(
-    name="research",
-    title="Research",
-    description=ROUTE_DESCRIPTIONS["research"],
-    output_schema=RESEARCH_OUTPUT_SCHEMA,
-    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
-)
-async def research_tool(
-    query: Annotated[str, Field(description=RESEARCH_INPUT_SCHEMA["properties"]["query"]["description"])],
-    max_sources: Annotated[int, Field(description=RESEARCH_INPUT_SCHEMA["properties"]["max_sources"]["description"])] = 5,
-    ctx: Context = None,
-) -> ToolResult:
-    return await _paid_tool_call(
-        tool_name="research",
-        route_key="POST /research",
-        ctx=ctx,
-        args={"query": query, "max_sources": max_sources},
-        extensions=_RESEARCH_EXTENSIONS,
-        run_and_log=_run_research,
+# Withdrawn from the MCP tool set while RESEARCH_ENABLED is False (2026-09-30) -
+# see app/handlers/research.py's own docstring for the diagnosis (free-tier
+# LLM synthesis latency, not something a budget reshuffle can fix). The
+# @mcp.tool decorator only registers a tool at import time, so simply not
+# running it here is enough - no separate "unregister" step exists or is
+# needed.
+if RESEARCH_ENABLED:
+    @mcp.tool(
+        name="research",
+        title="Research",
+        description=ROUTE_DESCRIPTIONS["research"],
+        output_schema=RESEARCH_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
     )
+    async def research_tool(
+        query: Annotated[str, Field(description=RESEARCH_INPUT_SCHEMA["properties"]["query"]["description"])],
+        max_sources: Annotated[int, Field(description=RESEARCH_INPUT_SCHEMA["properties"]["max_sources"]["description"])] = 5,
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="research",
+            route_key="POST /research",
+            ctx=ctx,
+            args={"query": query, "max_sources": max_sources},
+            extensions=_RESEARCH_EXTENSIONS,
+            run_and_log=_run_research,
+        )
 
 
 @mcp.tool(

@@ -95,22 +95,38 @@ WEATHER_SAMPLE_OUTPUT = {
         "timezone": "Europe/Paris",
     },
     "current": {
-        "time": "2026-09-19T13:45",
-        "temperature_c": 23.8,
-        "humidity_pct": 48,
-        "wind_speed_kmh": 12.2,
-        "weather_code": 1,
-        "conditions": "mainly_clear",
+        "time": "2026-09-30T12:30",
+        "temperature_c": 21.1,
+        "humidity_pct": 78,
+        "wind_speed_kmh": 8.9,
+        "weather_code": 61,
+        "conditions": "slight_rain",
     },
     "daily": [
         {
-            "date": "2026-09-19",
-            "temperature_max_c": 25.1,
-            "temperature_min_c": 15.2,
+            "date": "2026-09-30",
+            "temperature_max_c": 22.8,
+            "temperature_min_c": 20.5,
+            "precipitation_sum_mm": 13.2,
+            "weather_code": 63,
+            "conditions": "rain",
+        },
+        {
+            "date": "2026-10-01",
+            "temperature_max_c": 21.0,
+            "temperature_min_c": 16.0,
+            "precipitation_sum_mm": 1.9,
+            "weather_code": 80,
+            "conditions": "rain_showers",
+        },
+        {
+            "date": "2026-10-02",
+            "temperature_max_c": 20.6,
+            "temperature_min_c": 12.5,
             "precipitation_sum_mm": 0.0,
-            "weather_code": 1,
-            "conditions": "mainly_clear",
-        }
+            "weather_code": 3,
+            "conditions": "overcast",
+        },
     ],
 }
 
@@ -285,7 +301,8 @@ DISCOVER_INPUT_SCHEMA = {
             "description": (
                 "The need to match, in plain language - e.g. \"read a PDF and "
                 "give me markdown\" or \"persistent knowledge graph\". Matched "
-                "against 10101 MCP servers (official registry + carnet) by semantic similarity."
+                "against a curated snapshot of MCP servers (official registry + "
+                "carnet) by semantic similarity."
             ),
         },
         "max_results": {
@@ -360,7 +377,7 @@ DISCOVER_INPUT_EXAMPLE = {
 DISCOVER_SAMPLE_OUTPUT = {
     "q": "read a PDF and give me markdown",
     "snapshot_date": "2026-09-18",
-    "snapshot_rows": 10101,
+    "snapshot_rows": 10327,  # illustrative only - the real response always computes this live (len(snapshot))
     "min_similarity": 0.3,
     "matches": 3,
     "results": [
@@ -393,10 +410,10 @@ DISCOVER_SAMPLE_OUTPUT = {
 
 ROUTE_DESCRIPTIONS = {
     "search": (
-        "Web search: search the web and get ranked results with page content. "
-        "Up to 10 results with title, URL, snippet and publish date, plus clean "
-        "full-page Markdown for the top 3 by default. Up to 5 queries per call, "
-        "merged and de-duplicated. Each query is routed by Jev to the best "
+        "Web search: search the web and get ranked results, each with a "
+        "short extract from the page. Up to 10 results with title, URL, "
+        "snippet, extract and publish date. Up to 5 queries per call, merged "
+        "and de-duplicated. Each query is routed by Jev to the best "
         "specialised source (code, facts, news, prices, weather). No account, "
         "no API key. Try GET /search/sample. "
         + _KIT_MENTION
@@ -450,7 +467,7 @@ ROUTE_DESCRIPTIONS = {
     ),
     "discover": (
         "Find MCP servers matching a need, ranked by semantic similarity over a "
-        "curated snapshot of 10101 MCP servers. Returns name, endpoint, "
+        "curated snapshot of MCP servers. Returns name, endpoint, "
         "description, source registry and a 0-1 relevance per match. Paid POST: "
         "up to 25 matches. Try GET /discover/sample."
     ),
@@ -548,10 +565,9 @@ ROUTE_DESCRIPTIONS = {
     ),
     "llm-gateway": (
         "OpenAI-compatible chat completion API: call 400+ LLMs (Claude, GPT, "
-        "Gemini, Llama, Mistral) per request, pay with x402, no API key. Pay "
-        "only for what you use: sign a ceiling based on your max_tokens, "
-        "settle for real usage x 1.10 (min $0.001) once the call completes. "
-        "Try GET /v1/chat/completions/sample."
+        "Gemini, Llama, Mistral) per request, pay with x402, no API key. You "
+        "sign a fixed price computed from your max_tokens; unused tokens are "
+        "not refunded. Try GET /v1/chat/completions/sample."
     ),
     "token-risk": (
         "Base token risk scan: on-chain rug check and honeypot-style flag "
@@ -1418,7 +1434,7 @@ RANK_OUTPUT_SCHEMA = {
 # AgentCash's indexer scans the whole operation body for embedding text).
 ROUTE_SUMMARIES = {
     "discover": (
-        "Match a need in plain language against a curated snapshot of 10101 "
+        "Match a need in plain language against a curated snapshot of "
         "observed MCP servers and get the best five with a 0-1 relevance "
         "score each - semantic ranking a web search cannot guarantee."
     ),
@@ -1762,7 +1778,7 @@ RANK_SAMPLE_OUTPUT = {
 }
 
 
-TOKEN_RISK_SAMPLE_INPUT = {"address": "0x532f27101965dd16442E59d40670FaF5eBB142E"}
+TOKEN_RISK_SAMPLE_INPUT = {"address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"}
 
 TOKEN_RISK_INPUT_SCHEMA = {
     "properties": {
@@ -1775,7 +1791,7 @@ TOKEN_RISK_INPUT_SCHEMA = {
 }
 
 TOKEN_RISK_SAMPLE_OUTPUT = {
-    "address": "0x532f27101965dd16442E59d40670FaF5eBB142E",
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     "network": {"key": "base", "name": "Base", "caip2": "eip155:8453"},
     "verdict": {
         "verdict": "caution",
@@ -1964,12 +1980,13 @@ def _core_route_configs() -> dict[str, RouteConfig]:
     # module (same pattern every other handler file already uses), so a
     # top-of-file import here would be circular.
     from app.handlers.llm_gateway import SAMPLE_REQUEST, SAMPLE_RESPONSE, UPTO_ENABLED, compute_ceiling_price
+    from app.handlers.research import RESEARCH_ENABLED
 
     _llm_gateway_accepts = [_payment_option(compute_ceiling_price)]
     if UPTO_ENABLED:
         _llm_gateway_accepts.append(_upto_payment_option(compute_ceiling_price))
 
-    return {
+    _routes = {
         # /search reactive le 2026-09-11 : depuis le 2026-09-07, la route ne
         # depend plus d'OpenRouter (app/upstream/websearch.py interroge
         # SearXNG local) et repond deja 200 en direct, mais restait absente
@@ -2691,6 +2708,9 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             ),
         ),
     }
+    if not RESEARCH_ENABLED:
+        _routes.pop("POST /research", None)
+    return _routes
 
 
 async def _first_call_free_hook(context: SettleContext) -> SkipSettleResult | None:
