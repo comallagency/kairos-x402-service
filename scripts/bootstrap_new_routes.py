@@ -168,6 +168,9 @@ def _outcome(status: int, body_text: str) -> str:
 
 
 async def _pay_with_retry(signer, route: dict) -> tuple[str, str | None, str | None]:
+    # Always returns the FULL response body as the 3rd element, success or
+    # not - this is the real end-to-end test of what each route actually
+    # delivers for real money, not just a status code.
     if DRY_RUN:
         return "reglee", "SIMULATED", None
 
@@ -191,13 +194,12 @@ async def _pay_with_retry(signer, route: dict) -> tuple[str, str | None, str | N
 
         outcome = _outcome(status, body_text)
         if outcome == "amount_too_low":
-            return outcome, tx, body_text[:300]
+            return outcome, tx, body_text
         if outcome == "a_retenter" and attempt < MAX_RETRIES:
             print(f"  {route['path']}: status={status} non-200 (essai {attempt}/{MAX_RETRIES}, corps: {body_text[:100]!r}), nouvel essai dans {RETRY_DELAY_S}s")
             await asyncio.sleep(RETRY_DELAY_S)
             continue
-        detail = None if outcome == "reglee" else body_text[:300]
-        return outcome, tx, detail
+        return outcome, tx, body_text
 
     return "a_retenter", None, "essais epuises"
 
@@ -313,9 +315,10 @@ async def main() -> int:
 
     failures = []
     for i, (route, price) in enumerate(routes, start=1):
-        outcome, tx, detail = await _pay_with_retry(account_b, route)
+        outcome, tx, body_text = await _pay_with_retry(account_b, route)
         status_word = "OK" if outcome == "reglee" else f"ECHEC({outcome})"
-        print(f"[{i}/{len(routes)}] POST /{route['path']} -> {status_word} tx={tx} prix=${price:.6f} {detail or ''}")
+        print(f"[{i}/{len(routes)}] POST /{route['path']} -> {status_word} tx={tx} prix=${price:.6f}")
+        print(f"  reponse complete: {body_text}")
         if outcome != "reglee":
             failures.append(route["path"])
         if not DRY_RUN and i < len(routes):

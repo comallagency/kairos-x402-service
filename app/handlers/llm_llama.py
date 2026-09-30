@@ -18,22 +18,22 @@ ROUTE_KEY = 'llm/llama'
 
 price_fn = make_price_fn(MODEL)
 
-SAMPLE_REQUEST = {"messages": [{"role": "user", "content": "Say OK."}], "max_tokens": 150}
+SAMPLE_REQUEST = {"messages": [{"role": "user", "content": "Summarize in one sentence: The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France. It was designed by Gustave Eiffel's engineering company and built as the entrance arch for the 1889 World's Fair. Initially criticized by some of France's leading artists and intellectuals for its design, it has become a global cultural icon of France and one of the most recognizable structures in the world, attracting millions of visitors every year."}], "max_tokens": 150}
 SAMPLE_RESPONSE = {
-    "id": "gen-1790778763-JUTky3NBjSeIwFRlLjOF",
+    "id": "gen-1790781075-Lyd15GuBV6xAvA6HlOvf",
     "object": "chat.completion",
-    "created": 1790778763,
+    "created": 1790781075,
     "model": "meta-llama/llama-4-maverick",
     "provider": "DeepInfra",
     "choices": [
         {
             "index": 0,
             "finish_reason": "stop",
-            "message": {"role": "assistant", "content": "OK."},
+            "message": {"role": "assistant", "content": "The Eiffel Tower, a wrought-iron lattice tower in Paris, France, was designed by Gustave Eiffel's company for the 1889 World's Fair and has since become a global cultural icon of France, attracting millions of visitors annually."},
         }
     ],
-    "usage": {"prompt_tokens": 13, "completion_tokens": 3, "total_tokens": 16, "cost": 5e-06},
-    "x402_receipt": make_receipt("meta-llama/llama-4-maverick", "llm/llama", 873, 0.001),
+    "usage": {"prompt_tokens": 106, "completion_tokens": 51, "total_tokens": 157, "cost": 6.2e-05},
+    "x402_receipt": make_receipt("meta-llama/llama-4-maverick", "llm/llama", 1700, 0.001),
 }
 
 router = make_router(

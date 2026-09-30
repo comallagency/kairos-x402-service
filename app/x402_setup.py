@@ -599,7 +599,9 @@ ROUTE_DESCRIPTIONS = {
         "OpenAI-compatible chat completion API: call 400+ LLMs (Claude, GPT, "
         "Gemini, Llama, Mistral) per request, pay with x402, no API key. You "
         "sign a fixed price computed from your max_tokens; unused tokens are "
-        "not refunded. Try GET /v1/chat/completions/sample."
+        "not refunded. 20s server-side timeout - never charged if it "
+        "fires; set your client timeout to 30s. Try GET "
+        "/v1/chat/completions/sample."
     ),
     "token-risk": (
         "Base token risk scan: on-chain rug check and honeypot-style flag "
@@ -672,29 +674,36 @@ ROUTE_DESCRIPTIONS = {
         "completions on anthropic/claude-sonnet-5.5, pinned to Anthropic's "
         "own OpenRouter endpoint for reliability. You sign a fixed price "
         "computed from your max_tokens; unused tokens are not refunded. "
-        "Try GET /llm/claude-sonnet/sample."
+        "20s server-side timeout - never charged if it fires; set your "
+        "client timeout to 30s. Try GET /llm/claude-sonnet/sample."
     ),
     "llm-gpt-mini": (
         "GPT Mini API - pay per call, no API key. OpenAI-format chat "
         "completions on openai/gpt-5.4-mini, pinned to OpenAI's own "
         "OpenRouter endpoint for reliability. You sign a fixed price "
         "computed from your max_tokens; unused tokens are not refunded. "
-        "Try GET /llm/gpt-mini/sample."
+        "20s server-side timeout - never charged if it fires; set your "
+        "client timeout to 30s. Try GET /llm/gpt-mini/sample."
     ),
     "llm-gemini-flash": (
         "Gemini Flash API - pay per call, no API key. OpenAI-format chat "
         "completions on google/gemini-3.8-flash, pinned to Google AI "
         "Studio for reliability. This model spends hidden reasoning "
-        "tokens even on simple prompts - pass a realistic max_tokens "
-        "(50+) or you may get an empty response. You sign a fixed price "
+        "tokens even on simple prompts (measured: 385 reasoning tokens for "
+        "a one-sentence summary) - pass max_tokens=500 or higher, or you "
+        "may get an empty or truncated response. You sign a fixed price "
         "computed from your max_tokens; unused tokens are not refunded. "
-        "Try GET /llm/gemini-flash/sample."
+        "20s server-side timeout with an automatic 2nd-provider retry if "
+        "the first is slow - never charged if both miss; set your client "
+        "timeout to 30s. Try GET /llm/gemini-flash/sample."
     ),
     "llm-llama": (
         "Llama API - pay per call, no API key. OpenAI-format chat "
         "completions on meta-llama/llama-4-maverick, pinned to DeepInfra "
         "for reliability. You sign a fixed price computed from your "
-        "max_tokens; unused tokens are not refunded. Try GET "
+        "max_tokens; unused tokens are not refunded. 20s server-side "
+        "timeout - never charged if it fires; set your client timeout to "
+        "30s. Try GET "
         "/llm/llama/sample."
     ),
     "llm-deepseek": (
@@ -702,7 +711,9 @@ ROUTE_DESCRIPTIONS = {
         "completions on deepseek/deepseek-v4-pro, pinned to Reka for "
         "reliability (the fastest of 3 measured providers). You sign a "
         "fixed price computed from your max_tokens; unused tokens are not "
-        "refunded. Try GET /llm/deepseek/sample."
+        "refunded. 20s server-side timeout with an automatic 2nd-provider "
+        "retry if the first is slow - never charged if both miss; set "
+        "your client timeout to 30s. Try GET /llm/deepseek/sample."
     ),
 }
 
@@ -2038,40 +2049,24 @@ _CLASSIFY_OUTPUT_SCHEMA = {
     "required": ["label", "probability", "engine"],
 }
 
-SENTIMENT_SAMPLE_INPUT = {"text": "This product exceeded all my expectations, I love it!"}
 SENTIMENT_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
 SENTIMENT_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
-SENTIMENT_SAMPLE_OUTPUT = {"label": "positive", "probability": 0.93, "alternate_label": "neutral", "alternate_probability": 0.06, "engine": "jev"}
 
-INTENT_SAMPLE_INPUT = {"text": "Can you please reset my password?"}
 INTENT_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
 INTENT_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
-INTENT_SAMPLE_OUTPUT = {"label": "request", "probability": 0.71, "alternate_label": "question", "alternate_probability": 0.18, "engine": "jev"}
 
-SPAM_CHECK_SAMPLE_INPUT = {"text": "Hi Sarah, just confirming our meeting tomorrow at 3pm."}
 SPAM_CHECK_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
 SPAM_CHECK_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
-SPAM_CHECK_SAMPLE_OUTPUT = {"label": "not_spam", "probability": 0.97, "alternate_label": "spam", "alternate_probability": 0.03, "engine": "jev"}
 
-TOXICITY_SAMPLE_INPUT = {"text": "I disagree with your point, but I respect your perspective."}
 TOXICITY_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
 TOXICITY_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
-TOXICITY_SAMPLE_OUTPUT = {"label": "not_toxic", "probability": 0.95, "alternate_label": "toxic", "alternate_probability": 0.05, "engine": "jev"}
 
-PII_CHECK_SAMPLE_INPUT = {"text": "The quarterly report shows a 12% increase in revenue."}
 PII_CHECK_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
 PII_CHECK_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
-PII_CHECK_SAMPLE_OUTPUT = {"label": "no_pii", "probability": 0.91, "alternate_label": "pii_detected", "alternate_probability": 0.09, "engine": "jev"}
 
-LANGUAGE_SAMPLE_INPUT = {"text": "The quick brown fox jumps over the lazy dog."}
 LANGUAGE_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
 LANGUAGE_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
-LANGUAGE_SAMPLE_OUTPUT = {"label": "en", "probability": 0.98, "alternate_label": "other", "alternate_probability": 0.01, "engine": "jev"}
 
-CLASSIFY_SAMPLE_INPUT = {
-    "text": "I was charged twice for my subscription this month.",
-    "labels": ["billing", "technical", "account", "other"],
-}
 CLASSIFY_INPUT_SCHEMA = {
     "properties": {
         "text": {"type": "string", "description": "Text to classify, up to 4000 characters."},
@@ -2083,7 +2078,6 @@ CLASSIFY_INPUT_SCHEMA = {
     "required": ["text", "labels"],
 }
 CLASSIFY_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
-CLASSIFY_SAMPLE_OUTPUT = {"label": "billing", "probability": 0.81, "alternate_label": "technical", "alternate_probability": 0.14, "engine": "jev"}
 
 
 # Pack 2 (2026-09-30): shared input schema for the 5 pinned per-model LLM
@@ -2209,13 +2203,13 @@ def _core_route_configs() -> dict[str, RouteConfig]:
     # top-of-file import here would be circular.
     from app.handlers.llm_gateway import SAMPLE_REQUEST, SAMPLE_RESPONSE, UPTO_ENABLED, compute_ceiling_price
     from app.handlers.research import RESEARCH_ENABLED
-    from app.handlers.sentiment import SENTIMENT_ENABLED
-    from app.handlers.classify import CLASSIFY_ENABLED
-    from app.handlers.intent import INTENT_ENABLED
-    from app.handlers.spam_check import SPAM_CHECK_ENABLED
-    from app.handlers.toxicity import TOXICITY_ENABLED
-    from app.handlers.language import LANGUAGE_ENABLED
-    from app.handlers.pii_check import PII_CHECK_ENABLED
+    from app.handlers.sentiment import SENTIMENT_ENABLED, SAMPLE_REQUEST as SENTIMENT_SAMPLE_INPUT, SAMPLE_RESPONSE as SENTIMENT_SAMPLE_OUTPUT
+    from app.handlers.classify import CLASSIFY_ENABLED, SAMPLE_REQUEST as CLASSIFY_SAMPLE_INPUT, SAMPLE_RESPONSE as CLASSIFY_SAMPLE_OUTPUT
+    from app.handlers.intent import INTENT_ENABLED, SAMPLE_REQUEST as INTENT_SAMPLE_INPUT, SAMPLE_RESPONSE as INTENT_SAMPLE_OUTPUT
+    from app.handlers.spam_check import SPAM_CHECK_ENABLED, SAMPLE_REQUEST as SPAM_CHECK_SAMPLE_INPUT, SAMPLE_RESPONSE as SPAM_CHECK_SAMPLE_OUTPUT
+    from app.handlers.toxicity import TOXICITY_ENABLED, SAMPLE_REQUEST as TOXICITY_SAMPLE_INPUT, SAMPLE_RESPONSE as TOXICITY_SAMPLE_OUTPUT
+    from app.handlers.language import LANGUAGE_ENABLED, SAMPLE_REQUEST as LANGUAGE_SAMPLE_INPUT, SAMPLE_RESPONSE as LANGUAGE_SAMPLE_OUTPUT
+    from app.handlers.pii_check import PII_CHECK_ENABLED, SAMPLE_REQUEST as PII_CHECK_SAMPLE_INPUT, SAMPLE_RESPONSE as PII_CHECK_SAMPLE_OUTPUT
 
     _llm_gateway_accepts = [_payment_option(compute_ceiling_price)]
     if UPTO_ENABLED:

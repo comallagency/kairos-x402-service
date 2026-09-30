@@ -18,22 +18,22 @@ ROUTE_KEY = 'llm/gpt-mini'
 
 price_fn = make_price_fn(MODEL)
 
-SAMPLE_REQUEST = {"messages": [{"role": "user", "content": "Say OK."}], "max_tokens": 150}
+SAMPLE_REQUEST = {"messages": [{"role": "user", "content": "Summarize in one sentence: The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France. It was designed by Gustave Eiffel's engineering company and built as the entrance arch for the 1889 World's Fair. Initially criticized by some of France's leading artists and intellectuals for its design, it has become a global cultural icon of France and one of the most recognizable structures in the world, attracting millions of visitors every year."}], "max_tokens": 150}
 SAMPLE_RESPONSE = {
-    "id": "gen-1790778703-IkszK765bd62YRNv9gVV",
+    "id": "gen-1790781015-abP5jUyNb5Xs9xjmdtPX",
     "object": "chat.completion",
-    "created": 1790778703,
+    "created": 1790781015,
     "model": "openai/gpt-5.4-mini",
     "provider": "OpenAI",
     "choices": [
         {
             "index": 0,
             "finish_reason": "stop",
-            "message": {"role": "assistant", "content": "OK"},
+            "message": {"role": "assistant", "content": "The Eiffel Tower, a wrought-iron tower in Paris built for the 1889 World's Fair, evolved from a controversial design into one of the world's most iconic landmarks."},
         }
     ],
-    "usage": {"prompt_tokens": 9, "completion_tokens": 5, "total_tokens": 14, "cost": 2.925e-05},
-    "x402_receipt": make_receipt("openai/gpt-5.4-mini", "llm/gpt-mini", 897, 0.001),
+    "usage": {"prompt_tokens": 100, "completion_tokens": 39, "total_tokens": 139, "cost": 0.0002505},
+    "x402_receipt": make_receipt("openai/gpt-5.4-mini", "llm/gpt-mini", 1700, 0.001),
 }
 
 router = make_router(

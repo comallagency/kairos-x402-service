@@ -41,7 +41,10 @@ _CRITERIA = {
     "other": "The text is written in a language not listed above.",
 }
 
+SAMPLE_REQUEST = {"text": 'The quick brown fox jumps over the lazy dog.'}
+
 SAMPLE_RESPONSE = {
+    "input": 'The quick brown fox jumps over the lazy dog.',
     "label": 'en',
     "probability": 0.98,
     "alternate_label": 'other',

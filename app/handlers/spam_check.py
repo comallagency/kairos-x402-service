@@ -22,7 +22,10 @@ _CRITERIA = {
     "not_spam": "The text is genuine, legitimate content.",
 }
 
+SAMPLE_REQUEST = {"text": 'Hi Sarah, just confirming our meeting tomorrow at 3pm.'}
+
 SAMPLE_RESPONSE = {
+    "input": 'Hi Sarah, just confirming our meeting tomorrow at 3pm.',
     "label": 'not_spam',
     "probability": 0.97,
     "alternate_label": 'spam',
