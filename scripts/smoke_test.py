@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Post-recreate smoke test.
+"""Smoke test checks, reusable against any base URL.
 
-Run this after every `docker compose up --force-recreate x402`, before
-considering a deploy done - and from now on, before it too, against
-whatever is still live, so a check that would have failed isn't the thing
-that gets replaced. Exits non-zero if any of these doesn't return 200:
-/.well-known/x402, /openapi.json, /llms.txt, /.
+Run standalone after every deploy, before considering it done - exits
+non-zero if any of these doesn't return 200: /.well-known/x402,
+/openapi.json, /llms.txt, /. Defaults to the public domain
+(DEFAULT_BASE_URL); override with the SMOKE_TEST_BASE_URL env var.
 
 Added 2026-09-28 after a DynamicPrice callable (POST /v1/chat/completions'
 compute_ceiling_price) crashed /.well-known/x402 with a 500 -
@@ -22,6 +21,15 @@ still returning HTTP 200 the whole time - a plain status check could never
 have caught it. Root cause was a swallowed JS exception in live.html; see
 scripts/live_render_check/check.js and live.html's render()/renderInner()
 split from the same fix.
+
+Refactored 2026-09-30 (blue-green safety rework, see deploy.sh) to accept
+a base_url parameter instead of a hardcoded module constant: the SAME
+check logic now runs twice per deploy - once pre-cutover against the new
+container's own internal port (scripts/precutover_check.py), and once
+post-cutover, repeatedly, against the real public domain through nginx
+(scripts/post_cutover_watch.py). Kept runnable standalone (`python3
+scripts/smoke_test.py`) for manual checks, unchanged in behavior when run
+that way.
 """
 
 import os
@@ -31,19 +39,19 @@ from pathlib import Path
 
 import httpx
 
-BASE_URL = "https://x402.agentindex.world"
+DEFAULT_BASE_URL = "https://x402.agentindex.world"
 CHECKS = ["/.well-known/x402", "/openapi.json", "/llms.txt", "/"]
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 LIVE_RENDER_CHECK_JS = _SCRIPT_DIR / "live_render_check" / "check.js"
 
 
-def check_status_codes() -> list[str]:
+def check_status_codes(base_url: str) -> list[str]:
     failed = []
     with httpx.Client(timeout=15.0) as client:
         for path in CHECKS:
             try:
-                resp = client.get(f"{BASE_URL}{path}")
+                resp = client.get(f"{base_url}{path}")
             except httpx.HTTPError as exc:
                 print(f"FAIL {path}: {exc}")
                 failed.append(path)
@@ -55,7 +63,7 @@ def check_status_codes() -> list[str]:
     return failed
 
 
-def check_admin_live() -> list[str]:
+def check_admin_live(base_url: str) -> list[str]:
     """Headless render check (jsdom, see check.js's own docstring for why
     not a full browser) - does GET /admin/live actually populate itself, or
     does it silently stay stuck on its pre-render placeholder while still
@@ -67,7 +75,7 @@ def check_admin_live() -> list[str]:
         return []
 
     result = subprocess.run(
-        ["node", str(LIVE_RENDER_CHECK_JS), f"{BASE_URL}/admin/live", user, password],
+        ["node", str(LIVE_RENDER_CHECK_JS), f"{base_url}/admin/live", user, password],
         capture_output=True, text=True, timeout=30,
     )
     print(result.stdout.strip())
@@ -77,9 +85,15 @@ def check_admin_live() -> list[str]:
     return []
 
 
+def run_all(base_url: str) -> list[str]:
+    failed = check_status_codes(base_url)
+    failed += check_admin_live(base_url)
+    return failed
+
+
 def main() -> int:
-    failed = check_status_codes()
-    failed += check_admin_live()
+    base_url = os.getenv("SMOKE_TEST_BASE_URL", DEFAULT_BASE_URL)
+    failed = run_all(base_url)
 
     if failed:
         print(f"\n{len(failed)} check(s) failed: {failed}", file=sys.stderr)
