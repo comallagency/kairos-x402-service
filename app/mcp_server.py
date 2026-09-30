@@ -194,6 +194,34 @@ from app.x402_setup import (
     WALLET_INTELLIGENCE_OUTPUT_SCHEMA,
     X402_ECHO_OUTPUT_SCHEMA,
     AGENT_HEALTH_OUTPUT_SCHEMA,
+    SENTIMENT_INPUT_SCHEMA,
+    SENTIMENT_OUTPUT_SCHEMA,
+    SENTIMENT_SAMPLE_INPUT,
+    SENTIMENT_SAMPLE_OUTPUT,
+    CLASSIFY_INPUT_SCHEMA,
+    CLASSIFY_OUTPUT_SCHEMA,
+    CLASSIFY_SAMPLE_INPUT,
+    CLASSIFY_SAMPLE_OUTPUT,
+    INTENT_INPUT_SCHEMA,
+    INTENT_OUTPUT_SCHEMA,
+    INTENT_SAMPLE_INPUT,
+    INTENT_SAMPLE_OUTPUT,
+    SPAM_CHECK_INPUT_SCHEMA,
+    SPAM_CHECK_OUTPUT_SCHEMA,
+    SPAM_CHECK_SAMPLE_INPUT,
+    SPAM_CHECK_SAMPLE_OUTPUT,
+    TOXICITY_INPUT_SCHEMA,
+    TOXICITY_OUTPUT_SCHEMA,
+    TOXICITY_SAMPLE_INPUT,
+    TOXICITY_SAMPLE_OUTPUT,
+    LANGUAGE_INPUT_SCHEMA,
+    LANGUAGE_OUTPUT_SCHEMA,
+    LANGUAGE_SAMPLE_INPUT,
+    LANGUAGE_SAMPLE_OUTPUT,
+    PII_CHECK_INPUT_SCHEMA,
+    PII_CHECK_OUTPUT_SCHEMA,
+    PII_CHECK_SAMPLE_INPUT,
+    PII_CHECK_SAMPLE_OUTPUT,
     build_route_configs,
     get_resource_server,
 )
@@ -1230,6 +1258,109 @@ from app.handlers.wallet_intelligence import _lookup as _wallet_intelligence_loo
 from app.handlers.token_risk import _lookup as _token_risk_lookup
 from app.handlers.research import RESEARCH_ENABLED, ResearchError, _lookup as _research_lookup
 from app.upstream.evm_rpc import EvmRpcError
+from app.handlers.jev_classify import ClassifyError
+from app.handlers.sentiment import SENTIMENT_ENABLED, _lookup as _sentiment_lookup
+from app.handlers.classify import CLASSIFY_ENABLED, _lookup as _classify_lookup
+from app.handlers.intent import INTENT_ENABLED, _lookup as _intent_lookup
+from app.handlers.spam_check import SPAM_CHECK_ENABLED, _lookup as _spam_check_lookup
+from app.handlers.toxicity import TOXICITY_ENABLED, _lookup as _toxicity_lookup
+from app.handlers.language import LANGUAGE_ENABLED, _lookup as _language_lookup
+from app.handlers.pii_check import PII_CHECK_ENABLED, _lookup as _pii_check_lookup
+
+_SENTIMENT_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="sentiment",
+        description=ROUTE_DESCRIPTIONS["sentiment"],
+        input_schema=SENTIMENT_INPUT_SCHEMA,
+        example=SENTIMENT_SAMPLE_INPUT,
+        output=OutputConfig(example=SENTIMENT_SAMPLE_OUTPUT),
+    )
+)
+_CLASSIFY_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="classify",
+        description=ROUTE_DESCRIPTIONS["classify"],
+        input_schema=CLASSIFY_INPUT_SCHEMA,
+        example=CLASSIFY_SAMPLE_INPUT,
+        output=OutputConfig(example=CLASSIFY_SAMPLE_OUTPUT),
+    )
+)
+_INTENT_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="intent",
+        description=ROUTE_DESCRIPTIONS["intent"],
+        input_schema=INTENT_INPUT_SCHEMA,
+        example=INTENT_SAMPLE_INPUT,
+        output=OutputConfig(example=INTENT_SAMPLE_OUTPUT),
+    )
+)
+_SPAM_CHECK_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="spam_check",
+        description=ROUTE_DESCRIPTIONS["spam-check"],
+        input_schema=SPAM_CHECK_INPUT_SCHEMA,
+        example=SPAM_CHECK_SAMPLE_INPUT,
+        output=OutputConfig(example=SPAM_CHECK_SAMPLE_OUTPUT),
+    )
+)
+_TOXICITY_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="toxicity",
+        description=ROUTE_DESCRIPTIONS["toxicity"],
+        input_schema=TOXICITY_INPUT_SCHEMA,
+        example=TOXICITY_SAMPLE_INPUT,
+        output=OutputConfig(example=TOXICITY_SAMPLE_OUTPUT),
+    )
+)
+_LANGUAGE_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="language",
+        description=ROUTE_DESCRIPTIONS["language"],
+        input_schema=LANGUAGE_INPUT_SCHEMA,
+        example=LANGUAGE_SAMPLE_INPUT,
+        output=OutputConfig(example=LANGUAGE_SAMPLE_OUTPUT),
+    )
+)
+_PII_CHECK_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="pii_check",
+        description=ROUTE_DESCRIPTIONS["pii-check"],
+        input_schema=PII_CHECK_INPUT_SCHEMA,
+        example=PII_CHECK_SAMPLE_INPUT,
+        output=OutputConfig(example=PII_CHECK_SAMPLE_OUTPUT),
+    )
+)
+
+
+def _make_classify_runner(route: str, price_attr: str, lookup):
+    async def _run(args: dict, payer: str | None) -> dict:
+        body_excerpt = json.dumps(args)
+        try:
+            with Timer() as timer:
+                result = await lookup(args)
+        except ClassifyError as exc:
+            db.log_request(
+                route=route, method="MCP", status="error", payer=payer,
+                user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+            )
+            raise ServiceError(str(exc)) from exc
+        price = effective_price(payer, price_float(getattr(config, price_attr)))
+        db.log_request(
+            route=route, method="MCP", status="paid",
+            latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt,
+        )
+        return {**result, "x402_receipt": make_receipt(None, route, timer.elapsed_ms, price)}
+    return _run
+
+
+_run_sentiment = _make_classify_runner("sentiment", "PRICE_SENTIMENT", _sentiment_lookup)
+_run_classify = _make_classify_runner("classify", "PRICE_CLASSIFY", _classify_lookup)
+_run_intent = _make_classify_runner("intent", "PRICE_INTENT", _intent_lookup)
+_run_spam_check = _make_classify_runner("spam-check", "PRICE_SPAM_CHECK", _spam_check_lookup)
+_run_toxicity = _make_classify_runner("toxicity", "PRICE_TOXICITY", _toxicity_lookup)
+_run_language = _make_classify_runner("language", "PRICE_LANGUAGE", _language_lookup)
+_run_pii_check = _make_classify_runner("pii-check", "PRICE_PII_CHECK", _pii_check_lookup)
 
 _WALLET_BALANCE_EXTENSIONS = declare_mcp_discovery_extension(
     DeclareMcpDiscoveryConfig(
@@ -1507,6 +1638,133 @@ async def token_risk_tool(
         extensions=_TOKEN_RISK_EXTENSIONS,
         run_and_log=_run_token_risk,
     )
+
+
+if SENTIMENT_ENABLED:
+    @mcp.tool(
+        name="sentiment",
+        title="Sentiment Analysis",
+        description=ROUTE_DESCRIPTIONS["sentiment"],
+        output_schema=SENTIMENT_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def sentiment_tool(
+        text: Annotated[str, Field(description=SENTIMENT_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="sentiment", route_key="POST /sentiment", ctx=ctx,
+            args={"text": text}, extensions=_SENTIMENT_EXTENSIONS, run_and_log=_run_sentiment,
+        )
+
+
+if CLASSIFY_ENABLED:
+    @mcp.tool(
+        name="classify",
+        title="Text Classification",
+        description=ROUTE_DESCRIPTIONS["classify"],
+        output_schema=CLASSIFY_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def classify_tool(
+        text: Annotated[str, Field(description=CLASSIFY_INPUT_SCHEMA["properties"]["text"]["description"])],
+        labels: Annotated[list[str], Field(description=CLASSIFY_INPUT_SCHEMA["properties"]["labels"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="classify", route_key="POST /classify", ctx=ctx,
+            args={"text": text, "labels": labels}, extensions=_CLASSIFY_EXTENSIONS, run_and_log=_run_classify,
+        )
+
+
+if INTENT_ENABLED:
+    @mcp.tool(
+        name="intent",
+        title="Intent Detection",
+        description=ROUTE_DESCRIPTIONS["intent"],
+        output_schema=INTENT_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def intent_tool(
+        text: Annotated[str, Field(description=INTENT_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="intent", route_key="POST /intent", ctx=ctx,
+            args={"text": text}, extensions=_INTENT_EXTENSIONS, run_and_log=_run_intent,
+        )
+
+
+if SPAM_CHECK_ENABLED:
+    @mcp.tool(
+        name="spam_check",
+        title="Spam Detection",
+        description=ROUTE_DESCRIPTIONS["spam-check"],
+        output_schema=SPAM_CHECK_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def spam_check_tool(
+        text: Annotated[str, Field(description=SPAM_CHECK_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="spam_check", route_key="POST /spam-check", ctx=ctx,
+            args={"text": text}, extensions=_SPAM_CHECK_EXTENSIONS, run_and_log=_run_spam_check,
+        )
+
+
+if TOXICITY_ENABLED:
+    @mcp.tool(
+        name="toxicity",
+        title="Toxicity Detection",
+        description=ROUTE_DESCRIPTIONS["toxicity"],
+        output_schema=TOXICITY_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def toxicity_tool(
+        text: Annotated[str, Field(description=TOXICITY_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="toxicity", route_key="POST /toxicity", ctx=ctx,
+            args={"text": text}, extensions=_TOXICITY_EXTENSIONS, run_and_log=_run_toxicity,
+        )
+
+
+if LANGUAGE_ENABLED:
+    @mcp.tool(
+        name="language",
+        title="Language Detection",
+        description=ROUTE_DESCRIPTIONS["language"],
+        output_schema=LANGUAGE_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def language_tool(
+        text: Annotated[str, Field(description=LANGUAGE_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="language", route_key="POST /language", ctx=ctx,
+            args={"text": text}, extensions=_LANGUAGE_EXTENSIONS, run_and_log=_run_language,
+        )
+
+
+if PII_CHECK_ENABLED:
+    @mcp.tool(
+        name="pii_check",
+        title="PII Detection",
+        description=ROUTE_DESCRIPTIONS["pii-check"],
+        output_schema=PII_CHECK_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def pii_check_tool(
+        text: Annotated[str, Field(description=PII_CHECK_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="pii_check", route_key="POST /pii-check", ctx=ctx,
+            args={"text": text}, extensions=_PII_CHECK_EXTENSIONS, run_and_log=_run_pii_check,
+        )
 
 
 # Withdrawn from the MCP tool set while RESEARCH_ENABLED is False (2026-09-30) -

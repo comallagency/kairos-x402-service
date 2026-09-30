@@ -620,6 +620,53 @@ ROUTE_DESCRIPTIONS = {
         "over instead, marked \"synthesis\":\"extractive\". Try GET "
         "/research/sample."
     ),
+    "sentiment": (
+        "Sentiment analysis: classify text as positive, negative, or neutral "
+        "with a confidence score and an alternate label. Powered by Jev, "
+        "with an automatic Groq-hosted LLM fallback if Jev is slow or "
+        "unavailable (\"engine\":\"jev\"|\"fallback\" in the response) - under "
+        "4.5s guaranteed. Try GET /sentiment/sample."
+    ),
+    "classify": (
+        "Classify text into your own labels (2-20, caller-supplied): the "
+        "best-fitting label with a confidence score and an alternate label. "
+        "Powered by Jev, falling back to a Groq-hosted LLM if Jev is slow or "
+        "unavailable - under 4.5s guaranteed. Try GET /classify/sample."
+    ),
+    "intent": (
+        "Intent detection: classify text as a question, request, complaint, "
+        "compliment, or other, with a confidence score and an alternate "
+        "label. Powered by Jev, with an automatic Groq-hosted LLM fallback "
+        "if Jev is slow or unavailable - under 4.5s guaranteed. Try GET "
+        "/intent/sample."
+    ),
+    "spam-check": (
+        "Spam detection: classify text as spam or not spam with a "
+        "confidence score. Powered by Jev, with an automatic Groq-hosted "
+        "LLM fallback if Jev is slow or unavailable - under 4.5s "
+        "guaranteed. Try GET /spam-check/sample."
+    ),
+    "toxicity": (
+        "Toxicity detection: classify text as toxic or not toxic (hate "
+        "speech, harassment, threats, severe offensive language) with a "
+        "confidence score. Powered by Jev, with an automatic Groq-hosted "
+        "LLM fallback if Jev is slow or unavailable - under 4.5s "
+        "guaranteed. Try GET /toxicity/sample."
+    ),
+    "language": (
+        "Language detection: identify which of 20 common languages (or "
+        "\"other\") a text is written in, with a confidence score. Powered "
+        "by Jev, with an automatic Groq-hosted LLM fallback if Jev is slow "
+        "or unavailable - under 4.5s guaranteed. Try GET /language/sample."
+    ),
+    "pii-check": (
+        "PII detection: flag whether text contains personally identifiable "
+        "information (name plus contact details, email, phone, address, "
+        "government ID, financial account) with a confidence score. "
+        "Powered by Jev, with an automatic Groq-hosted LLM fallback if Jev "
+        "is slow or unavailable - under 4.5s guaranteed. Try GET "
+        "/pii-check/sample."
+    ),
 }
 
 # Non-vital startup check: a description that grew past the Bazaar limit is
@@ -1551,6 +1598,13 @@ ROUTE_SUMMARIES = {
         "Rank up to 50 documents by relevance to a query in one call, each with "
         "its relevance probability."
     ),
+    "sentiment": "Classify text sentiment (positive/negative/neutral) with a confidence score - Jev-powered, LLM fallback.",
+    "classify": "Classify text into your own custom labels (2-20) with a confidence score - Jev-powered, LLM fallback.",
+    "intent": "Detect the intent behind text (question/request/complaint/compliment) with a confidence score - Jev-powered.",
+    "spam-check": "Detect spam text with a confidence score - Jev-powered, LLM fallback.",
+    "toxicity": "Detect toxic text (hate speech, harassment, threats) with a confidence score - Jev-powered.",
+    "language": "Detect which of 20 common languages a text is written in - Jev-powered.",
+    "pii-check": "Detect personally identifiable information in text - Jev-powered.",
 }
 
 ROUTE_USE_CASES = {
@@ -1919,6 +1973,77 @@ TOKEN_RISK_OUTPUT_SCHEMA = {
 }
 
 
+# Pack 1 (2026-09-30): shared input/output schema shape for the 7
+# Jev-engine text-classification routes - all return {label, probability,
+# alternate_label, alternate_probability, engine} plus the usual receipt.
+_CLASSIFY_TEXT_INPUT_SCHEMA = {
+    "properties": {
+        "text": {"type": "string", "description": "Text to classify, up to 4000 characters."},
+    },
+    "required": ["text"],
+}
+
+_CLASSIFY_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "label": {"type": "string", "description": "The best-fitting label."},
+        "probability": {"type": "number", "description": "Confidence in `label`, 0 to 1."},
+        "alternate_label": {"type": ["string", "null"], "description": "The second-best label, if any."},
+        "alternate_probability": {"type": ["number", "null"], "description": "Confidence in `alternate_label`, if known."},
+        "engine": {"type": "string", "enum": ["jev", "fallback"], "description": "Which engine answered: Jev (primary) or the Groq-hosted LLM fallback."},
+        "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
+    },
+    "required": ["label", "probability", "engine"],
+}
+
+SENTIMENT_SAMPLE_INPUT = {"text": "This product exceeded all my expectations, I love it!"}
+SENTIMENT_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
+SENTIMENT_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
+SENTIMENT_SAMPLE_OUTPUT = {"label": "positive", "probability": 0.93, "alternate_label": "neutral", "alternate_probability": 0.06, "engine": "jev"}
+
+INTENT_SAMPLE_INPUT = {"text": "Can you please reset my password?"}
+INTENT_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
+INTENT_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
+INTENT_SAMPLE_OUTPUT = {"label": "request", "probability": 0.71, "alternate_label": "question", "alternate_probability": 0.18, "engine": "jev"}
+
+SPAM_CHECK_SAMPLE_INPUT = {"text": "Hi Sarah, just confirming our meeting tomorrow at 3pm."}
+SPAM_CHECK_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
+SPAM_CHECK_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
+SPAM_CHECK_SAMPLE_OUTPUT = {"label": "not_spam", "probability": 0.97, "alternate_label": "spam", "alternate_probability": 0.03, "engine": "jev"}
+
+TOXICITY_SAMPLE_INPUT = {"text": "I disagree with your point, but I respect your perspective."}
+TOXICITY_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
+TOXICITY_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
+TOXICITY_SAMPLE_OUTPUT = {"label": "not_toxic", "probability": 0.95, "alternate_label": "toxic", "alternate_probability": 0.05, "engine": "jev"}
+
+PII_CHECK_SAMPLE_INPUT = {"text": "The quarterly report shows a 12% increase in revenue."}
+PII_CHECK_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
+PII_CHECK_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
+PII_CHECK_SAMPLE_OUTPUT = {"label": "no_pii", "probability": 0.91, "alternate_label": "pii_detected", "alternate_probability": 0.09, "engine": "jev"}
+
+LANGUAGE_SAMPLE_INPUT = {"text": "The quick brown fox jumps over the lazy dog."}
+LANGUAGE_INPUT_SCHEMA = _CLASSIFY_TEXT_INPUT_SCHEMA
+LANGUAGE_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
+LANGUAGE_SAMPLE_OUTPUT = {"label": "en", "probability": 0.98, "alternate_label": "other", "alternate_probability": 0.01, "engine": "jev"}
+
+CLASSIFY_SAMPLE_INPUT = {
+    "text": "I was charged twice for my subscription this month.",
+    "labels": ["billing", "technical", "account", "other"],
+}
+CLASSIFY_INPUT_SCHEMA = {
+    "properties": {
+        "text": {"type": "string", "description": "Text to classify, up to 4000 characters."},
+        "labels": {
+            "type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 20,
+            "description": "2 to 20 candidate labels, your own choice of wording.",
+        },
+    },
+    "required": ["text", "labels"],
+}
+CLASSIFY_OUTPUT_SCHEMA = _CLASSIFY_OUTPUT_SCHEMA
+CLASSIFY_SAMPLE_OUTPUT = {"label": "billing", "probability": 0.81, "alternate_label": "technical", "alternate_probability": 0.14, "engine": "jev"}
+
+
 RESEARCH_SAMPLE_INPUT = {"query": "What are the main features of the Rust programming language?"}
 
 RESEARCH_INPUT_SCHEMA = {
@@ -2021,6 +2146,13 @@ def _core_route_configs() -> dict[str, RouteConfig]:
     # top-of-file import here would be circular.
     from app.handlers.llm_gateway import SAMPLE_REQUEST, SAMPLE_RESPONSE, UPTO_ENABLED, compute_ceiling_price
     from app.handlers.research import RESEARCH_ENABLED
+    from app.handlers.sentiment import SENTIMENT_ENABLED
+    from app.handlers.classify import CLASSIFY_ENABLED
+    from app.handlers.intent import INTENT_ENABLED
+    from app.handlers.spam_check import SPAM_CHECK_ENABLED
+    from app.handlers.toxicity import TOXICITY_ENABLED
+    from app.handlers.language import LANGUAGE_ENABLED
+    from app.handlers.pii_check import PII_CHECK_ENABLED
 
     _llm_gateway_accepts = [_payment_option(compute_ceiling_price)]
     if UPTO_ENABLED:
@@ -2747,9 +2879,128 @@ def _core_route_configs() -> dict[str, RouteConfig]:
                 output=OutputConfig(example=SAMPLE_RESPONSE, schema=LLM_GATEWAY_OUTPUT_SCHEMA),
             ),
         ),
+        "POST /sentiment": RouteConfig(
+            accepts=_payment_option(config.PRICE_SENTIMENT),
+            resource=f"{config.BASE_URL}/sentiment",
+            description=ROUTE_DESCRIPTIONS["sentiment"],
+            mime_type="application/json",
+            service_name="sentiment-analysis",
+            icon_url=ICON_URL,
+            tags=["sentiment analysis", "text sentiment", "opinion mining", "Powered by Jev"],
+            extensions=declare_discovery_extension(
+                input=SENTIMENT_SAMPLE_INPUT,
+                input_schema=SENTIMENT_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=SENTIMENT_SAMPLE_OUTPUT, schema=SENTIMENT_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /classify": RouteConfig(
+            accepts=_payment_option(config.PRICE_CLASSIFY),
+            resource=f"{config.BASE_URL}/classify",
+            description=ROUTE_DESCRIPTIONS["classify"],
+            mime_type="application/json",
+            service_name="text-classification",
+            icon_url=ICON_URL,
+            tags=["classify text", "text classification", "custom labels", "Powered by Jev"],
+            extensions=declare_discovery_extension(
+                input=CLASSIFY_SAMPLE_INPUT,
+                input_schema=CLASSIFY_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=CLASSIFY_SAMPLE_OUTPUT, schema=CLASSIFY_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /intent": RouteConfig(
+            accepts=_payment_option(config.PRICE_INTENT),
+            resource=f"{config.BASE_URL}/intent",
+            description=ROUTE_DESCRIPTIONS["intent"],
+            mime_type="application/json",
+            service_name="intent-detection",
+            icon_url=ICON_URL,
+            tags=["intent detection", "intent classification", "text intent", "Powered by Jev"],
+            extensions=declare_discovery_extension(
+                input=INTENT_SAMPLE_INPUT,
+                input_schema=INTENT_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=INTENT_SAMPLE_OUTPUT, schema=INTENT_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /spam-check": RouteConfig(
+            accepts=_payment_option(config.PRICE_SPAM_CHECK),
+            resource=f"{config.BASE_URL}/spam-check",
+            description=ROUTE_DESCRIPTIONS["spam-check"],
+            mime_type="application/json",
+            service_name="spam-detection",
+            icon_url=ICON_URL,
+            tags=["spam detection", "spam filter", "spam classifier", "Powered by Jev"],
+            extensions=declare_discovery_extension(
+                input=SPAM_CHECK_SAMPLE_INPUT,
+                input_schema=SPAM_CHECK_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=SPAM_CHECK_SAMPLE_OUTPUT, schema=SPAM_CHECK_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /toxicity": RouteConfig(
+            accepts=_payment_option(config.PRICE_TOXICITY),
+            resource=f"{config.BASE_URL}/toxicity",
+            description=ROUTE_DESCRIPTIONS["toxicity"],
+            mime_type="application/json",
+            service_name="toxicity-detection",
+            icon_url=ICON_URL,
+            tags=["toxicity detection", "content moderation", "hate speech detection", "Powered by Jev"],
+            extensions=declare_discovery_extension(
+                input=TOXICITY_SAMPLE_INPUT,
+                input_schema=TOXICITY_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=TOXICITY_SAMPLE_OUTPUT, schema=TOXICITY_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /language": RouteConfig(
+            accepts=_payment_option(config.PRICE_LANGUAGE),
+            resource=f"{config.BASE_URL}/language",
+            description=ROUTE_DESCRIPTIONS["language"],
+            mime_type="application/json",
+            service_name="language-detection",
+            icon_url=ICON_URL,
+            tags=["language detection", "language identification", "detect language", "Powered by Jev"],
+            extensions=declare_discovery_extension(
+                input=LANGUAGE_SAMPLE_INPUT,
+                input_schema=LANGUAGE_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=LANGUAGE_SAMPLE_OUTPUT, schema=LANGUAGE_OUTPUT_SCHEMA),
+            ),
+        ),
+        "POST /pii-check": RouteConfig(
+            accepts=_payment_option(config.PRICE_PII_CHECK),
+            resource=f"{config.BASE_URL}/pii-check",
+            description=ROUTE_DESCRIPTIONS["pii-check"],
+            mime_type="application/json",
+            service_name="pii-detection",
+            icon_url=ICON_URL,
+            tags=["PII detection", "PII scanner", "personal data detection", "Powered by Jev"],
+            extensions=declare_discovery_extension(
+                input=PII_CHECK_SAMPLE_INPUT,
+                input_schema=PII_CHECK_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=PII_CHECK_SAMPLE_OUTPUT, schema=PII_CHECK_OUTPUT_SCHEMA),
+            ),
+        ),
     }
     if not RESEARCH_ENABLED:
         _routes.pop("POST /research", None)
+    if not SENTIMENT_ENABLED:
+        _routes.pop("POST /sentiment", None)
+    if not CLASSIFY_ENABLED:
+        _routes.pop("POST /classify", None)
+    if not INTENT_ENABLED:
+        _routes.pop("POST /intent", None)
+    if not SPAM_CHECK_ENABLED:
+        _routes.pop("POST /spam-check", None)
+    if not TOXICITY_ENABLED:
+        _routes.pop("POST /toxicity", None)
+    if not LANGUAGE_ENABLED:
+        _routes.pop("POST /language", None)
+    if not PII_CHECK_ENABLED:
+        _routes.pop("POST /pii-check", None)
     return _routes
 
 
