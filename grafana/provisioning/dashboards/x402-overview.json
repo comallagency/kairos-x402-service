@@ -97,9 +97,9 @@
             "type": "frser-sqlite-datasource",
             "uid": "requests-db"
           },
-          "queryText": "SELECT strftime('%Y-%m-%dT%H:00:00Z', ts) AS time, COUNT(*) AS requests FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route') GROUP BY time ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', strftime('%Y-%m-%dT%H:00:00Z', ts)) AS INTEGER) * 1000 AS time, COUNT(*) AS requests FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route') GROUP BY time ORDER BY time",
           "queryType": "time_series",
-          "rawQueryText": "SELECT strftime('%Y-%m-%dT%H:00:00Z', ts) AS time, COUNT(*) AS requests FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route') GROUP BY time ORDER BY time",
+          "rawQueryText": "SELECT CAST(strftime('%s', strftime('%Y-%m-%dT%H:00:00Z', ts)) AS INTEGER) * 1000 AS time, COUNT(*) AS requests FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route') GROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
@@ -129,9 +129,9 @@
             "type": "frser-sqlite-datasource",
             "uid": "requests-db"
           },
-          "queryText": "SELECT date AS time, COUNT(DISTINCT ip) AS distinct_visitors FROM daily_visitors WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND class NOT IN ('prober', 'indexer') AND ip != '169.58.121.36' GROUP BY date ORDER BY date",
+          "queryText": "SELECT CAST(strftime('%s', date) AS INTEGER) * 1000 AS time, COUNT(DISTINCT ip) AS distinct_visitors FROM daily_visitors WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND class NOT IN ('prober', 'indexer') AND ip != '169.58.121.36' GROUP BY date ORDER BY date",
           "queryType": "time_series",
-          "rawQueryText": "SELECT date AS time, COUNT(DISTINCT ip) AS distinct_visitors FROM daily_visitors WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND class NOT IN ('prober', 'indexer') AND ip != '169.58.121.36' GROUP BY date ORDER BY date",
+          "rawQueryText": "SELECT CAST(strftime('%s', date) AS INTEGER) * 1000 AS time, COUNT(DISTINCT ip) AS distinct_visitors FROM daily_visitors WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND class NOT IN ('prober', 'indexer') AND ip != '169.58.121.36' GROUP BY date ORDER BY date",
           "refId": "A"
         }
       ],
@@ -175,7 +175,7 @@
     },
     {
       "id": 4,
-      "title": "Entonnoir: tentatives de paiement",
+      "title": "Entonnoir: tentatives de paiement (reelles)",
       "type": "stat",
       "datasource": {
         "type": "frser-sqlite-datasource",
@@ -193,9 +193,9 @@
             "type": "frser-sqlite-datasource",
             "uid": "requests-db"
           },
-          "queryText": "SELECT SUM(CASE WHEN status IN ('paid','payment_failed') THEN 1 ELSE 0 END) AS value FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route')",
+          "queryText": "SELECT SUM(CASE WHEN status IN ('paid','payment_failed') AND payer IS NOT NULL AND lower(payer) NOT IN ('0xb3f32bdfe8d07825bc0d7387295ab1d7559ba69d','0x3cedc3cba49c3809ee46b9bf60da75d6607b45ec') AND (user_agent IS NULL OR lower(user_agent) NOT LIKE 'python-httpx%') THEN 1 ELSE 0 END) AS value FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route')",
           "queryType": "table",
-          "rawQueryText": "SELECT SUM(CASE WHEN status IN ('paid','payment_failed') THEN 1 ELSE 0 END) AS value FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route')",
+          "rawQueryText": "SELECT SUM(CASE WHEN status IN ('paid','payment_failed') AND payer IS NOT NULL AND lower(payer) NOT IN ('0xb3f32bdfe8d07825bc0d7387295ab1d7559ba69d','0x3cedc3cba49c3809ee46b9bf60da75d6607b45ec') AND (user_agent IS NULL OR lower(user_agent) NOT LIKE 'python-httpx%') THEN 1 ELSE 0 END) AS value FROM requests WHERE ts >= '${__from:date:iso}' AND ts <= '${__to:date:iso}' AND ('$route' = 'All' OR route = '$route')",
           "refId": "A"
         }
       ],
@@ -257,9 +257,9 @@
             "type": "frser-sqlite-datasource",
             "uid": "requests-db"
           },
-          "queryText": "SELECT date(block_time) AS time, SUM(amount_usdc) AS revenue_day FROM chain_payments WHERE is_mechanical = 0 AND block_time >= '${__from:date:iso}' AND block_time <= '${__to:date:iso}' GROUP BY time ORDER BY time",
+          "queryText": "SELECT CAST(strftime('%s', date(block_time)) AS INTEGER) * 1000 AS time, SUM(amount_usdc) AS revenue_day FROM chain_payments WHERE is_mechanical = 0 AND block_time >= '${__from:date:iso}' AND block_time <= '${__to:date:iso}' GROUP BY time ORDER BY time",
           "queryType": "time_series",
-          "rawQueryText": "SELECT date(block_time) AS time, SUM(amount_usdc) AS revenue_day FROM chain_payments WHERE is_mechanical = 0 AND block_time >= '${__from:date:iso}' AND block_time <= '${__to:date:iso}' GROUP BY time ORDER BY time",
+          "rawQueryText": "SELECT CAST(strftime('%s', date(block_time)) AS INTEGER) * 1000 AS time, SUM(amount_usdc) AS revenue_day FROM chain_payments WHERE is_mechanical = 0 AND block_time >= '${__from:date:iso}' AND block_time <= '${__to:date:iso}' GROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
@@ -289,9 +289,9 @@
             "type": "frser-sqlite-datasource",
             "uid": "requests-db"
           },
-          "queryText": "SELECT date AS time, COUNT(*) AS new_buyers FROM daily_visitors WHERE class = 'buyer' AND is_new = 1 AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') GROUP BY date ORDER BY date",
+          "queryText": "SELECT CAST(strftime('%s', date) AS INTEGER) * 1000 AS time, COUNT(*) AS new_buyers FROM daily_visitors WHERE class = 'buyer' AND is_new = 1 AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') GROUP BY date ORDER BY date",
           "queryType": "time_series",
-          "rawQueryText": "SELECT date AS time, COUNT(*) AS new_buyers FROM daily_visitors WHERE class = 'buyer' AND is_new = 1 AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') GROUP BY date ORDER BY date",
+          "rawQueryText": "SELECT CAST(strftime('%s', date) AS INTEGER) * 1000 AS time, COUNT(*) AS new_buyers FROM daily_visitors WHERE class = 'buyer' AND is_new = 1 AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') GROUP BY date ORDER BY date",
           "refId": "A"
         }
       ],
@@ -367,7 +367,7 @@
     },
     {
       "id": 10,
-      "title": "Erreurs 4xx/5xx par route",
+      "title": "Erreurs 4xx/5xx par route publique (periode choisie en haut)",
       "type": "table",
       "datasource": {
         "type": "frser-sqlite-datasource",
@@ -385,9 +385,9 @@
             "type": "frser-sqlite-datasource",
             "uid": "requests-db"
           },
-          "queryText": "SELECT route, SUM(c_4xx_other) AS c_4xx, SUM(c_5xx) AS c_5xx, SUM(c_404) AS c_404 FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ('$route' = 'All' OR route = '$route') GROUP BY route ORDER BY c_5xx DESC, c_4xx DESC",
+          "queryText": "SELECT route, SUM(c_4xx_other) AS c_4xx, SUM(c_5xx) AS c_5xx, SUM(c_404) AS c_404 FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND route NOT LIKE '/admin%' AND ('$route' = 'All' OR ltrim(route, '/') = '$route') GROUP BY route ORDER BY c_5xx DESC, c_4xx DESC",
           "queryType": "table",
-          "rawQueryText": "SELECT route, SUM(c_4xx_other) AS c_4xx, SUM(c_5xx) AS c_5xx, SUM(c_404) AS c_404 FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ('$route' = 'All' OR route = '$route') GROUP BY route ORDER BY c_5xx DESC, c_4xx DESC",
+          "rawQueryText": "SELECT route, SUM(c_4xx_other) AS c_4xx, SUM(c_5xx) AS c_5xx, SUM(c_404) AS c_404 FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND route NOT LIKE '/admin%' AND ('$route' = 'All' OR ltrim(route, '/') = '$route') GROUP BY route ORDER BY c_5xx DESC, c_4xx DESC",
           "refId": "A"
         }
       ],
@@ -395,7 +395,41 @@
         "defaults": {},
         "overrides": []
       },
-      "options": {}
+      "options": {},
+      "description": "Source: nginx access log (daily_route_stats, day granularity) - the requests table has no real HTTP status code, only application-level outcomes."
+    },
+    {
+      "id": 14,
+      "title": "Erreurs 5xx des dernieres 24h (avec cause)",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "requests-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "requests-db"
+          },
+          "queryText": "SELECT route, error_reason, COUNT(*) AS n, MAX(ts) AS last_seen FROM requests WHERE status = 'error' AND ts >= datetime('now', '-24 hours') AND route NOT LIKE 'admin%' GROUP BY route, error_reason ORDER BY n DESC",
+          "queryType": "table",
+          "rawQueryText": "SELECT route, error_reason, COUNT(*) AS n, MAX(ts) AS last_seen FROM requests WHERE status = 'error' AND ts >= datetime('now', '-24 hours') AND route NOT LIKE 'admin%' GROUP BY route, error_reason ORDER BY n DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "description": "Source: requests.error_reason (application-level cause) - rolling last 24h, independent of the time picker above."
     },
     {
       "id": 11,
@@ -417,9 +451,9 @@
             "type": "frser-sqlite-datasource",
             "uid": "requests-db"
           },
-          "queryText": "SELECT route, ROUND(AVG(p50_ms), 1) AS p50_ms, ROUND(AVG(p95_ms), 1) AS p95_ms FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ('$route' = 'All' OR route = '$route') GROUP BY route ORDER BY p95_ms DESC",
+          "queryText": "SELECT route, ROUND(AVG(p50_ms), 1) AS p50_ms, ROUND(AVG(p95_ms), 1) AS p95_ms FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ('$route' = 'All' OR ltrim(route, '/') = '$route') GROUP BY route ORDER BY p95_ms DESC",
           "queryType": "table",
-          "rawQueryText": "SELECT route, ROUND(AVG(p50_ms), 1) AS p50_ms, ROUND(AVG(p95_ms), 1) AS p95_ms FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ('$route' = 'All' OR route = '$route') GROUP BY route ORDER BY p95_ms DESC",
+          "rawQueryText": "SELECT route, ROUND(AVG(p50_ms), 1) AS p50_ms, ROUND(AVG(p95_ms), 1) AS p95_ms FROM daily_route_stats WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') AND ('$route' = 'All' OR ltrim(route, '/') = '$route') GROUP BY route ORDER BY p95_ms DESC",
           "refId": "A"
         }
       ],
@@ -427,7 +461,8 @@
         "defaults": {},
         "overrides": []
       },
-      "options": {}
+      "options": {},
+      "description": "Source: nginx $request_time (daily_route_stats). Verified 2026-09-30 against real external calls - matches (see batch report)."
     },
     {
       "id": 12,
@@ -449,9 +484,9 @@
             "type": "frser-sqlite-datasource",
             "uid": "requests-db"
           },
-          "queryText": "SELECT date AS time, score, uptime_pct * 100 AS uptime_pct FROM reputation_snapshots WHERE source = 'agenteconomy' AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date",
+          "queryText": "SELECT CAST(strftime('%s', date) AS INTEGER) * 1000 AS time, score, uptime_pct * 100 AS uptime_pct FROM reputation_snapshots WHERE source = 'agenteconomy' AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date",
           "queryType": "time_series",
-          "rawQueryText": "SELECT date AS time, score, uptime_pct * 100 AS uptime_pct FROM reputation_snapshots WHERE source = 'agenteconomy' AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date",
+          "rawQueryText": "SELECT CAST(strftime('%s', date) AS INTEGER) * 1000 AS time, score, uptime_pct * 100 AS uptime_pct FROM reputation_snapshots WHERE source = 'agenteconomy' AND date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date",
           "refId": "A"
         }
       ],
@@ -481,9 +516,9 @@
             "type": "frser-sqlite-datasource",
             "uid": "requests-db"
           },
-          "queryText": "SELECT date AS time, query, rank FROM bazaar_rank_history WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date, query",
+          "queryText": "SELECT CAST(strftime('%s', date) AS INTEGER) * 1000 AS time, query, rank FROM bazaar_rank_history WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date, query",
           "queryType": "time_series",
-          "rawQueryText": "SELECT date AS time, query, rank FROM bazaar_rank_history WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date, query",
+          "rawQueryText": "SELECT CAST(strftime('%s', date) AS INTEGER) * 1000 AS time, query, rank FROM bazaar_rank_history WHERE date >= date('${__from:date:iso}') AND date <= date('${__to:date:iso}') ORDER BY date, query",
           "refId": "A"
         }
       ],
