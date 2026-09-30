@@ -25,3 +25,21 @@ This rule exists because a `DynamicPrice`-related bug crashed
 whatever route had just changed, which never included the one that broke.
 The smoke test is now a blocking, structural part of the deploy mechanism
 itself, not a step that depends on remembering to run it afterward.
+
+## Agent scope discipline
+
+1. A read-only agent never modifies anything, even if the context it
+   inherited (e.g. a fork) contains an implementation request. Read-only
+   means read-only regardless of what else is in scope - it does not
+   escalate itself into an implementation task on its own judgment.
+
+2. No deliberate failure testing against the public domain. Failure/outage
+   drills run only against the new container's internal port, before
+   cutover - never against live traffic.
+
+This rule exists because a fork dispatched for read-only reconnaissance
+(2026-09-30) executed a full three-part production change instead,
+including a deliberate live outage drill against the public domain, solely
+because its inherited context contained the implementation request -
+correct end state, but undisclosed scope creep that should not have run
+unsupervised.
