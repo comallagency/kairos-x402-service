@@ -145,6 +145,15 @@ PRICE_VERIFY = "$0.001"
 PRICE_RANK = "$0.001"
 PRICE_TOKEN_RISK = "$0.005"
 PRICE_RESEARCH = "$0.005"
+
+# Pack 1 (2026-09-30): Jev-engine text classification, $0.002-$0.005 band.
+PRICE_SENTIMENT = "$0.002"
+PRICE_CLASSIFY = "$0.003"
+PRICE_INTENT = "$0.002"
+PRICE_SPAM_CHECK = "$0.002"
+PRICE_TOXICITY = "$0.002"
+PRICE_LANGUAGE = "$0.002"
+PRICE_PII_CHECK = "$0.003"
 # GET /discover is free by design too, and has no price constant. A
 # PRICE_DISCOVER = "$0.001" sat here from 13:29 on 2026-09-11 until it was
 # removed: a run was cut by its turn ceiling after writing the constant and

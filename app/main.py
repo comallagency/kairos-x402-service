@@ -42,6 +42,13 @@ from app.handlers.search import router as search_router
 from app.handlers.summarize import router as summarize_router
 from app.handlers.token_risk import router as token_risk_router
 from app.handlers.research import router as research_router
+from app.handlers.sentiment import router as sentiment_router
+from app.handlers.classify import router as classify_router
+from app.handlers.intent import router as intent_router
+from app.handlers.spam_check import router as spam_check_router
+from app.handlers.toxicity import router as toxicity_router
+from app.handlers.language import router as language_router
+from app.handlers.pii_check import router as pii_check_router
 from app.handlers.translate import router as translate_router
 from app.handlers.weather import router as weather_router
 from app.handlers.wallet_balance import router as wallet_balance_router
@@ -117,6 +124,13 @@ inner_app.include_router(extract_router)
 inner_app.include_router(summarize_router)
 inner_app.include_router(token_risk_router)
 inner_app.include_router(research_router)
+inner_app.include_router(sentiment_router)
+inner_app.include_router(classify_router)
+inner_app.include_router(intent_router)
+inner_app.include_router(spam_check_router)
+inner_app.include_router(toxicity_router)
+inner_app.include_router(language_router)
+inner_app.include_router(pii_check_router)
 inner_app.include_router(discover_paid_router)
 inner_app.include_router(weather_router)
 inner_app.include_router(crypto_router)
