@@ -113,7 +113,8 @@ _SYSTEM_PROMPT = (
     "claim drawn from a source, cite it in square brackets, e.g. [1] or "
     "[1][2] if two sources support it. If the sources do not fully answer "
     "the question, say so plainly rather than guessing or using outside "
-    "knowledge."
+    "knowledge. Round any numbers you write, such as prices or "
+    "percentages, to 2 decimal places."
 )
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
@@ -130,6 +131,27 @@ class ResearchError(Exception):
 
 def _source_text(result: dict) -> str:
     return (result.get("content_markdown") or result.get("extract") or "")[:RESEARCH_CONTENT_CHARS]
+
+
+_NUMBER_ROUND_RE = re.compile(r"(?<![\d.,])(\d{1,3}(?:,\d{3})*|\d+)\.(\d{3,})(?!\d)(?!\.\d)")
+
+
+def _round_numbers(text: str) -> str:
+    """Rounds decimal numbers with 3+ fraction digits down to 2 (raw source
+    text often carries far more precision than useful for a price or a
+    percentage, e.g. a crypto quote with 6 decimal digits) before that text
+    reaches the synthesis prompt. Only touches numbers that already have
+    3+ fraction digits, so clean 2-decimal figures pass through untouched,
+    and the lookbehind/lookahead guards skip anything that looks like part
+    of a longer dotted sequence (IP addresses, version strings)."""
+    def repl(match: "re.Match") -> str:
+        int_part, frac = match.group(1), match.group(2)
+        rounded = f"{float(int_part.replace(',', '') + '.' + frac):.2f}"
+        if "," not in int_part:
+            return rounded
+        whole, dec = rounded.split(".")
+        return f"{int(whole):,}.{dec}"
+    return _NUMBER_ROUND_RE.sub(repl, text)
 
 
 async def _run_search(query: str, max_sources: int) -> list[dict]:
@@ -153,7 +175,7 @@ def _build_sources_block(results: list[dict]) -> str:
     lines = []
     for i, r in enumerate(results, start=1):
         title = r.get("title") or r.get("url")
-        lines.append(f"[{i}] {title} ({r.get('url')}): {_source_text(r)}")
+        lines.append(f"[{i}] {title} ({r.get('url')}): {_round_numbers(_source_text(r))}")
     return "\n\n".join(lines)
 
 
