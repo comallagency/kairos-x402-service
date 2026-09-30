@@ -142,6 +142,11 @@ def _network_block(network: str) -> dict:
 
 
 def _activity_stats(events: list[dict]) -> dict:
+    """paid_usdc excludes mechanical-wallet/bootstrap-script rows (2026-09-30,
+    same fix and same reasoning as _live_classify/_compute_agg_24h) - by_status/
+    by_route counts are left as raw totals (they already describe the whole
+    24h event stream, not a "real buyers" metric)."""
+    mechanical = db.mechanical_wallets()
     by_status: dict[str, int] = {}
     by_route: dict[str, int] = {}
     paid_usdc = 0.0
@@ -150,7 +155,7 @@ def _activity_stats(events: list[dict]) -> dict:
         by_status[st] = by_status.get(st, 0) + 1
         rt = row.get("route") or "?"
         by_route[rt] = by_route.get(rt, 0) + 1
-        if st == "paid" and row.get("amount_usdc") is not None:
+        if st == "paid" and row.get("amount_usdc") is not None and not _is_mechanical_traffic(row.get("user_agent") or "", row.get("payer"), mechanical):
             try:
                 paid_usdc += float(row["amount_usdc"])
             except (TypeError, ValueError):
@@ -201,8 +206,32 @@ def _live_is_scanner(ua: str) -> bool:
     return any(p.search(ua) for p in _LIVE_SCAN_RE)
 
 
-def _live_classify(status: str, ua: str, paid: bool, failed: bool) -> str:
+# Our own bootstrap scripts (scripts/bootstrap_*.py) all use the x402 SDK's
+# httpx client with its default, never-overridden User-Agent - a real
+# buyer using Python+httpx directly is a real (if rare) possibility, so
+# this alone isn't proof, but combined with a MECHANICAL_WALLETS payer
+# (the fully reliable signal - only we hold those keys) it correctly
+# catches both the self-payment itself AND the bootstrap's own pre-payment
+# noise (402 probes, /sample calls) that never carries a payer at all.
+_OWN_SCRIPT_UA_RE = re.compile(r"^python-httpx", re.IGNORECASE)
+
+
+def _is_mechanical_traffic(ua: str, payer: str | None, mechanical: set[str]) -> bool:
+    if (payer or "").strip().lower() in mechanical:
+        return True
+    return bool(_OWN_SCRIPT_UA_RE.match(ua or ""))
+
+
+def _live_classify(status: str, ua: str, paid: bool, failed: bool, payer: str | None, mechanical: set[str]) -> str:
     ua = ua or ""
+    if _is_mechanical_traffic(ua, payer, mechanical):
+        # Found 2026-09-30: this was missing everywhere on /admin/live - a
+        # real query showed 36 of 45 "paid" rows in the last 24h (111 of
+        # 127 over 7d) were our own bootstrap/mechanical-wallet traffic,
+        # not real buyers. Every other admin page already excludes this
+        # (see db.py's history_7d/daily_overview/last_real_payment) - only
+        # the funnel/route-table/agents numbers computed here had not.
+        return "scan"
     if failed or status == "payment_failed":
         return "err"
     if _live_is_scanner(ua):
@@ -284,6 +313,7 @@ def _route_p50_latency_24h() -> dict[str, float]:
 
 
 def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> dict:
+    mechanical = db.mechanical_wallets()
     scan_n = interest_n = visit_n = paid_n = failed_n = 0
     by_ua: dict[str, dict] = {}
     by_route: dict[str, dict] = {}
@@ -291,9 +321,10 @@ def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> 
     for row in recent:
         status = row.get("status") or ""
         ua = (row.get("user_agent") or "").strip()
+        payer = row.get("payer")
         paid = status == "paid"
         failed = status == "payment_failed"
-        k = _live_classify(status, ua, paid, failed)
+        k = _live_classify(status, ua, paid, failed, payer, mechanical)
         if k == "scan":
             scan_n += 1
         elif k == "wait":
@@ -318,11 +349,19 @@ def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> 
             a["first"] = ts
         route = (row.get("route") or "").lstrip("/")
         a["routes"][route] = a["routes"].get(route, 0) + 1
-        if paid:
+        # Keyed off k (the row's actual classification), not the raw
+        # paid/failed/status booleans (2026-09-30 fix) - those raw booleans
+        # don't know about MECHANICAL_WALLETS or our own bootstrap-script
+        # UA, so a mechanical/self row still incremented these even after
+        # _live_classify() correctly reclassified it as "scan" above -
+        # found via a real check: the python-httpx agent still showed
+        # paid=36 here (its real, unfixed number) while route_perf's
+        # already-correct paid counts (keyed off k) showed the real ~9.
+        if k == "paid":
             a["paid"] += 1
-        if failed:
+        if k == "err":
             a["failed"] += 1
-        if status == "unpaid":
+        if k == "wait":
             a["unpaid"] += 1
 
         r = by_route.setdefault(
@@ -343,7 +382,7 @@ def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> 
 
     agents_full = list(by_ua.values())
     for a in agents_full:
-        a["is_scanner"] = _live_is_scanner(a["ua"])
+        a["is_scanner"] = _live_is_scanner(a["ua"]) or bool(_OWN_SCRIPT_UA_RE.match(a["ua"]))
         top_routes = sorted(a["routes"].items(), key=lambda kv: -kv[1])[:3]
         a["routes"] = [route for route, _ in top_routes]
     agents_full.sort(key=lambda a: (a["is_scanner"], -a["paid"], -a["n"]))
