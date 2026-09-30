@@ -1,10 +1,12 @@
 """POST /research — cited research synthesis on Base, < 4.5s guaranteed.
 
-v1 ("rapide"): internal web search (reusing /search's own pipeline
-in-process - no self-paid HTTP call, no second page fetch beyond what that
-pipeline already fetches) feeds a fast LLM (mistral-nemo, falling back to
-llama-3.3-70b) that writes a short cited answer, optionally checked by a
-single Jev call for overall claim support.
+v2 (2026-09-30, "Jev-powered research"): internal web search (reusing
+/search's own pipeline in-process - no self-paid HTTP call, no second page
+fetch beyond what that pipeline already fetches) feeds a single fast, PAID
+LLM call pinned to a specific provider, with a deterministic no-LLM
+extractive fallback if that call ever misses its own tight cap - never a
+second LLM call, so the total is bounded by construction, not by hoping an
+upstream is fast.
 
 Time-budget orchestrator, same pattern as /token-risk and /search (see
 their module docstrings for the incidents that shaped this): t0 = request
@@ -13,24 +15,54 @@ received, GLOBAL_DEADLINE_S total.
 - Search (internal run_web_search + the same content enrichment /search
   itself uses) gets its own SEARCH_TIMEOUT_S. No search results by then -
   whether genuinely empty or the search timed out - means there is nothing
-  to synthesize from, so this is the one hard failure case: 504, unsettled.
-- Synthesis gets SYNTHESIS_TIMEOUT_S. A synthesis failure (upstream error or
-  timeout) is the other hard failure case: 502, unsettled - without an
-  answer there is nothing to sell.
-- Claim verification (a single Jev call checking whether the answer's
+  to synthesize from, so this is the one hard failure case: 422, unsettled
+  (a voluntary "couldn't produce a result", never a 5xx - x402's own
+  settlement rule skips any status >= 400 regardless).
+- Synthesis gets a FIXED SYNTHESIS_TIMEOUT_S = 1.5s cap. v1 (still in git
+  history) tried "mistral-nemo, falling back to llama-3.3-70b" with NO
+  provider pinned, and measured 1.4-11.7s latency across repeated identical
+  calls - only 3/10 real end-to-end calls succeeded within budget,
+  diagnosed 2026-09-30 as OpenRouter silently load-balancing across EVERY
+  provider that serves that model id, including slow/degraded ones (one of
+  mistral-nemo's own providers, Novita, measured 37.9% uptime the same
+  day). The model choice itself was never the problem - a live latency
+  test that day, pinning meta-llama/llama-3.3-70b-instruct to ONLY its
+  Groq-hosted endpoint (provider={"only": ["Groq"], "allow_fallbacks":
+  False}), measured 0.72-1.13s across 5 real calls with a realistic
+  research prompt - comfortably inside a 1.5s cap, with Groq's own
+  uptime_last_30m at 99.79% that day. That pin is RESEARCH_MODEL /
+  RESEARCH_MODEL_PROVIDER below. On a miss (Groq itself times out or
+  errors - rare, but not assumed away), there is deliberately no second
+  LLM call - retrying anywhere, even a fast provider, risks compounding
+  past the deadline. Instead: EXTRACTIVE fallback (_extractive_synthesize)
+  - the most relevant sentences already sitting in the search results
+  themselves (no upstream call required to have SOME answer), picked by a
+  single bounded Jev /rank-style call when enough budget remains, falling
+  back further to a deterministic keyword-overlap heuristic (same
+  Jev-then-deterministic pattern already used by websearch.py's rerank and
+  token_risk.py's verdict) when it doesn't. Every sentence in an extractive
+  answer is a verbatim quote from its cited source, so claims_verified is
+  trivially true for that path - there is nothing to check that isn't
+  already a direct copy.
+- Claim verification (a single Jev call checking whether the LLM answer's
   citations are actually supported by their sources - not a per-claim
-  check, which would need multiple calls this budget cannot afford) is
-  OPTIONAL: only attempted if at least VERIFY_MIN_BUDGET_S remains after
-  synthesis, and bounded by whatever budget is actually left (never more).
-  Skipped (or timed out) verification still settles as 200, with
-  "claims_verified": false and "claims_verified_reason" explaining why -
-  never silently presented as verified when it wasn't attempted.
+  check, which would need multiple calls this budget cannot afford) only
+  runs for the LLM path, and only when at least VERIFY_MIN_BUDGET_S
+  remains after synthesis. Skipped (or timed out) verification still
+  settles as 200, with "claims_verified": false and
+  "claims_verified_reason" explaining why - never silently presented as
+  verified when it wasn't attempted.
+
+Re-enabled in the catalog 2026-09-30 (RESEARCH_ENABLED = True) after being
+withdrawn the same day pending exactly this fix - see git history for the
+withdrawal commit and the diagnosis that led here.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 
 from fastapi import APIRouter, Request
@@ -45,26 +77,7 @@ from app.x402_setup import ROUTE_DESCRIPTIONS
 
 router = APIRouter()
 
-# Diagnosed 2026-09-30 (10 live end-to-end calls, no payment, direct handler
-# invocation): 3/10 succeeded within the 4.2s internal budget. Of the 7
-# failures, 2 were the search phase missing SEARCH_TIMEOUT_S (2.7s) and 5 -
-# the majority - were synthesis alone hitting the remaining budget, every
-# time landing at essentially the full GLOBAL_DEADLINE_S (4.20-4.21s
-# observed). Search itself is largely fine (9/10 standalone, most under
-# 1.5s) - the real bottleneck is free-tier LLM latency variance
-# (mistral-nemo/llama-3.3-70b measured 1.4-11.7s across repeated identical
-# calls at build time, see the module docstring above and the original
-# commit) that no internal budget reshuffling between search and synthesis
-# can fix: even giving synthesis the entire 4.2s outright would still miss
-# on the slow end of that range. The only real fixes are a paid faster
-# model (changes the cost structure) or loosening the <4.5s guarantee
-# (changes the product promise) - neither is "simple and safe" enough to
-# bundle into a description-accuracy pass, so the route is withdrawn from
-# discovery (see build_route_configs() in x402_setup.py and the MCP tool
-# guard in mcp_server.py) until one of those is deliberately decided.
-# Failures below use 422 (never 5xx) either way - a voluntary "couldn't
-# produce a result in time", not an infrastructure fault.
-RESEARCH_ENABLED = False
+RESEARCH_ENABLED = True
 
 MAX_QUERY_CHARS = 500
 DEFAULT_MAX_SOURCES = 5
@@ -79,16 +92,19 @@ RESEARCH_CONTENT_CHARS = 3000  # per source, into the synthesis prompt - kept
 # matches /search's own SEARCH_PHASE_TIMEOUT_S=3.0 closely (not 2.5 - tried
 # that first, search alone needs realistic room given run_web_search's own
 # internal classify+collect_raw+rerank chain, and 2.5s produced far more
-# "no_results" failures live than 2.7-3.0s did). SYNTHESIS_TIMEOUT_S is kept
-# at the spec'd 1.5s exactly. 2.7 + 1.5 = 4.2, the full internal budget -
-# verify only gets a look-in when search+synthesis together beat their
-# worst case.
+# "no_results" failures live than 2.7-3.0s did).
 GLOBAL_DEADLINE_S = 4.2
 SEARCH_TIMEOUT_S = 2.7
-SYNTHESIS_TIMEOUT_S = 1.5
+SYNTHESIS_TIMEOUT_S = 1.5  # fixed cap (2026-09-30) - Groq-pinned llama-3.3-70b measured 0.72-1.13s, no dynamic extension needed
 VERIFY_MIN_BUDGET_S = 1.0
+JEV_EXTRACTIVE_MIN_BUDGET_S = 0.8  # below this, skip straight to the deterministic sentence picker - no upstream call attempted at all
 
-SYNTHESIS_MODELS = ["mistralai/mistral-nemo", "meta-llama/llama-3.3-70b-instruct"]
+RESEARCH_MODEL = "meta-llama/llama-3.3-70b-instruct"
+# Pinned, not a fallback list (2026-09-30) - see module docstring. Groq is
+# the only provider tried; allow_fallbacks=False means a Groq miss goes
+# straight to the extractive path below, never silently to a slower
+# provider serving the same model id.
+RESEARCH_MODEL_PROVIDER = {"only": ["Groq"], "allow_fallbacks": False}
 SYNTHESIS_MAX_TOKENS = 350
 
 _SYSTEM_PROMPT = (
@@ -99,6 +115,13 @@ _SYSTEM_PROMPT = (
     "the question, say so plainly rather than guessing or using outside "
     "knowledge."
 )
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_WORD_RE = re.compile(r"[a-z0-9]+")
+EXTRACTIVE_SENTENCE_CHARS = 300
+EXTRACTIVE_SENTENCES_PER_SOURCE = 6
+EXTRACTIVE_MAX_SENTENCES = 6
+_EXTRACTIVE_RANK_INSTRUCTIONS = "Which of these sentences is most useful for answering the question?"
 
 
 class ResearchError(Exception):
@@ -134,7 +157,7 @@ def _build_sources_block(results: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
-async def _synthesize(query: str, results: list[dict]) -> tuple[str, str | None, float | None]:
+async def _synthesize_llm(query: str, results: list[dict]) -> tuple[str, str | None, float | None]:
     """Returns (answer_text, model_served, cost_usd). cost_usd is None if
     OpenRouter didn't report one (e.g. the last-resort single-model call
     style still returns usage when asked - included via extra_body - but
@@ -145,8 +168,8 @@ async def _synthesize(query: str, results: list[dict]) -> tuple[str, str | None,
         {"role": "user", "content": f"Question: {query}\n\nSources:\n{_build_sources_block(results)}"},
     ]
     data = await chat_completion(
-        messages, SYNTHESIS_MODELS, max_tokens=SYNTHESIS_MAX_TOKENS, temperature=0.2,
-        timeout=30.0, extra_body={"usage": {"include": True}},
+        messages, [RESEARCH_MODEL], max_tokens=SYNTHESIS_MAX_TOKENS, temperature=0.2,
+        timeout=30.0, extra_body={"usage": {"include": True}, "provider": RESEARCH_MODEL_PROVIDER},
         # Intentionally NOT SYNTHESIS_TIMEOUT_S: the external asyncio.wait_for
         # in _lookup already enforces that bound by cancelling this call
         # cleanly (-> asyncio.TimeoutError). Passing the same value here too
@@ -163,6 +186,58 @@ async def _synthesize(query: str, results: list[dict]) -> tuple[str, str | None,
     usage = data.get("usage") or {}
     cost = usage.get("cost")
     return answer, model_served, (float(cost) if cost is not None else None)
+
+
+def _split_sentences(text: str) -> list[str]:
+    return [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if len(s.strip()) >= 25]
+
+
+def _keyword_overlap_score(query: str, sentence: str) -> int:
+    q_tokens = set(_WORD_RE.findall(query.lower()))
+    s_tokens = set(_WORD_RE.findall(sentence.lower()))
+    return len(q_tokens & s_tokens)
+
+
+async def _jev_rank_sentences(query: str, candidates: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Same Jev 'choice over many criteria' primitive as POST /rank
+    (app/handlers/jev.py) - one call, probabilities over every candidate
+    sentence, sorted descending. Reused rather than reinvented so this
+    inherits the same well-tested shape."""
+    criteria = {f"s_{i}": sent[:EXTRACTIVE_SENTENCE_CHARS] for i, (_, sent) in enumerate(candidates)}
+    questions = {"ranking": {"type": "choice", "instructions": _EXTRACTIVE_RANK_INSTRUCTIONS, "criteria": criteria}}
+    data = await ask_jev(query, questions)
+    probabilities = data["answers"]["ranking"]["probabilities"]
+    ranked = sorted(probabilities.items(), key=lambda kv: kv[1], reverse=True)
+    return [candidates[int(key.split("_")[1])] for key, _ in ranked]
+
+
+async def _extractive_synthesize(query: str, results: list[dict], budget_s: float) -> str:
+    """No-LLM fallback: the most relevant sentences already sitting in the
+    search results, picked by a bounded Jev call when enough budget
+    remains (JEV_EXTRACTIVE_MIN_BUDGET_S), otherwise straight to a
+    deterministic keyword-overlap sort - never a second LLM call, and
+    never without SOME answer as long as at least one source has
+    extractable text. Every sentence returned is a verbatim quote from its
+    cited source."""
+    candidates: list[tuple[int, str]] = []
+    for i, r in enumerate(results, start=1):
+        for sent in _split_sentences(_source_text(r))[:EXTRACTIVE_SENTENCES_PER_SOURCE]:
+            candidates.append((i, sent))
+
+    if not candidates:
+        return "The retrieved sources did not contain extractable sentences to answer this question."
+
+    ranked: list[tuple[int, str]] | None = None
+    if budget_s >= JEV_EXTRACTIVE_MIN_BUDGET_S:
+        try:
+            ranked = await asyncio.wait_for(_jev_rank_sentences(query, candidates), timeout=budget_s)
+        except (asyncio.TimeoutError, JevError):
+            ranked = None
+    if ranked is None:
+        ranked = sorted(candidates, key=lambda c: _keyword_overlap_score(query, c[1]), reverse=True)
+
+    chosen = ranked[:EXTRACTIVE_MAX_SENTENCES]
+    return " ".join(f"{sent} [{idx}]" for idx, sent in chosen)
 
 
 _VERIFY_CRITERIA = {
@@ -220,48 +295,48 @@ async def _lookup(body: dict) -> dict:
     if not results:
         raise ResearchError("no_results")
 
-    # Dynamic, not fixed at SYNTHESIS_TIMEOUT_S (2026-09-28: measured real
-    # mistral-nemo/llama-3.3-70b latency for this prompt size at 1.4-11.7s
-    # across repeated identical calls - a fixed 1.5s cap produced a ~5%
-    # success rate (1/20 on the exact 10-question x2-trial measurement this
-    # route was built to pass) because that ceiling almost never reflects
-    # what these free-tier models actually take. Search is typically much
-    # faster (0.6-2.8s measured) than its own SEARCH_TIMEOUT_S budget, so
-    # give synthesis whatever's actually left of the total deadline, capped
-    # at SYNTHESIS_TIMEOUT_S only as an upper bound - never less generous
-    # than the spec's 1.5s floor when search took its full budget, often
-    # much more when search was fast. Same "remaining budget" pattern
-    # /token-risk's Jev step already uses successfully.
-    synthesis_budget = max(SYNTHESIS_TIMEOUT_S, GLOBAL_DEADLINE_S - (time.monotonic() - t0))
     t_synth = time.monotonic()
+    model_served = None
+    cost_usd = None
     try:
         answer, model_served, cost_usd = await asyncio.wait_for(
-            _synthesize(query, results), timeout=synthesis_budget
+            _synthesize_llm(query, results), timeout=SYNTHESIS_TIMEOUT_S
         )
-    except (asyncio.TimeoutError, OpenRouterError) as exc:
-        timing["synthesis"] = round((time.monotonic() - t_synth) * 1000)
-        raise ResearchError("synthesis_failed") from exc
+        synthesis_mode = "llm"
+    except (asyncio.TimeoutError, OpenRouterError):
+        remaining_for_extractive = max(0.0, GLOBAL_DEADLINE_S - (time.monotonic() - t0))
+        answer = await _extractive_synthesize(query, results, remaining_for_extractive)
+        synthesis_mode = "extractive"
     timing["synthesis"] = round((time.monotonic() - t_synth) * 1000)
 
-    remaining = GLOBAL_DEADLINE_S - (time.monotonic() - t0)
-    claims_verified = False
-    claims_verified_reason = None
-    t_verify = time.monotonic()
-    if remaining >= VERIFY_MIN_BUDGET_S:
-        try:
-            claims_verified = await asyncio.wait_for(_verify_claims(query, answer, results), timeout=remaining)
-            if not claims_verified:
-                claims_verified_reason = "jev_found_unsupported_claim"
-        except (asyncio.TimeoutError, JevError):
-            claims_verified_reason = "verification_timed_out_or_failed"
+    if synthesis_mode == "extractive":
+        # Every sentence is a verbatim quote from its cited source - there
+        # is nothing an unsupported-claim check could catch that isn't
+        # already a direct copy, so this is trivially true, not skipped.
+        claims_verified = True
+        claims_verified_reason = None
+        timing["verify"] = 0
     else:
-        claims_verified_reason = "insufficient_time_budget_remaining"
-    timing["verify"] = round((time.monotonic() - t_verify) * 1000)
+        remaining = GLOBAL_DEADLINE_S - (time.monotonic() - t0)
+        claims_verified = False
+        claims_verified_reason = None
+        t_verify = time.monotonic()
+        if remaining >= VERIFY_MIN_BUDGET_S:
+            try:
+                claims_verified = await asyncio.wait_for(_verify_claims(query, answer, results), timeout=remaining)
+                if not claims_verified:
+                    claims_verified_reason = "jev_found_unsupported_claim"
+            except (asyncio.TimeoutError, JevError):
+                claims_verified_reason = "verification_timed_out_or_failed"
+        else:
+            claims_verified_reason = "insufficient_time_budget_remaining"
+        timing["verify"] = round((time.monotonic() - t_verify) * 1000)
     timing["total"] = round((time.monotonic() - t0) * 1000)
 
     return {
         "query": query,
         "answer": answer,
+        "synthesis": synthesis_mode,
         "sources": _shape_sources(results),
         "claims_verified": claims_verified,
         "claims_verified_reason": claims_verified_reason,
@@ -271,24 +346,30 @@ async def _lookup(body: dict) -> dict:
     }
 
 
+# Captured from a real end-to-end call (2026-09-30, no payment, see
+# app.handlers.research._lookup - not hand-written).
 SAMPLE_RESPONSE = {
-    "query": "What caused the 2026 Base network congestion in September?",
+    "query": "What are the main features of the Rust programming language?",
     "answer": (
-        "Base experienced elevated congestion in mid-September 2026 driven by a surge in memecoin launch "
-        "activity on Uniswap V2/V3 and Aerodrome [1]. Average gas prices briefly spiked above typical levels "
-        "during peak trading windows [1][2]. The Base team noted no protocol-level incident and attributed the "
-        "load to organic demand rather than an attack [2]. Several DEX aggregators reported temporarily degraded "
-        "quote latency during the same window [3]. Network conditions normalized within about a day as launch "
-        "volume subsided [1]."
+        "The main features of the Rust programming language include an emphasis on performance, type safety, "
+        "concurrency, and memory safety [1]. Rust supports multiple programming paradigms [1]. The language's "
+        "syntax is heavily influenced by C++ and functional programming languages such as OCaml [2]. Rust has a "
+        "focus on static typing and a borrow system, similar to other systems programming languages [5]. However, "
+        "sources [3] and [4] do not provide information about Rust, instead discussing other programming "
+        "languages, Zig and V, respectively. Overall, the sources suggest that Rust is a systems programming "
+        "language with a strong focus on safety and performance [1][2][5]."
     ),
+    "synthesis": "llm",
     "sources": [
-        {"title": "Base network activity report", "url": "https://example.com/base-report", "published_at": "2026-09-15T00:00:00Z", "source": "web"},
-        {"title": "Gas price tracker", "url": "https://example.com/gas-tracker", "published_at": "2026-09-16T00:00:00Z", "source": "web"},
-        {"title": "DEX aggregator status page", "url": "https://example.com/dex-status", "published_at": "2026-09-15T00:00:00Z", "source": "web"},
+        {"title": "Rust (programming language)", "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)", "published_at": None, "source": "wikipedia"},
+        {"title": "Rust syntax", "url": "https://en.wikipedia.org/wiki/Rust_syntax", "published_at": None, "source": "wikipedia"},
+        {"title": "Zig (programming language)", "url": "https://en.wikipedia.org/wiki/Zig_(programming_language)", "published_at": None, "source": "wikipedia"},
+        {"title": "V (programming language)", "url": "https://en.wikipedia.org/wiki/V_(programming_language)", "published_at": None, "source": "wikipedia"},
+        {"title": "Mojo (programming language)", "url": "https://en.wikipedia.org/wiki/Mojo_(programming_language)", "published_at": None, "source": "wikipedia"},
     ],
     "claims_verified": True,
     "claims_verified_reason": None,
-    "timing_ms": {"search": 1450, "synthesis": 980, "verify": 720, "total": 3170},
+    "timing_ms": {"search": 1230, "synthesis": 644, "verify": 287, "total": 2160},
 }
 
 
@@ -297,7 +378,7 @@ async def research_sample():
     return {
         **SAMPLE_RESPONSE,
         "note": "Static example, not a live call.",
-        "x402_receipt": make_receipt(None, "research", 3170, 0.0),
+        "x402_receipt": make_receipt(None, "research", SAMPLE_RESPONSE["timing_ms"]["total"], 0.0),
     }
 
 
@@ -313,11 +394,11 @@ async def _paid(request: Request, body: dict):
         if reason == "missing_query":
             code = 400
         elif reason in ("no_results", "synthesis_failed"):
-            # 422, not 5xx (2026-09-30): both are "couldn't produce a
-            # result within budget", not an infrastructure fault - same
-            # reasoning as /search's own no_results fix, and x402's own
-            # settlement rule already skips settlement on any status >= 400
-            # regardless, so this changes nothing about "aucun règlement".
+            # 422, not 5xx: both are "couldn't produce a result within
+            # budget", not an infrastructure fault - same reasoning as
+            # /search's own no_results fix, and x402's own settlement rule
+            # already skips settlement on any status >= 400 regardless, so
+            # this changes nothing about "aucun règlement".
             code = 422
         else:
             code = 502
