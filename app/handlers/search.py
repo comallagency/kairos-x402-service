@@ -32,46 +32,51 @@ SAMPLE_QUERY = "best ramen restaurants in Shibuya Tokyo"
 # why: the old SearXNG-only /search returned generic Python docs for this
 # exact query, never anything FastAPI-specific - GitHub repository search
 # does.
+# Captured from a real call (2026-09-30, no payment) - English, two
+# distinct sources (wikipedia, hackernews), matching what Jev routing
+# actually returns for a general/news-leaning query. Replaces an older
+# all-GitHub, partly non-English sample (found in the delivery audit,
+# 2026-09-30) that illustrated only the "code" routing path.
 SAMPLE_SEARCH_OUTPUT = {
-    "query": "python fastapi tutorial",
+    "query": "recent earthquake news",
     "results": [
         {
-            "title": "liaogx/fastapi-tutorial",
-            "url": "https://github.com/liaogx/fastapi-tutorial",
-            "date": "2023-08-09T09:13:40Z",
-            "source": "github",
-            "extract": "整体的介绍 FastAPI，快速上手开发，结合 API 交互文档逐个讲解核心模块的使用。视频学习地址：",
+            "title": "Lists of earthquakes",
+            "url": "https://en.wikipedia.org/wiki/Lists_of_earthquakes",
+            "date": None,
+            "source": "wikipedia",
+            "extract": "to Earthquakes. USGS-ANSS Latest earthquakes around the world Southern California Earthquake Center (SCEC) IRIS Seismic Monitor, Recent earthquakes around",
         },
         {
-            "title": "windson/fastapi",
-            "url": "https://github.com/windson/fastapi",
-            "date": "2024-03-29T06:30:47Z",
-            "source": "github",
-            "extract": "FastAPI Tutorials & Deployment Methods to Cloud and on-prem infrastructures",
+            "title": "List of earthquakes in 2026",
+            "url": "https://en.wikipedia.org/wiki/List_of_earthquakes_in_2026",
+            "date": None,
+            "source": "wikipedia",
+            "extract": "This is a list of earthquakes in 2026. Only earthquakes of magnitude 6 or above are included, unless they result in significant damage and/or casualties",
         },
         {
-            "title": "microsoft/python-sample-vscode-fastapi-tutorial",
-            "url": "https://github.com/microsoft/python-sample-vscode-fastapi-tutorial",
-            "date": "2026-06-17T23:54:14Z",
-            "source": "github",
-            "extract": "Sample code for the FastAPI tutorial in the VS Code documentation",
+            "title": "Is Recent Earthquake Activity Unusual? Scientists Say No.",
+            "url": "http://www.usgs.gov/newsroom/article.asp?ID=2439",
+            "date": "2010-04-15T00:49:30Z",
+            "source": "hackernews",
+            "extract": None,
         },
         {
-            "title": "YapayZekaveTeknolojiAkademisi/FastAPI-Notes",
-            "url": "https://github.com/YapayZekaveTeknolojiAkademisi/FastAPI-Notes",
-            "date": "2025-12-20T22:16:17Z",
-            "source": "github",
-            "extract": "FastAPI framework'ünü sıfırdan öğrenmek isteyenler için hazırlanmış, Türkçe bir eğitim rehber serisi. Temel kavramlardan production-ready API geliştirmeye kadar ilerleyen bir öğrenme yolu sunar.",
+            "title": "2026 Venezuela earthquakes",
+            "url": "https://en.wikipedia.org/wiki/2026_Venezuela_earthquakes",
+            "date": None,
+            "source": "wikipedia",
+            "extract": "doublet large strike-slip earthquakes affected northwestern and central Venezuela. The epicenter of the first earthquake was in Veroes Municipality,",
         },
         {
-            "title": "zhiyuan8/FastAPI-websocket-tutorial",
-            "url": "https://github.com/zhiyuan8/FastAPI-websocket-tutorial",
-            "date": "2024-02-25T03:13:55Z",
-            "source": "github",
-            "extract": "Build dynamic, secure APIs with FastAPI: Features DB integration, real-time WebSocket, streaming, and efficient request handling with middleware, powered by Starlette and Pydantic.",
+            "title": "Lists of 21st-century earthquakes",
+            "url": "https://en.wikipedia.org/wiki/Lists_of_21st-century_earthquakes",
+            "date": None,
+            "source": "wikipedia",
+            "extract": "tsunami is one of the deadliest natural disasters in recent history. The 2005 Kashmir earthquake destroyed several towns, and caused extensive damage",
         },
     ],
-    "x402_receipt": make_receipt(neutral_model_id(None), "web_search", 1292, 0.0, searches_run=1, sources_read=5),
+    "x402_receipt": make_receipt(neutral_model_id(None), "web_search", 2890, 0.0, searches_run=1, sources_read=5),
 }
 MAX_BATCH_QUERIES = 5
 # 2026-09-28: same class of risk as /token-risk - news queries measured up

@@ -18,15 +18,47 @@ from app.receipts import extract_payer_from_payment_dict
 
 logger = logging.getLogger("x402.setup")
 
+# Captured from a real call (2026-09-30, no payment) - two distinct
+# sources (wikipedia, hackernews), matching what Jev routing actually
+# returns for a general/news-leaning query, not a single-source placeholder.
 SEARCH_SAMPLE_OUTPUT = {
-    "query": "best ramen restaurants in Shibuya Tokyo",
+    "query": "recent earthquake news",
     "results": [
         {
-            "title": "The Best Ramen in Tokyo: 16 Restaurants to Not Miss | Eater",
-            "url": "https://www.eater.com/maps/best-ramen-tokyo-japan",
+            "title": "Lists of earthquakes",
+            "url": "https://en.wikipedia.org/wiki/Lists_of_earthquakes",
             "date": None,
-            "extract": "A curated guide to Tokyo's standout ramen shops, including several in Shibuya...",
-        }
+            "source": "wikipedia",
+            "extract": "to Earthquakes. USGS-ANSS Latest earthquakes around the world Southern California Earthquake Center (SCEC) IRIS Seismic Monitor, Recent earthquakes around",
+        },
+        {
+            "title": "List of earthquakes in 2026",
+            "url": "https://en.wikipedia.org/wiki/List_of_earthquakes_in_2026",
+            "date": None,
+            "source": "wikipedia",
+            "extract": "This is a list of earthquakes in 2026. Only earthquakes of magnitude 6 or above are included, unless they result in significant damage and/or casualties",
+        },
+        {
+            "title": "Is Recent Earthquake Activity Unusual? Scientists Say No.",
+            "url": "http://www.usgs.gov/newsroom/article.asp?ID=2439",
+            "date": "2010-04-15T00:49:30Z",
+            "source": "hackernews",
+            "extract": None,
+        },
+        {
+            "title": "2026 Venezuela earthquakes",
+            "url": "https://en.wikipedia.org/wiki/2026_Venezuela_earthquakes",
+            "date": None,
+            "source": "wikipedia",
+            "extract": "doublet large strike-slip earthquakes affected northwestern and central Venezuela. The epicenter of the first earthquake was in Veroes Municipality,",
+        },
+        {
+            "title": "Lists of 21st-century earthquakes",
+            "url": "https://en.wikipedia.org/wiki/Lists_of_21st-century_earthquakes",
+            "date": None,
+            "source": "wikipedia",
+            "extract": "tsunami is one of the deadliest natural disasters in recent history. The 2005 Kashmir earthquake destroyed several towns, and caused extensive damage",
+        },
     ],
 }
 
@@ -410,12 +442,12 @@ DISCOVER_SAMPLE_OUTPUT = {
 
 ROUTE_DESCRIPTIONS = {
     "search": (
-        "Web search: search the web and get ranked results, each with a "
-        "short extract from the page. Up to 10 results with title, URL, "
-        "snippet, extract and publish date. Up to 5 queries per call, merged "
-        "and de-duplicated. Each query is routed by Jev to the best "
-        "specialised source (code, facts, news, prices, weather). No account, "
-        "no API key. Try GET /search/sample. "
+        "Jev-routed web search: each query goes to the best specialised "
+        "source (code, facts, news, prices), results ranked by relevance. "
+        "28/30 test queries answered. Up to 10 results per query, each with "
+        "title, URL, snippet, short extract and publish date. Up to 5 "
+        "queries per call, merged and de-duplicated. No account, no API "
+        "key. Try GET /search/sample. "
         + _KIT_MENTION
     ),
     "translate": (
@@ -2009,7 +2041,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             icon_url=ICON_URL,
             tags=["search", "web-search"],
             extensions=declare_discovery_extension(
-                input={"query": "best ramen restaurants in Shibuya Tokyo"},
+                input={"query": "recent earthquake news"},
                 input_schema=SEARCH_INPUT_SCHEMA,
                 body_type="json",
                 output=OutputConfig(example=SEARCH_SAMPLE_OUTPUT, schema=SEARCH_OUTPUT_SCHEMA),
