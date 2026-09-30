@@ -55,10 +55,16 @@ def require_text(body: dict, field: str = "text") -> str:
 
 
 def _top_two(probabilities: dict) -> tuple[str, float, str | None, float | None]:
+    """Rounds to 2 decimals (2026-09-30, quality pass) - Jev's real
+    probabilities already vary continuously for ambiguous input (verified:
+    5 real ambiguous texts produced e.g. 0.64/0.36, 0.89/0.01/0.1, never a
+    degenerate 0/1 split unless the input genuinely was that clear-cut),
+    this only fixes DISPLAY precision. round(x, 2) explicitly - not the
+    bare round(x), which would collapse to an integer 0 or 1."""
     ranked = sorted(probabilities.items(), key=lambda kv: kv[1], reverse=True)
     label, prob = ranked[0]
     alt_label, alt_prob = ranked[1] if len(ranked) > 1 else (None, None)
-    return label, prob, alt_label, alt_prob
+    return label, round(prob, 2), alt_label, (round(alt_prob, 2) if alt_prob is not None else None)
 
 
 async def _classify_via_jev(text: str, instructions: str, criteria: dict) -> dict:
@@ -111,7 +117,7 @@ async def _classify_via_llm(text: str, instructions: str, labels: list[str]) -> 
     remaining = [l for l in labels if l != label]
     return {
         "label": label,
-        "probability": max(0.0, min(1.0, prob)),
+        "probability": round(max(0.0, min(1.0, prob)), 2),
         "alternate_label": remaining[0] if remaining else None,
         "alternate_probability": None,
         "engine": "fallback",

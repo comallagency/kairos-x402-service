@@ -21,16 +21,16 @@ MAX_LABELS = 20
 _INSTRUCTIONS = "Which of these labels best classifies the text?"
 
 SAMPLE_REQUEST = {
-    "text": "I was charged twice for my subscription this month.",
+    "text": "Not sure if this is a billing thing or a setup issue, but I got charged and the feature still isn't active.",
     "labels": ["billing", "technical", "account", "other"],
 }
 
 SAMPLE_RESPONSE = {
-    "input": "I was charged twice for my subscription this month.",
+    "input": "Not sure if this is a billing thing or a setup issue, but I got charged and the feature still isn't active.",
     "label": "billing",
-    "probability": 0.81,
-    "alternate_label": "technical",
-    "alternate_probability": 0.14,
+    "probability": 0.84,
+    "alternate_label": "account",
+    "alternate_probability": 0.07,
     "engine": "jev",
 }
 

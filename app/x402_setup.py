@@ -684,8 +684,9 @@ ROUTE_DESCRIPTIONS = {
         "completions on openai/gpt-5.4-mini, pinned to OpenAI's own "
         "OpenRouter endpoint for reliability. You sign a fixed price "
         "computed from your max_tokens; unused tokens are not refunded. "
-        "20s server-side timeout - never charged if it fires; set your "
-        "client timeout to 30s. Try GET /llm/gpt-mini/sample."
+        "20s server-side timeout with an automatic 2nd-provider retry if "
+        "the first is slow - never charged if both miss; set your client "
+        "timeout to 30s. Try GET /llm/gpt-mini/sample."
     ),
     "llm-gemini-flash": (
         "Gemini Flash API - pay per call, no API key. Chat completions on "

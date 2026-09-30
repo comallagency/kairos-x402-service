@@ -23,15 +23,15 @@ _CRITERIA = {
     "neutral": "The text is factual, neutral, or does not express a clear sentiment either way.",
 }
 
-SAMPLE_REQUEST = {"text": 'This product exceeded all my expectations, I love it!'}
+SAMPLE_REQUEST = {"text": 'It works well overall, just wish the battery lasted longer.'}
 
 SAMPLE_RESPONSE = {
-    "input": 'This product exceeded all my expectations, I love it!',
+    "input": 'It works well overall, just wish the battery lasted longer.',
     "label": 'positive',
     "probability": 0.93,
     "alternate_label": 'neutral',
-    "alternate_probability": 0.06,
-    "engine": "jev",
+    "alternate_probability": 0.05,
+    "engine": 'jev',
 }
 
 
