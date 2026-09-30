@@ -22,15 +22,15 @@ _CRITERIA = {
     "not_spam": "The text is genuine, legitimate content.",
 }
 
-SAMPLE_REQUEST = {"text": 'Hi Sarah, just confirming our meeting tomorrow at 3pm.'}
+SAMPLE_REQUEST = {"text": "CONGRATULATIONS! You've won a $1000 gift card! Click here immediately to claim your prize before it expires!"}
 
 SAMPLE_RESPONSE = {
-    "input": 'Hi Sarah, just confirming our meeting tomorrow at 3pm.',
-    "label": 'not_spam',
-    "probability": 0.97,
-    "alternate_label": 'spam',
-    "alternate_probability": 0.03,
-    "engine": "jev",
+    "input": "CONGRATULATIONS! You've won a $1000 gift card! Click here immediately to claim your prize before it expires!",
+    "label": 'spam',
+    "probability": 1.0,
+    "alternate_label": 'not_spam',
+    "alternate_probability": 0.0,
+    "engine": 'jev',
 }
 
 

@@ -25,15 +25,15 @@ _CRITERIA = {
     "other": "The text does not clearly fit question, request, complaint, or compliment.",
 }
 
-SAMPLE_REQUEST = {"text": 'Can you please reset my password?'}
+SAMPLE_REQUEST = {"text": 'Could someone take a look at why my last two orders were both delayed?'}
 
 SAMPLE_RESPONSE = {
-    "input": 'Can you please reset my password?',
+    "input": 'Could someone take a look at why my last two orders were both delayed?',
     "label": 'request',
-    "probability": 0.71,
+    "probability": 0.55,
     "alternate_label": 'question',
-    "alternate_probability": 0.18,
-    "engine": "jev",
+    "alternate_probability": 0.29,
+    "engine": 'jev',
 }
 
 

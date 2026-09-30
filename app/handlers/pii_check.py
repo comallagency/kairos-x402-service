@@ -22,15 +22,15 @@ _CRITERIA = {
     "no_pii": "The text does not contain personally identifiable information.",
 }
 
-SAMPLE_REQUEST = {"text": 'The quarterly report shows a 12% increase in revenue.'}
+SAMPLE_REQUEST = {"text": 'Feel free to call the office at 555-201-4477 during business hours.'}
 
 SAMPLE_RESPONSE = {
-    "input": 'The quarterly report shows a 12% increase in revenue.',
-    "label": 'no_pii',
-    "probability": 0.91,
-    "alternate_label": 'pii_detected',
-    "alternate_probability": 0.09,
-    "engine": "jev",
+    "input": 'Feel free to call the office at 555-201-4477 during business hours.',
+    "label": 'pii_detected',
+    "probability": 0.85,
+    "alternate_label": 'no_pii',
+    "alternate_probability": 0.15,
+    "engine": 'jev',
 }
 
 
