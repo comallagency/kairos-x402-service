@@ -222,6 +222,7 @@ from app.x402_setup import (
     PII_CHECK_OUTPUT_SCHEMA,
     PII_CHECK_SAMPLE_INPUT,
     PII_CHECK_SAMPLE_OUTPUT,
+    LLM_PER_MODEL_INPUT_SCHEMA,
     build_route_configs,
     get_resource_server,
 )
@@ -1266,6 +1267,138 @@ from app.handlers.spam_check import SPAM_CHECK_ENABLED, _lookup as _spam_check_l
 from app.handlers.toxicity import TOXICITY_ENABLED, _lookup as _toxicity_lookup
 from app.handlers.language import LANGUAGE_ENABLED, _lookup as _language_lookup
 from app.handlers.pii_check import PII_CHECK_ENABLED, _lookup as _pii_check_lookup
+from app.handlers.llm_per_model import lookup as _llm_per_model_lookup
+from app.handlers.llm_claude_sonnet import MODEL as _CLAUDE_SONNET_MODEL, PROVIDER as _CLAUDE_SONNET_PROVIDER, SAMPLE_REQUEST as _CLAUDE_SONNET_SAMPLE_REQUEST, SAMPLE_RESPONSE as _CLAUDE_SONNET_SAMPLE_RESPONSE
+from app.handlers.llm_gpt_mini import MODEL as _GPT_MINI_MODEL, PROVIDER as _GPT_MINI_PROVIDER, SAMPLE_REQUEST as _GPT_MINI_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GPT_MINI_SAMPLE_RESPONSE
+from app.handlers.llm_gemini_flash import MODEL as _GEMINI_FLASH_MODEL, PROVIDER as _GEMINI_FLASH_PROVIDER, SAMPLE_REQUEST as _GEMINI_FLASH_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GEMINI_FLASH_SAMPLE_RESPONSE
+from app.handlers.llm_llama import MODEL as _LLAMA_MODEL, PROVIDER as _LLAMA_PROVIDER, SAMPLE_REQUEST as _LLAMA_SAMPLE_REQUEST, SAMPLE_RESPONSE as _LLAMA_SAMPLE_RESPONSE
+from app.handlers.llm_deepseek import MODEL as _DEEPSEEK_MODEL, PROVIDER as _DEEPSEEK_PROVIDER, SAMPLE_REQUEST as _DEEPSEEK_SAMPLE_REQUEST, SAMPLE_RESPONSE as _DEEPSEEK_SAMPLE_RESPONSE
+
+_CLAUDE_SONNET_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="llm_claude_sonnet",
+        description=ROUTE_DESCRIPTIONS["llm-claude-sonnet"],
+        input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+        example=_CLAUDE_SONNET_SAMPLE_REQUEST,
+        output=OutputConfig(example=_CLAUDE_SONNET_SAMPLE_RESPONSE),
+    )
+)
+_GPT_MINI_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="llm_gpt_mini",
+        description=ROUTE_DESCRIPTIONS["llm-gpt-mini"],
+        input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+        example=_GPT_MINI_SAMPLE_REQUEST,
+        output=OutputConfig(example=_GPT_MINI_SAMPLE_RESPONSE),
+    )
+)
+_GEMINI_FLASH_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="llm_gemini_flash",
+        description=ROUTE_DESCRIPTIONS["llm-gemini-flash"],
+        input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+        example=_GEMINI_FLASH_SAMPLE_REQUEST,
+        output=OutputConfig(example=_GEMINI_FLASH_SAMPLE_RESPONSE),
+    )
+)
+_LLAMA_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="llm_llama",
+        description=ROUTE_DESCRIPTIONS["llm-llama"],
+        input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+        example=_LLAMA_SAMPLE_REQUEST,
+        output=OutputConfig(example=_LLAMA_SAMPLE_RESPONSE),
+    )
+)
+_DEEPSEEK_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="llm_deepseek",
+        description=ROUTE_DESCRIPTIONS["llm-deepseek"],
+        input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+        example=_DEEPSEEK_SAMPLE_REQUEST,
+        output=OutputConfig(example=_DEEPSEEK_SAMPLE_RESPONSE),
+    )
+)
+
+
+async def _run_pinned_model_mcp(
+    *, ctx, model: str, provider: dict, route_key: str, tool_name: str, extensions: dict,
+    messages: list, max_tokens,
+):
+    """Shared MCP flow for Pack 2's 5 pinned per-model routes (2026-09-30) -
+    the same manual ResourceConfig-building ask_model_tool already needs:
+    a DynamicPrice callback reading the HTTP body via adapter._request has
+    no equivalent in an MCP context (no Starlette request to read), so the
+    ceiling is computed directly from the tool's own already-parsed
+    arguments instead. "exact" scheme only - Pack 2 never offers "upto"."""
+    from x402.schemas import ResourceConfig
+
+    server = await _ensure_initialized()
+    resource_info = _resource_info(tool_name, route_key)
+
+    capped_max_tokens = llm_gateway_capped_max_tokens(max_tokens)
+    ceiling = await llm_gateway_price_ceiling_usd(model, capped_max_tokens, messages)
+    ceiling_str = f"${ceiling:.6f}"
+    exact_config = ResourceConfig(scheme="exact", pay_to=config.X402_PAY_TO, price=ceiling_str, network=config.X402_NETWORK)
+    accepts = server.build_payment_requirements(exact_config)
+
+    meta: dict = {}
+    if ctx is not None:
+        request_context = ctx.request_context
+        if request_context is not None and request_context.meta:
+            meta = request_context.meta
+
+    payment_payload = extract_payment_from_meta({"_meta": meta})
+    if payment_payload is None:
+        return await _payment_required_result(server, accepts, resource_info, extensions, "Payment required to access this tool")
+
+    payment_requirements = server.find_matching_requirements(accepts, payment_payload)
+    if payment_requirements is None:
+        return await _payment_required_result(server, accepts, resource_info, extensions, "No matching payment requirements found")
+
+    verify_result = await server.verify_payment(payment_payload, payment_requirements)
+    if not verify_result.is_valid:
+        return await _payment_required_result(
+            server, accepts, resource_info, extensions,
+            f"Payment verification failed: {verify_result.invalid_reason}",
+        )
+
+    payer = extract_payer_from_payment_dict(payment_payload.model_dump(by_alias=True, exclude_none=True))
+    body_excerpt = json.dumps({"max_tokens": max_tokens})[:2000]
+
+    if not isinstance(messages, list) or not messages:
+        db.log_request(
+            route=route_key, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason="invalid_request",
+        )
+        return ToolResult(structured_content={"error": {"reason": "invalid_request", "detail": "messages must be a non-empty array."}}, is_error=True)
+
+    try:
+        with Timer() as t:
+            data, _, real_cost = await _llm_per_model_lookup(model, provider, messages, max_tokens)
+    except OpenRouterError as exc:
+        db.log_request(
+            route=route_key, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
+        )
+        return ToolResult(structured_content={"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, is_error=True)
+
+    billed = effective_price(payer, ceiling)
+    settle_result = await server.settle_payment(payment_payload, payment_requirements)
+    if not settle_result.success:
+        return _settlement_failed_result(accepts, resource_info, extensions, settle_result)
+
+    db.log_request(
+        route=route_key, method="MCP", status="paid", latency_ms=t.elapsed_ms,
+        amount_usdc=billed, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+        upstream_cost_usd=real_cost, margin_usd=billed - real_cost,
+    )
+    receipt = make_receipt(model, route_key, t.elapsed_ms, billed)
+    settle_meta = settle_result.model_dump(by_alias=True, exclude_none=True)
+    return ToolResult(
+        structured_content={**data, "x402_receipt": receipt},
+        meta={MCP_PAYMENT_RESPONSE_META_KEY: settle_meta},
+    )
 
 _SENTIMENT_EXTENSIONS = declare_mcp_discovery_extension(
     DeclareMcpDiscoveryConfig(
@@ -1765,6 +1898,101 @@ if PII_CHECK_ENABLED:
             tool_name="pii_check", route_key="POST /pii-check", ctx=ctx,
             args={"text": text}, extensions=_PII_CHECK_EXTENSIONS, run_and_log=_run_pii_check,
         )
+
+
+@mcp.tool(
+    name="llm_claude_sonnet",
+    title="Claude Sonnet API",
+    description=ROUTE_DESCRIPTIONS["llm-claude-sonnet"],
+    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+)
+async def llm_claude_sonnet_tool(
+    messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+    max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _run_pinned_model_mcp(
+        ctx=ctx, model=_CLAUDE_SONNET_MODEL, provider=_CLAUDE_SONNET_PROVIDER,
+        route_key="POST /llm/claude-sonnet", tool_name="llm_claude_sonnet",
+        extensions=_CLAUDE_SONNET_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+    )
+
+
+@mcp.tool(
+    name="llm_gpt_mini",
+    title="GPT Mini API",
+    description=ROUTE_DESCRIPTIONS["llm-gpt-mini"],
+    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+)
+async def llm_gpt_mini_tool(
+    messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+    max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _run_pinned_model_mcp(
+        ctx=ctx, model=_GPT_MINI_MODEL, provider=_GPT_MINI_PROVIDER,
+        route_key="POST /llm/gpt-mini", tool_name="llm_gpt_mini",
+        extensions=_GPT_MINI_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+    )
+
+
+@mcp.tool(
+    name="llm_gemini_flash",
+    title="Gemini Flash API",
+    description=ROUTE_DESCRIPTIONS["llm-gemini-flash"],
+    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+)
+async def llm_gemini_flash_tool(
+    messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+    max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _run_pinned_model_mcp(
+        ctx=ctx, model=_GEMINI_FLASH_MODEL, provider=_GEMINI_FLASH_PROVIDER,
+        route_key="POST /llm/gemini-flash", tool_name="llm_gemini_flash",
+        extensions=_GEMINI_FLASH_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+    )
+
+
+@mcp.tool(
+    name="llm_llama",
+    title="Llama API",
+    description=ROUTE_DESCRIPTIONS["llm-llama"],
+    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+)
+async def llm_llama_tool(
+    messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+    max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _run_pinned_model_mcp(
+        ctx=ctx, model=_LLAMA_MODEL, provider=_LLAMA_PROVIDER,
+        route_key="POST /llm/llama", tool_name="llm_llama",
+        extensions=_LLAMA_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+    )
+
+
+@mcp.tool(
+    name="llm_deepseek",
+    title="DeepSeek API",
+    description=ROUTE_DESCRIPTIONS["llm-deepseek"],
+    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+)
+async def llm_deepseek_tool(
+    messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+    max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _run_pinned_model_mcp(
+        ctx=ctx, model=_DEEPSEEK_MODEL, provider=_DEEPSEEK_PROVIDER,
+        route_key="POST /llm/deepseek", tool_name="llm_deepseek",
+        extensions=_DEEPSEEK_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+    )
 
 
 # Withdrawn from the MCP tool set while RESEARCH_ENABLED is False (2026-09-30) -

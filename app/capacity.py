@@ -192,3 +192,61 @@ class LLMGatewayCircuitBreakerMiddleware:
             }
         )
         await send({"type": "http.response.body", "body": body})
+
+
+class PinnedModelCircuitBreakerMiddleware:
+    """Pure-ASGI middleware, wrapped OUTSIDE the x402 payment middleware -
+    same placement and reasoning as LLMGatewayCircuitBreakerMiddleware,
+    generalized to several paths at once for Pack 2's 5 pinned per-model
+    LLM routes (2026-09-30). Each is "exact" scheme only (no settlement
+    surprise the way "upto" has), but the same "don't quote a price for a
+    call we can't afford" reasoning applies - a buyer paying the full
+    ceiling for a call that then 502s on insufficient OpenRouter credit is
+    still a bad outcome worth failing closed before ever offering the 402.
+    Per-route floor since each model has a very different real per-token
+    cost (Claude Sonnet vs Llama are not remotely the same worst case)."""
+
+    FLOORS_USD = {
+        "/llm/claude-sonnet": 1.00,
+        "/llm/gpt-mini": 0.25,
+        "/llm/gemini-flash": 0.25,
+        "/llm/llama": 0.25,
+        "/llm/deepseek": 0.25,
+    }
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        floor = self.FLOORS_USD.get(scope["path"]) if scope["type"] == "http" and scope["method"] == "POST" else None
+        if floor is None:
+            await self.app(scope, receive, send)
+            return
+
+        if await has_sufficient_balance(floor):
+            await self.app(scope, receive, send)
+            return
+
+        route = scope["path"].lstrip("/")
+        db.log_request(
+            route=route,
+            method="POST",
+            status="circuit_breaker_open",
+            error_reason="openrouter_balance_below_floor",
+        )
+        body = json.dumps(
+            {
+                "error": {
+                    "reason": "temporarily_unavailable",
+                    "detail": "This model route is temporarily disabled (upstream credit low). Other routes are unaffected.",
+                }
+            }
+        ).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 503,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})

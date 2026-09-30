@@ -231,25 +231,36 @@ async def chat_completion_raw(
     messages: list[dict[str, str]],
     max_tokens: int,
     timeout: float = 60.0,
+    provider: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Single-model call for the LLM gateway (app/handlers/llm_gateway.py) -
-    deliberately separate from chat_completion(): the gateway passes through
-    exactly the model the buyer paid for (no multi-model fallback list, no
-    opinionated "empty content is an error" retry-worthy failure - the buyer
-    sees the real upstream response either way), and always requests
-    usage:{include:true} so the real per-call cost is available to compute
-    the "upto" settlement amount."""
+    """Single-model call for the LLM gateway (app/handlers/llm_gateway.py)
+    and Pack 2's 5 pinned per-model routes (app/handlers/llm_per_model.py,
+    2026-09-30) - deliberately separate from chat_completion(): the caller
+    passes through exactly the model (and, for Pack 2, exact provider) the
+    buyer paid for (no multi-model fallback list, no opinionated "empty
+    content is an error" retry-worthy failure - the buyer sees the real
+    upstream response either way), and always requests usage:{include:true}
+    so the real per-call cost is available to compute the "upto" settlement
+    amount (llm_gateway.py) or for margin logging (Pack 2, "exact" only).
+
+    provider: optional pin, e.g. {"only": ["Groq"], "allow_fallbacks": False}
+    - merged with the existing data_collection:deny default rather than
+    replacing it, so a pin never silently drops that privacy setting."""
     if not config.OPENROUTER_API_KEY:
         raise OpenRouterError("OPENROUTER_API_KEY is not set")
 
     await rate_limiter.acquire()
+
+    body_provider: dict[str, Any] = {"data_collection": "deny"}
+    if provider:
+        body_provider.update(provider)
 
     body = {
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
         "usage": {"include": True},
-        "provider": {"data_collection": "deny"},
+        "provider": body_provider,
     }
     headers = {
         "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
