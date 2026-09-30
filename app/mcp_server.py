@@ -105,6 +105,7 @@ from app.handlers.llm_gateway import (
     _price_ceiling_usd as llm_gateway_price_ceiling_usd,
     _priced_models_map as llm_gateway_priced_models_map,
     _unpriced_model_error as llm_gateway_unpriced_model_error,
+    GLOBAL_TIMEOUT_S as llm_gateway_timeout_s,
 )
 from app.upstream.tokencount import count_tokens
 from app.upstream.jev import JevError, ask_jev
@@ -196,32 +197,18 @@ from app.x402_setup import (
     AGENT_HEALTH_OUTPUT_SCHEMA,
     SENTIMENT_INPUT_SCHEMA,
     SENTIMENT_OUTPUT_SCHEMA,
-    SENTIMENT_SAMPLE_INPUT,
-    SENTIMENT_SAMPLE_OUTPUT,
     CLASSIFY_INPUT_SCHEMA,
     CLASSIFY_OUTPUT_SCHEMA,
-    CLASSIFY_SAMPLE_INPUT,
-    CLASSIFY_SAMPLE_OUTPUT,
     INTENT_INPUT_SCHEMA,
     INTENT_OUTPUT_SCHEMA,
-    INTENT_SAMPLE_INPUT,
-    INTENT_SAMPLE_OUTPUT,
     SPAM_CHECK_INPUT_SCHEMA,
     SPAM_CHECK_OUTPUT_SCHEMA,
-    SPAM_CHECK_SAMPLE_INPUT,
-    SPAM_CHECK_SAMPLE_OUTPUT,
     TOXICITY_INPUT_SCHEMA,
     TOXICITY_OUTPUT_SCHEMA,
-    TOXICITY_SAMPLE_INPUT,
-    TOXICITY_SAMPLE_OUTPUT,
     LANGUAGE_INPUT_SCHEMA,
     LANGUAGE_OUTPUT_SCHEMA,
-    LANGUAGE_SAMPLE_INPUT,
-    LANGUAGE_SAMPLE_OUTPUT,
     PII_CHECK_INPUT_SCHEMA,
     PII_CHECK_OUTPUT_SCHEMA,
-    PII_CHECK_SAMPLE_INPUT,
-    PII_CHECK_SAMPLE_OUTPUT,
     LLM_PER_MODEL_INPUT_SCHEMA,
     build_route_configs,
     get_resource_server,
@@ -1260,19 +1247,19 @@ from app.handlers.token_risk import _lookup as _token_risk_lookup
 from app.handlers.research import RESEARCH_ENABLED, ResearchError, _lookup as _research_lookup
 from app.upstream.evm_rpc import EvmRpcError
 from app.handlers.jev_classify import ClassifyError
-from app.handlers.sentiment import SENTIMENT_ENABLED, _lookup as _sentiment_lookup
-from app.handlers.classify import CLASSIFY_ENABLED, _lookup as _classify_lookup
-from app.handlers.intent import INTENT_ENABLED, _lookup as _intent_lookup
-from app.handlers.spam_check import SPAM_CHECK_ENABLED, _lookup as _spam_check_lookup
-from app.handlers.toxicity import TOXICITY_ENABLED, _lookup as _toxicity_lookup
-from app.handlers.language import LANGUAGE_ENABLED, _lookup as _language_lookup
-from app.handlers.pii_check import PII_CHECK_ENABLED, _lookup as _pii_check_lookup
+from app.handlers.sentiment import SENTIMENT_ENABLED, _lookup as _sentiment_lookup, SAMPLE_REQUEST as SENTIMENT_SAMPLE_INPUT, SAMPLE_RESPONSE as SENTIMENT_SAMPLE_OUTPUT
+from app.handlers.classify import CLASSIFY_ENABLED, _lookup as _classify_lookup, SAMPLE_REQUEST as CLASSIFY_SAMPLE_INPUT, SAMPLE_RESPONSE as CLASSIFY_SAMPLE_OUTPUT
+from app.handlers.intent import INTENT_ENABLED, _lookup as _intent_lookup, SAMPLE_REQUEST as INTENT_SAMPLE_INPUT, SAMPLE_RESPONSE as INTENT_SAMPLE_OUTPUT
+from app.handlers.spam_check import SPAM_CHECK_ENABLED, _lookup as _spam_check_lookup, SAMPLE_REQUEST as SPAM_CHECK_SAMPLE_INPUT, SAMPLE_RESPONSE as SPAM_CHECK_SAMPLE_OUTPUT
+from app.handlers.toxicity import TOXICITY_ENABLED, _lookup as _toxicity_lookup, SAMPLE_REQUEST as TOXICITY_SAMPLE_INPUT, SAMPLE_RESPONSE as TOXICITY_SAMPLE_OUTPUT
+from app.handlers.language import LANGUAGE_ENABLED, _lookup as _language_lookup, SAMPLE_REQUEST as LANGUAGE_SAMPLE_INPUT, SAMPLE_RESPONSE as LANGUAGE_SAMPLE_OUTPUT
+from app.handlers.pii_check import PII_CHECK_ENABLED, _lookup as _pii_check_lookup, SAMPLE_REQUEST as PII_CHECK_SAMPLE_INPUT, SAMPLE_RESPONSE as PII_CHECK_SAMPLE_OUTPUT
 from app.handlers.llm_per_model import lookup as _llm_per_model_lookup
 from app.handlers.llm_claude_sonnet import MODEL as _CLAUDE_SONNET_MODEL, PROVIDER as _CLAUDE_SONNET_PROVIDER, SAMPLE_REQUEST as _CLAUDE_SONNET_SAMPLE_REQUEST, SAMPLE_RESPONSE as _CLAUDE_SONNET_SAMPLE_RESPONSE
 from app.handlers.llm_gpt_mini import MODEL as _GPT_MINI_MODEL, PROVIDER as _GPT_MINI_PROVIDER, SAMPLE_REQUEST as _GPT_MINI_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GPT_MINI_SAMPLE_RESPONSE
-from app.handlers.llm_gemini_flash import MODEL as _GEMINI_FLASH_MODEL, PROVIDER as _GEMINI_FLASH_PROVIDER, SAMPLE_REQUEST as _GEMINI_FLASH_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GEMINI_FLASH_SAMPLE_RESPONSE
+from app.handlers.llm_gemini_flash import MODEL as _GEMINI_FLASH_MODEL, PROVIDER as _GEMINI_FLASH_PROVIDER, FALLBACK_PROVIDER as _GEMINI_FLASH_FALLBACK_PROVIDER, SAMPLE_REQUEST as _GEMINI_FLASH_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GEMINI_FLASH_SAMPLE_RESPONSE
 from app.handlers.llm_llama import MODEL as _LLAMA_MODEL, PROVIDER as _LLAMA_PROVIDER, SAMPLE_REQUEST as _LLAMA_SAMPLE_REQUEST, SAMPLE_RESPONSE as _LLAMA_SAMPLE_RESPONSE
-from app.handlers.llm_deepseek import MODEL as _DEEPSEEK_MODEL, PROVIDER as _DEEPSEEK_PROVIDER, SAMPLE_REQUEST as _DEEPSEEK_SAMPLE_REQUEST, SAMPLE_RESPONSE as _DEEPSEEK_SAMPLE_RESPONSE
+from app.handlers.llm_deepseek import MODEL as _DEEPSEEK_MODEL, PROVIDER as _DEEPSEEK_PROVIDER, FALLBACK_PROVIDER as _DEEPSEEK_FALLBACK_PROVIDER, SAMPLE_REQUEST as _DEEPSEEK_SAMPLE_REQUEST, SAMPLE_RESPONSE as _DEEPSEEK_SAMPLE_RESPONSE
 
 _CLAUDE_SONNET_EXTENSIONS = declare_mcp_discovery_extension(
     DeclareMcpDiscoveryConfig(
@@ -1323,7 +1310,7 @@ _DEEPSEEK_EXTENSIONS = declare_mcp_discovery_extension(
 
 async def _run_pinned_model_mcp(
     *, ctx, model: str, provider: dict, route_key: str, tool_name: str, extensions: dict,
-    messages: list, max_tokens,
+    messages: list, max_tokens, fallback_provider: dict | None = None,
 ):
     """Shared MCP flow for Pack 2's 5 pinned per-model routes (2026-09-30) -
     the same manual ResourceConfig-building ask_model_tool already needs:
@@ -1375,7 +1362,16 @@ async def _run_pinned_model_mcp(
 
     try:
         with Timer() as t:
-            data, _, real_cost = await _llm_per_model_lookup(model, provider, messages, max_tokens)
+            data, _, real_cost = await _llm_per_model_lookup(model, provider, messages, max_tokens, fallback_provider=fallback_provider)
+    except asyncio.TimeoutError:
+        db.log_request(
+            route=route_key, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason="upstream_timeout",
+        )
+        return ToolResult(
+            structured_content={"error": {"reason": "upstream_timeout", "detail": "No response within 20s - not charged. Set your client timeout to 30s."}},
+            is_error=True,
+        )
     except OpenRouterError as exc:
         db.log_request(
             route=route_key, method="MCP", status="error", payer=payer,
@@ -1954,6 +1950,7 @@ async def llm_gemini_flash_tool(
         ctx=ctx, model=_GEMINI_FLASH_MODEL, provider=_GEMINI_FLASH_PROVIDER,
         route_key="POST /llm/gemini-flash", tool_name="llm_gemini_flash",
         extensions=_GEMINI_FLASH_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+        fallback_provider=_GEMINI_FLASH_FALLBACK_PROVIDER,
     )
 
 
@@ -1992,6 +1989,7 @@ async def llm_deepseek_tool(
         ctx=ctx, model=_DEEPSEEK_MODEL, provider=_DEEPSEEK_PROVIDER,
         route_key="POST /llm/deepseek", tool_name="llm_deepseek",
         extensions=_DEEPSEEK_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+        fallback_provider=_DEEPSEEK_FALLBACK_PROVIDER,
     )
 
 
@@ -2526,7 +2524,16 @@ async def ask_model_tool(
 
     try:
         with Timer() as t:
-            data = await chat_completion_raw(model, messages, capped_max_tokens)
+            data = await asyncio.wait_for(chat_completion_raw(model, messages, capped_max_tokens), timeout=llm_gateway_timeout_s)
+    except asyncio.TimeoutError:
+        db.log_request(
+            route="v1/chat/completions", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason="upstream_timeout",
+        )
+        return ToolResult(
+            structured_content={"error": {"reason": "upstream_timeout", "detail": f"No response within {llm_gateway_timeout_s:.0f}s - not charged. Set your client timeout to 30s."}},
+            is_error=True,
+        )
     except OpenRouterError as exc:
         db.log_request(
             route="v1/chat/completions", method="MCP", status="error", payer=payer,

@@ -18,22 +18,22 @@ ROUTE_KEY = 'llm/claude-sonnet'
 
 price_fn = make_price_fn(MODEL)
 
-SAMPLE_REQUEST = {"messages": [{"role": "user", "content": "Say OK."}], "max_tokens": 150}
+SAMPLE_REQUEST = {"messages": [{"role": "user", "content": "Summarize in one sentence: The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France. It was designed by Gustave Eiffel's engineering company and built as the entrance arch for the 1889 World's Fair. Initially criticized by some of France's leading artists and intellectuals for its design, it has become a global cultural icon of France and one of the most recognizable structures in the world, attracting millions of visitors every year."}], "max_tokens": 150}
 SAMPLE_RESPONSE = {
-    "id": "gen-1790778686-klDKt8CYDyvYH5k61wgJ",
+    "id": "gen-1790780999-5D8mNBe2jJJ4gO8UyUsm",
     "object": "chat.completion",
-    "created": 1790778686,
+    "created": 1790780999,
     "model": "anthropic/claude-sonnet-5.5",
     "provider": "Anthropic",
     "choices": [
         {
             "index": 0,
             "finish_reason": "stop",
-            "message": {"role": "assistant", "content": "OK."},
+            "message": {"role": "assistant", "content": "The Eiffel Tower, a wrought-iron lattice tower in Paris designed by Gustave Eiffel's company for the 1889 World's Fair, was initially criticized by prominent French artists and intellectuals but has since become a globally recognized cultural icon that draws millions of visitors annually."},
         }
     ],
-    "usage": {"prompt_tokens": 13, "completion_tokens": 5, "total_tokens": 18, "cost": 7.6e-05},
-    "x402_receipt": make_receipt("anthropic/claude-sonnet-5.5", "llm/claude-sonnet", 1696, 0.001683),
+    "usage": {"prompt_tokens": 160, "completion_tokens": 100, "total_tokens": 260, "cost": 0.00132},
+    "x402_receipt": make_receipt("anthropic/claude-sonnet-5.5", "llm/claude-sonnet", 1700, 0.001892),
 }
 
 router = make_router(

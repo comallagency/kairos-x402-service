@@ -41,6 +41,7 @@ excluded" apart).
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -60,6 +61,13 @@ MARKUP = 1.10
 MIN_SETTLE_USD = 0.001
 MAX_TOKENS_CAP = 4096
 DEFAULT_MAX_TOKENS = 1024
+
+# 20s hard server-side deadline (2026-09-30, correction avant indexation):
+# never settle without a delivered response. Any model/provider combo
+# the buyer picks gets the same ceiling - unlike Pack 2's pinned routes,
+# there is no fixed second provider to fall back to here (the buyer's
+# model choice is arbitrary), so a miss is a plain 504, unsettled.
+GLOBAL_TIMEOUT_S = 20.0
 
 # See module docstring: flip to True to re-offer "upto" as a second
 # accepts[] option (app/x402_setup.py's RouteConfig and mcp_server.py's
@@ -335,7 +343,16 @@ async def chat_completions(request: Request):
 
     try:
         with Timer() as t:
-            data = await chat_completion_raw(model, messages, capped_max_tokens)
+            data = await asyncio.wait_for(chat_completion_raw(model, messages, capped_max_tokens), timeout=GLOBAL_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        db.log_request(
+            route="v1/chat/completions", method="POST", status="error", payer=payer,
+            user_agent=user_agent, body_excerpt=body_excerpt, error_reason="upstream_timeout",
+        )
+        return JSONResponse(
+            {"error": {"reason": "upstream_timeout", "detail": f"No response within {GLOBAL_TIMEOUT_S:.0f}s - not charged. Set your client timeout to 30s."}},
+            status_code=504,
+        )
     except OpenRouterError as exc:
         db.log_request(
             route="v1/chat/completions", method="POST", status="error", payer=payer,

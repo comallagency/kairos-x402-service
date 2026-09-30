@@ -13,30 +13,39 @@ from app.receipts import make_receipt
 
 MODEL = 'deepseek/deepseek-v4-pro'
 PROVIDER = {'only': ['Reka'], 'allow_fallbacks': False}
+# 2nd-provider fallback (2026-09-30): a real 10-call test measured a 32.2s
+# p95 on Reka alone - DigitalOcean measured 99.87% uptime_last_30m the same
+# day (the closest to Reka's own volatile 99.02-99.66% without picking
+# Novita, whose uptime is real but has a documented history of volatility
+# for this account on a different model - see research.py's own module
+# docstring), used if the primary exceeds PRIMARY_TIMEOUT_S (8s) - see
+# app/handlers/llm_per_model.py.
+FALLBACK_PROVIDER = {'only': ['DigitalOcean'], 'allow_fallbacks': False}
 ROUTE_PATH = '/llm/deepseek'
 ROUTE_KEY = 'llm/deepseek'
 
 price_fn = make_price_fn(MODEL)
 
-SAMPLE_REQUEST = {"messages": [{"role": "user", "content": "Say OK."}], "max_tokens": 150}
+SAMPLE_REQUEST = {"messages": [{"role": "user", "content": "Summarize in one sentence: The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France. It was designed by Gustave Eiffel's engineering company and built as the entrance arch for the 1889 World's Fair. Initially criticized by some of France's leading artists and intellectuals for its design, it has become a global cultural icon of France and one of the most recognizable structures in the world, attracting millions of visitors every year."}], "max_tokens": 150}
 SAMPLE_RESPONSE = {
-    "id": "gen-1790778806-YfPURU15xoucLCDculX8",
+    "id": "gen-1790781087-DvBLYQhDzogYW0WpOA5r",
     "object": "chat.completion",
-    "created": 1790778806,
+    "created": 1790781087,
     "model": "deepseek/deepseek-v4-pro",
     "provider": "Reka",
     "choices": [
         {
             "index": 0,
             "finish_reason": "stop",
-            "message": {"role": "assistant", "content": "OK."},
+            "message": {"role": "assistant", "content": "Despite initial criticism, the Eiffel Tower, designed by Gustave Eiffel's company for the 1889 World's Fair, has evolved into a globally recognized cultural icon of France that attracts millions of visitors annually."},
         }
     ],
-    "usage": {"prompt_tokens": 15, "completion_tokens": 3, "total_tokens": 18, "cost": 2.73e-05},
-    "x402_receipt": make_receipt("deepseek/deepseek-v4-pro", "llm/deepseek", 2038, 0.001),
+    "usage": {"prompt_tokens": 110, "completion_tokens": 46, "total_tokens": 156, "cost": 0.0002626},
+    "x402_receipt": make_receipt("deepseek/deepseek-v4-pro", "llm/deepseek", 1700, 0.001),
 }
 
 router = make_router(
     route_path=ROUTE_PATH, route_key=ROUTE_KEY, model=MODEL, provider=PROVIDER,
     description_key='llm-deepseek', sample_request=SAMPLE_REQUEST, sample_response=SAMPLE_RESPONSE,
+    fallback_provider=FALLBACK_PROVIDER,
 )

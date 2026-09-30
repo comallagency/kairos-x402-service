@@ -22,7 +22,10 @@ _CRITERIA = {
     "not_toxic": "The text does not contain hate speech, harassment, threats, or severe offensive language.",
 }
 
+SAMPLE_REQUEST = {"text": 'I disagree with your point, but I respect your perspective.'}
+
 SAMPLE_RESPONSE = {
+    "input": 'I disagree with your point, but I respect your perspective.',
     "label": 'not_toxic',
     "probability": 0.95,
     "alternate_label": 'toxic',

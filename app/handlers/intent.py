@@ -25,7 +25,10 @@ _CRITERIA = {
     "other": "The text does not clearly fit question, request, complaint, or compliment.",
 }
 
+SAMPLE_REQUEST = {"text": 'Can you please reset my password?'}
+
 SAMPLE_RESPONSE = {
+    "input": 'Can you please reset my password?',
     "label": 'request',
     "probability": 0.71,
     "alternate_label": 'question',

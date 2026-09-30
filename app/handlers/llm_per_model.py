@@ -12,6 +12,7 @@ uptime/latency numbers behind the pin.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -23,6 +24,18 @@ from app.handlers.llm_gateway import _capped_max_tokens, _price_ceiling_usd
 from app.receipts import Timer, effective_price, extract_payer_address, make_receipt
 from app.upstream.openrouter import OpenRouterError, chat_completion_raw
 from app.x402_setup import ROUTE_DESCRIPTIONS
+
+# 20s hard server-side deadline (2026-09-30, correction avant indexation):
+# never settle without a delivered response. PRIMARY_TIMEOUT_S bounds only
+# the primary provider attempt on routes with a fallback_provider (Gemini
+# Flash and DeepSeek, both measured with real 32-34s p95 tail latency on a
+# single provider) - the fallback then gets whatever remains of the 20s
+# total. Routes with no fallback_provider get the full 20s on their one
+# attempt. Either way, the OUTER wait_for in lookup() is the actual
+# ceiling - it fires even if the inner primary-then-fallback sequence
+# itself has a bug, so "20s max, always" holds by construction.
+PRIMARY_TIMEOUT_S = 8.0
+GLOBAL_TIMEOUT_S = 20.0
 
 
 def _validate_messages(body: dict) -> list | None:
@@ -53,19 +66,44 @@ def make_price_fn(model: str):
     return _price
 
 
-async def lookup(model: str, provider: dict, messages: list, max_tokens_raw: Any) -> tuple[dict, float, float]:
+async def _attempt(model: str, provider: dict, messages: list, capped_max_tokens: int) -> dict:
+    return await chat_completion_raw(model, messages, capped_max_tokens, provider=provider)
+
+
+async def _lookup_inner(model: str, provider: dict, fallback_provider: dict | None, messages: list, capped_max_tokens: int) -> dict:
+    if fallback_provider is None:
+        return await _attempt(model, provider, messages, capped_max_tokens)
+    try:
+        return await asyncio.wait_for(_attempt(model, provider, messages, capped_max_tokens), timeout=PRIMARY_TIMEOUT_S)
+    except (asyncio.TimeoutError, OpenRouterError):
+        # Primary was slow (>8s) or errored outright - one bounded retry on
+        # a second, independently-pinned provider, never a third attempt.
+        # The outer wait_for in lookup() still caps the whole thing at 20s
+        # total, so this fallback gets whatever's left of that budget, not
+        # a fresh 8-20s window of its own.
+        return await _attempt(model, fallback_provider, messages, capped_max_tokens)
+
+
+async def lookup(model: str, provider: dict, messages: list, max_tokens_raw: Any, fallback_provider: dict | None = None) -> tuple[dict, float, float]:
     """Returns (data, ceiling_usd, real_cost_usd). Raises OpenRouterError on
-    upstream failure - the caller decides how that maps to an HTTP/MCP
-    error, matching every other handler in this codebase."""
+    a genuine upstream failure (mapped to 502 by the caller), or
+    asyncio.TimeoutError if nothing came back within GLOBAL_TIMEOUT_S
+    (mapped to 504, never settled - see make_router's _post()).
+    fallback_provider: if given, the primary attempt is capped at
+    PRIMARY_TIMEOUT_S and a slow/failed primary retries once on this
+    second provider - see module docstring."""
     capped_max_tokens = _capped_max_tokens(max_tokens_raw)
     ceiling = await _price_ceiling_usd(model, capped_max_tokens, messages)
-    data = await chat_completion_raw(model, messages, capped_max_tokens, provider=provider)
+    data = await asyncio.wait_for(
+        _lookup_inner(model, provider, fallback_provider, messages, capped_max_tokens),
+        timeout=GLOBAL_TIMEOUT_S,
+    )
     usage = data.get("usage") or {}
     real_cost = float(usage.get("cost") or 0.0)
     return data, ceiling, real_cost
 
 
-def make_router(*, route_path: str, route_key: str, model: str, provider: dict, description_key: str, sample_request: dict, sample_response: dict):
+def make_router(*, route_path: str, route_key: str, model: str, provider: dict, description_key: str, sample_request: dict, sample_response: dict, fallback_provider: dict | None = None):
     router = APIRouter()
 
     @router.get(f"{route_path}/sample", openapi_extra={"security": []})
@@ -106,7 +144,16 @@ def make_router(*, route_path: str, route_key: str, model: str, provider: dict, 
 
         try:
             with Timer() as t:
-                data, ceiling, real_cost = await lookup(model, provider, messages, body.get("max_tokens"))
+                data, ceiling, real_cost = await lookup(model, provider, messages, body.get("max_tokens"), fallback_provider=fallback_provider)
+        except asyncio.TimeoutError:
+            db.log_request(
+                route=route_key, method="POST", status="error", payer=payer,
+                user_agent=user_agent, body_excerpt=body_excerpt, error_reason="upstream_timeout",
+            )
+            return JSONResponse(
+                {"error": {"reason": "upstream_timeout", "detail": f"No response within {GLOBAL_TIMEOUT_S:.0f}s - not charged. Set your client timeout to 30s."}},
+                status_code=504,
+            )
         except OpenRouterError as exc:
             db.log_request(
                 route=route_key, method="POST", status="error", payer=payer,

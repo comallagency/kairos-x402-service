@@ -22,7 +22,10 @@ _CRITERIA = {
     "no_pii": "The text does not contain personally identifiable information.",
 }
 
+SAMPLE_REQUEST = {"text": 'The quarterly report shows a 12% increase in revenue.'}
+
 SAMPLE_RESPONSE = {
+    "input": 'The quarterly report shows a 12% increase in revenue.',
     "label": 'no_pii',
     "probability": 0.91,
     "alternate_label": 'pii_detected',
