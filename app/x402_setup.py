@@ -579,12 +579,14 @@ ROUTE_DESCRIPTIONS = {
         "only when history fits 1-2 log queries. Try GET /token-risk/sample."
     ),
     "research": (
-        "Web research report with sources: ask a question, get a cited "
-        "answer in 5-8 sentences, each claim tagged to a numbered source, "
-        "built from real page content - no invented facts. Under 4.5s "
-        "guaranteed: search and a fast LLM (mistral-nemo/llama-3.3-70b) "
-        "always run; claim verification only when time remains, marked "
-        "plainly when skipped. Try GET /research/sample."
+        "Jev-powered research: routed search, cited answer, claims "
+        "verified against sources. Ask a question, get a 5-8 sentence "
+        "answer, each claim tagged to a numbered source, built from real "
+        "page content - no invented facts. A fast paid LLM writes it, "
+        "under 4.5s guaranteed; on a rare miss, a no-LLM extractive "
+        "fallback (top sentences from the sources, picked by Jev) takes "
+        "over instead, marked \"synthesis\":\"extractive\". Try GET "
+        "/research/sample."
     ),
 }
 
@@ -1885,7 +1887,7 @@ TOKEN_RISK_OUTPUT_SCHEMA = {
 }
 
 
-RESEARCH_SAMPLE_INPUT = {"query": "What caused the 2026 Base network congestion in September?"}
+RESEARCH_SAMPLE_INPUT = {"query": "What are the main features of the Rust programming language?"}
 
 RESEARCH_INPUT_SCHEMA = {
     "properties": {
@@ -1895,24 +1897,29 @@ RESEARCH_INPUT_SCHEMA = {
     "required": ["query"],
 }
 
+# Captured from a real end-to-end call (2026-09-30, no payment).
 RESEARCH_SAMPLE_OUTPUT = {
-    "query": "What caused the 2026 Base network congestion in September?",
+    "query": "What are the main features of the Rust programming language?",
     "answer": (
-        "Base experienced elevated congestion in mid-September 2026 driven by a surge in memecoin launch "
-        "activity on Uniswap V2/V3 and Aerodrome [1]. Average gas prices briefly spiked above typical levels "
-        "during peak trading windows [1][2]. The Base team noted no protocol-level incident and attributed the "
-        "load to organic demand rather than an attack [2]. Several DEX aggregators reported temporarily degraded "
-        "quote latency during the same window [3]. Network conditions normalized within about a day as launch "
-        "volume subsided [1]."
+        "The main features of the Rust programming language include an emphasis on performance, type safety, "
+        "concurrency, and memory safety [1]. Rust supports multiple programming paradigms [1]. The language's "
+        "syntax is heavily influenced by C++ and functional programming languages such as OCaml [2]. Rust has a "
+        "focus on static typing and a borrow system, similar to other systems programming languages [5]. However, "
+        "sources [3] and [4] do not provide information about Rust, instead discussing other programming "
+        "languages, Zig and V, respectively. Overall, the sources suggest that Rust is a systems programming "
+        "language with a strong focus on safety and performance [1][2][5]."
     ),
+    "synthesis": "llm",
     "sources": [
-        {"title": "Base network activity report", "url": "https://example.com/base-report", "published_at": "2026-09-15T00:00:00Z", "source": "web"},
-        {"title": "Gas price tracker", "url": "https://example.com/gas-tracker", "published_at": "2026-09-16T00:00:00Z", "source": "web"},
-        {"title": "DEX aggregator status page", "url": "https://example.com/dex-status", "published_at": "2026-09-15T00:00:00Z", "source": "web"},
+        {"title": "Rust (programming language)", "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)", "published_at": None, "source": "wikipedia"},
+        {"title": "Rust syntax", "url": "https://en.wikipedia.org/wiki/Rust_syntax", "published_at": None, "source": "wikipedia"},
+        {"title": "Zig (programming language)", "url": "https://en.wikipedia.org/wiki/Zig_(programming_language)", "published_at": None, "source": "wikipedia"},
+        {"title": "V (programming language)", "url": "https://en.wikipedia.org/wiki/V_(programming_language)", "published_at": None, "source": "wikipedia"},
+        {"title": "Mojo (programming language)", "url": "https://en.wikipedia.org/wiki/Mojo_(programming_language)", "published_at": None, "source": "wikipedia"},
     ],
     "claims_verified": True,
     "claims_verified_reason": None,
-    "timing_ms": {"search": 1450, "synthesis": 980, "verify": 720, "total": 3170},
+    "timing_ms": {"search": 1230, "synthesis": 644, "verify": 287, "total": 2160},
 }
 
 RESEARCH_OUTPUT_SCHEMA = {
@@ -1920,6 +1927,7 @@ RESEARCH_OUTPUT_SCHEMA = {
     "properties": {
         "query": {"type": "string"},
         "answer": {"type": "string", "description": "5-8 sentences, each claim cited inline as [n] referring to the sources array (1-indexed)."},
+        "synthesis": {"type": "string", "enum": ["llm", "extractive"], "description": "'llm' when a paid fast model wrote the answer (the common case). 'extractive' when that model missed its own tight time cap and the answer is instead the most relevant sentences already present in the sources, verbatim, picked by Jev - never a second LLM call."},
         "sources": {
             "type": "array",
             "items": {
@@ -1937,7 +1945,7 @@ RESEARCH_OUTPUT_SCHEMA = {
         "timing_ms": {"type": "object", "description": "search, synthesis, verify, total, in milliseconds."},
         "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
     },
-    "required": ["query", "answer", "sources", "claims_verified", "timing_ms"],
+    "required": ["query", "answer", "synthesis", "sources", "claims_verified", "timing_ms"],
 }
 
 
