@@ -1,0 +1,10 @@
+apiVersion: 1
+datasources:
+  - name: requests-db
+    uid: requests-db
+    type: frser-sqlite-datasource
+    access: proxy
+    isDefault: true
+    jsonData:
+      path: /var/lib/grafana-data/requests.db
+    editable: false
