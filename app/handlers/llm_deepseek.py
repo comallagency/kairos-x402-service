@@ -11,6 +11,14 @@ from __future__ import annotations
 from app.handlers.llm_per_model import make_price_fn, make_router
 from app.receipts import make_receipt
 
+# Withdrawn from the catalog 2026-09-30 (real p95 measured at 20014ms (2/10 hit the 20s ceiling) on
+# 10 real calls, after adding the 8s/20s provider-fallback timeout fix
+# the same day) - see app/x402_setup.py's _core_route_configs() for
+# where this excludes the route, and app/mcp_server.py for the MCP tool.
+# Reintegrate only once a real measurement (different provider and/or
+# model version) clears >=29/30 on 30 real calls - not attempted yet.
+DEEPSEEK_ENABLED = False
+
 MODEL = 'deepseek/deepseek-v4-pro'
 PROVIDER = {'only': ['Reka'], 'allow_fallbacks': False}
 # 2nd-provider fallback (2026-09-30): a real 10-call test measured a 32.2s

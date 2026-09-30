@@ -61,9 +61,12 @@ NETWORK = "eip155:8453"
 USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 BASE_RPC = "https://mainnet.base.org"
 
+# gemini-flash and deepseek withdrawn 2026-09-30 (real p95 measured >= 20s
+# on 10 real calls even with the 8s/20s provider-fallback fix) - excluded
+# here until a reintegration measurement clears >=29/30 on 30 real calls.
 TARGET_PATHS = [
     "sentiment", "classify", "intent", "spam-check", "toxicity", "language", "pii-check",
-    "llm/claude-sonnet", "llm/gpt-mini", "llm/gemini-flash", "llm/llama", "llm/deepseek",
+    "llm/claude-sonnet", "llm/gpt-mini", "llm/llama",
 ]
 
 FUNDING_PATH = "x402-echo"

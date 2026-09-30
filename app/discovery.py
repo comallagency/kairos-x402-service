@@ -329,6 +329,16 @@ def _research_enabled() -> bool:
     return RESEARCH_ENABLED
 
 
+def _gemini_flash_enabled() -> bool:
+    from app.handlers.llm_gemini_flash import GEMINI_FLASH_ENABLED
+    return GEMINI_FLASH_ENABLED
+
+
+def _deepseek_enabled() -> bool:
+    from app.handlers.llm_deepseek import DEEPSEEK_ENABLED
+    return DEEPSEEK_ENABLED
+
+
 def _llms_catalog() -> str:
     base = config.BASE_URL.rstrip("/")
     lines = [
@@ -475,6 +485,10 @@ def _llms_catalog() -> str:
     ]
     if not _research_enabled():
         lines = [line for line in lines if "/research" not in line]
+    if not _gemini_flash_enabled():
+        lines = [line for line in lines if "/llm/gemini-flash" not in line]
+    if not _deepseek_enabled():
+        lines = [line for line in lines if "/llm/deepseek" not in line]
     return "\n".join(lines) + "\n"
 
 
