@@ -686,16 +686,14 @@ ROUTE_DESCRIPTIONS = {
         "client timeout to 30s. Try GET /llm/gpt-mini/sample."
     ),
     "llm-gemini-flash": (
-        "Gemini Flash API - pay per call, no API key. OpenAI-format chat "
-        "completions on google/gemini-3.8-flash, pinned to Google AI "
-        "Studio for reliability. This model spends hidden reasoning "
-        "tokens even on simple prompts (measured: 385 reasoning tokens for "
-        "a one-sentence summary) - pass max_tokens=500 or higher, or you "
-        "may get an empty or truncated response. You sign a fixed price "
-        "computed from your max_tokens; unused tokens are not refunded. "
-        "20s server-side timeout with an automatic 2nd-provider retry if "
-        "the first is slow - never charged if both miss; set your client "
-        "timeout to 30s. Try GET /llm/gemini-flash/sample."
+        "Gemini Flash API - pay per call, no API key. Chat completions on "
+        "google/gemini-3.8-flash, pinned to Google AI Studio. Spends "
+        "hidden reasoning tokens even on simple prompts - pass "
+        "max_tokens=500+ or you may get an empty/truncated response. "
+        "Fixed price from your max_tokens, unused tokens not refunded. "
+        "20s timeout with a 2nd-provider retry if the first is slow - "
+        "never charged if both miss; set your client timeout to 30s. "
+        "Try GET /llm/gemini-flash/sample."
     ),
     "llm-llama": (
         "Llama API - pay per call, no API key. OpenAI-format chat "
@@ -3067,9 +3065,9 @@ def _core_route_configs() -> dict[str, RouteConfig]:
     # and fixed in the 2026-09-30 conformity batch).
     from app.handlers.llm_claude_sonnet import price_fn as _claude_sonnet_price_fn, SAMPLE_REQUEST as _CLAUDE_SONNET_SAMPLE_REQUEST, SAMPLE_RESPONSE as _CLAUDE_SONNET_SAMPLE_RESPONSE
     from app.handlers.llm_gpt_mini import price_fn as _gpt_mini_price_fn, SAMPLE_REQUEST as _GPT_MINI_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GPT_MINI_SAMPLE_RESPONSE
-    from app.handlers.llm_gemini_flash import price_fn as _gemini_flash_price_fn, SAMPLE_REQUEST as _GEMINI_FLASH_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GEMINI_FLASH_SAMPLE_RESPONSE
+    from app.handlers.llm_gemini_flash import GEMINI_FLASH_ENABLED, price_fn as _gemini_flash_price_fn, SAMPLE_REQUEST as _GEMINI_FLASH_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GEMINI_FLASH_SAMPLE_RESPONSE
     from app.handlers.llm_llama import price_fn as _llama_price_fn, SAMPLE_REQUEST as _LLAMA_SAMPLE_REQUEST, SAMPLE_RESPONSE as _LLAMA_SAMPLE_RESPONSE
-    from app.handlers.llm_deepseek import price_fn as _deepseek_price_fn, SAMPLE_REQUEST as _DEEPSEEK_SAMPLE_REQUEST, SAMPLE_RESPONSE as _DEEPSEEK_SAMPLE_RESPONSE
+    from app.handlers.llm_deepseek import DEEPSEEK_ENABLED, price_fn as _deepseek_price_fn, SAMPLE_REQUEST as _DEEPSEEK_SAMPLE_REQUEST, SAMPLE_RESPONSE as _DEEPSEEK_SAMPLE_RESPONSE
 
     _routes["POST /llm/claude-sonnet"] = RouteConfig(
         accepts=_payment_option(_claude_sonnet_price_fn),
@@ -3146,6 +3144,10 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             output=OutputConfig(example=_DEEPSEEK_SAMPLE_RESPONSE, schema=LLM_GATEWAY_OUTPUT_SCHEMA),
         ),
     )
+    if not GEMINI_FLASH_ENABLED:
+        _routes.pop("POST /llm/gemini-flash", None)
+    if not DEEPSEEK_ENABLED:
+        _routes.pop("POST /llm/deepseek", None)
     return _routes
 
 

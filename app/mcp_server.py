@@ -1257,9 +1257,9 @@ from app.handlers.pii_check import PII_CHECK_ENABLED, _lookup as _pii_check_look
 from app.handlers.llm_per_model import lookup as _llm_per_model_lookup
 from app.handlers.llm_claude_sonnet import MODEL as _CLAUDE_SONNET_MODEL, PROVIDER as _CLAUDE_SONNET_PROVIDER, SAMPLE_REQUEST as _CLAUDE_SONNET_SAMPLE_REQUEST, SAMPLE_RESPONSE as _CLAUDE_SONNET_SAMPLE_RESPONSE
 from app.handlers.llm_gpt_mini import MODEL as _GPT_MINI_MODEL, PROVIDER as _GPT_MINI_PROVIDER, SAMPLE_REQUEST as _GPT_MINI_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GPT_MINI_SAMPLE_RESPONSE
-from app.handlers.llm_gemini_flash import MODEL as _GEMINI_FLASH_MODEL, PROVIDER as _GEMINI_FLASH_PROVIDER, FALLBACK_PROVIDER as _GEMINI_FLASH_FALLBACK_PROVIDER, SAMPLE_REQUEST as _GEMINI_FLASH_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GEMINI_FLASH_SAMPLE_RESPONSE
+from app.handlers.llm_gemini_flash import GEMINI_FLASH_ENABLED, MODEL as _GEMINI_FLASH_MODEL, PROVIDER as _GEMINI_FLASH_PROVIDER, FALLBACK_PROVIDER as _GEMINI_FLASH_FALLBACK_PROVIDER, SAMPLE_REQUEST as _GEMINI_FLASH_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GEMINI_FLASH_SAMPLE_RESPONSE
 from app.handlers.llm_llama import MODEL as _LLAMA_MODEL, PROVIDER as _LLAMA_PROVIDER, SAMPLE_REQUEST as _LLAMA_SAMPLE_REQUEST, SAMPLE_RESPONSE as _LLAMA_SAMPLE_RESPONSE
-from app.handlers.llm_deepseek import MODEL as _DEEPSEEK_MODEL, PROVIDER as _DEEPSEEK_PROVIDER, FALLBACK_PROVIDER as _DEEPSEEK_FALLBACK_PROVIDER, SAMPLE_REQUEST as _DEEPSEEK_SAMPLE_REQUEST, SAMPLE_RESPONSE as _DEEPSEEK_SAMPLE_RESPONSE
+from app.handlers.llm_deepseek import DEEPSEEK_ENABLED, MODEL as _DEEPSEEK_MODEL, PROVIDER as _DEEPSEEK_PROVIDER, FALLBACK_PROVIDER as _DEEPSEEK_FALLBACK_PROVIDER, SAMPLE_REQUEST as _DEEPSEEK_SAMPLE_REQUEST, SAMPLE_RESPONSE as _DEEPSEEK_SAMPLE_RESPONSE
 
 _CLAUDE_SONNET_EXTENSIONS = declare_mcp_discovery_extension(
     DeclareMcpDiscoveryConfig(
@@ -1934,24 +1934,25 @@ async def llm_gpt_mini_tool(
     )
 
 
-@mcp.tool(
-    name="llm_gemini_flash",
-    title="Gemini Flash API",
-    description=ROUTE_DESCRIPTIONS["llm-gemini-flash"],
-    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
-    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
-)
-async def llm_gemini_flash_tool(
-    messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
-    max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
-    ctx: Context = None,
-) -> ToolResult:
-    return await _run_pinned_model_mcp(
-        ctx=ctx, model=_GEMINI_FLASH_MODEL, provider=_GEMINI_FLASH_PROVIDER,
-        route_key="POST /llm/gemini-flash", tool_name="llm_gemini_flash",
-        extensions=_GEMINI_FLASH_EXTENSIONS, messages=messages, max_tokens=max_tokens,
-        fallback_provider=_GEMINI_FLASH_FALLBACK_PROVIDER,
+if GEMINI_FLASH_ENABLED:
+    @mcp.tool(
+        name="llm_gemini_flash",
+        title="Gemini Flash API",
+        description=ROUTE_DESCRIPTIONS["llm-gemini-flash"],
+        output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
     )
+    async def llm_gemini_flash_tool(
+        messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+        max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _run_pinned_model_mcp(
+            ctx=ctx, model=_GEMINI_FLASH_MODEL, provider=_GEMINI_FLASH_PROVIDER,
+            route_key="POST /llm/gemini-flash", tool_name="llm_gemini_flash",
+            extensions=_GEMINI_FLASH_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+            fallback_provider=_GEMINI_FLASH_FALLBACK_PROVIDER,
+        )
 
 
 @mcp.tool(
@@ -1973,24 +1974,25 @@ async def llm_llama_tool(
     )
 
 
-@mcp.tool(
-    name="llm_deepseek",
-    title="DeepSeek API",
-    description=ROUTE_DESCRIPTIONS["llm-deepseek"],
-    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
-    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
-)
-async def llm_deepseek_tool(
-    messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
-    max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
-    ctx: Context = None,
-) -> ToolResult:
-    return await _run_pinned_model_mcp(
-        ctx=ctx, model=_DEEPSEEK_MODEL, provider=_DEEPSEEK_PROVIDER,
-        route_key="POST /llm/deepseek", tool_name="llm_deepseek",
-        extensions=_DEEPSEEK_EXTENSIONS, messages=messages, max_tokens=max_tokens,
-        fallback_provider=_DEEPSEEK_FALLBACK_PROVIDER,
+if DEEPSEEK_ENABLED:
+    @mcp.tool(
+        name="llm_deepseek",
+        title="DeepSeek API",
+        description=ROUTE_DESCRIPTIONS["llm-deepseek"],
+        output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
     )
+    async def llm_deepseek_tool(
+        messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+        max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _run_pinned_model_mcp(
+            ctx=ctx, model=_DEEPSEEK_MODEL, provider=_DEEPSEEK_PROVIDER,
+            route_key="POST /llm/deepseek", tool_name="llm_deepseek",
+            extensions=_DEEPSEEK_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+            fallback_provider=_DEEPSEEK_FALLBACK_PROVIDER,
+        )
 
 
 # Withdrawn from the MCP tool set while RESEARCH_ENABLED is False (2026-09-30) -
