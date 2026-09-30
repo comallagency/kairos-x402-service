@@ -630,10 +630,12 @@ ROUTE_DESCRIPTIONS = {
         "4.5s guaranteed. Try GET /sentiment/sample."
     ),
     "classify": (
-        "Classify text into your own labels (2-20, caller-supplied): the "
-        "best-fitting label with a confidence score and an alternate label. "
-        "Powered by Jev, falling back to a Groq-hosted LLM if Jev is slow or "
-        "unavailable - under 4.5s guaranteed. Try GET /classify/sample."
+        "Text classification with your own custom labels (2-20) - "
+        "categorize a support ticket, a review, or any text into the "
+        "best-fitting label, with a confidence score and an alternate "
+        "label. Powered by Jev, falling back to a Groq-hosted LLM if Jev "
+        "is slow or unavailable - under 4.5s guaranteed. Try GET "
+        "/classify/sample."
     ),
     "intent": (
         "Intent detection: classify text as a question, request, complaint, "
@@ -2954,9 +2956,9 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/classify",
             description=ROUTE_DESCRIPTIONS["classify"],
             mime_type="application/json",
-            service_name="text-classification",
+            service_name="support-ticket-classifier",
             icon_url=ICON_URL,
-            tags=["classify text", "text classification", "custom labels", "Powered by Jev"],
+            tags=["classify text", "text classification", "custom labels", "categorize support ticket", "Powered by Jev"],
             extensions=declare_discovery_extension(
                 input=CLASSIFY_SAMPLE_INPUT,
                 input_schema=CLASSIFY_INPUT_SCHEMA,
