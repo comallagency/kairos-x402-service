@@ -53,22 +53,41 @@ SAMPLE_RESPONSE = {
         "timezone": "Europe/Paris",
     },
     "current": {
-        "time": "2026-09-19T13:45",
-        "temperature_c": 23.8,
-        "humidity_pct": 48,
-        "wind_speed_kmh": 12.2,
-        "weather_code": 1,
-        "conditions": "mainly_clear",
+        "time": "2026-09-30T12:30",
+        "temperature_c": 21.1,
+        "humidity_pct": 78,
+        "wind_speed_kmh": 8.9,
+        "weather_code": 61,
+        "conditions": "slight_rain",
     },
+    # Real 3-day forecast captured live 2026-09-30 (was truncated to 1 day -
+    # a documentation bug found in the delivery audit; the actual handler
+    # already requests and returns forecast_days=3, see _forecast() above).
     "daily": [
         {
-            "date": "2026-09-19",
-            "temperature_max_c": 25.1,
-            "temperature_min_c": 15.2,
+            "date": "2026-09-30",
+            "temperature_max_c": 22.8,
+            "temperature_min_c": 20.5,
+            "precipitation_sum_mm": 13.2,
+            "weather_code": 63,
+            "conditions": "rain",
+        },
+        {
+            "date": "2026-10-01",
+            "temperature_max_c": 21.0,
+            "temperature_min_c": 16.0,
+            "precipitation_sum_mm": 1.9,
+            "weather_code": 80,
+            "conditions": "rain_showers",
+        },
+        {
+            "date": "2026-10-02",
+            "temperature_max_c": 20.6,
+            "temperature_min_c": 12.5,
             "precipitation_sum_mm": 0.0,
-            "weather_code": 1,
-            "conditions": "mainly_clear",
-        }
+            "weather_code": 3,
+            "conditions": "overcast",
+        },
     ],
 }
 

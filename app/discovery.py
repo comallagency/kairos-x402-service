@@ -324,6 +324,11 @@ async def llms_txt():
     return _llms_catalog()
 
 
+def _research_enabled() -> bool:
+    from app.handlers.research import RESEARCH_ENABLED
+    return RESEARCH_ENABLED
+
+
 def _llms_catalog() -> str:
     base = config.BASE_URL.rstrip("/")
     lines = [
@@ -434,6 +439,8 @@ def _llms_catalog() -> str:
         f"- Facilitator: CDP (Coinbase)",
         "",
     ]
+    if not _research_enabled():
+        lines = [line for line in lines if "/research" not in line]
     return "\n".join(lines) + "\n"
 
 
