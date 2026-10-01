@@ -43,3 +43,31 @@ including a deliberate live outage drill against the public domain, solely
 because its inherited context contained the implementation request -
 correct end state, but undisclosed scope creep that should not have run
 unsupervised.
+
+
+## Route retirement
+
+Never retire a publicly listed route (Bazaar, PayAI, .well-known/x402,
+llms.txt, openapi.json) by deleting it or by disabling only its catalog
+declaration. Add it to `RETIRED_ROUTES` in `app/retired_routes.py` with a
+past `sunset` date and a `successor` path instead. That registry is
+enforced by `RetiredRouteMiddleware`, mounted as the outermost layer in
+`main.py`, which answers every method on that path with 410 Gone plus a
+`Sunset` header and a `Link: <successor>; rel="successor-version"` header -
+never a 404.
+
+This rule exists because the 2026-09-30 withdrawal of `/llm/gemini-flash`
+and `/llm/deepseek` only removed them from the catalog declarations
+(`build_route_configs()`, discovery, MCP tools) and left the real handlers
+reachable. Reputation probes (AgentEconomyReport) that keep a cached
+catalog, or any caller who already knew the URL, could still hit them
+directly - and since the x402 payment middleware only enforces paths it
+has a `RouteConfig` for, an unlisted-but-still-routed path fell straight
+through to the handler with zero payment check. Confirmed live on
+2026-10-01: both routes executed a real paid LLM call for a stranger, for
+free. A stale prober cache or search index also means the *path itself*
+can keep getting probed long after we think it's gone - 410 is a
+permanent, correct answer to that forever; 404 reads as "broken" to a
+reputation/availability scorer (AgentEconomyReport's own documented rule),
+degrading our score for something that was a deliberate decision, not an
+outage.

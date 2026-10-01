@@ -3151,6 +3151,33 @@ def _core_route_configs() -> dict[str, RouteConfig]:
         _routes.pop("POST /llm/gemini-flash", None)
     if not DEEPSEEK_ENABLED:
         _routes.pop("POST /llm/deepseek", None)
+
+    # GET twins for POST-only Bazaar-listed routes (2026-10-01): AgentEconomyReport
+    # (and presumably other GET-based probes, same precedent as the /weather GET
+    # twin for "shizu-style" paying agents) sent an unpaid GET price-check to each
+    # of these 13 routes and got FastAPI's 405 instead of our 402, since the
+    # payment middleware only recognizes (method, path) pairs present in this
+    # dict - a 405 isn't a declared payment challenge, so it read as downtime.
+    # Real measured impact: 13 of ~23 probed routes affected, consistent with the
+    # 46.9% availability figure that triggered the AgentEconomyReport D grade.
+    # Config-only, no new FastAPI handler: the middleware answers unpaid GETs
+    # with 402 directly, before ever reaching the router (confirmed by reading
+    # x402/http/middleware/fastapi.py - requires_payment() short-circuits before
+    # call_next()), so no regression for real buyers, who already use POST.
+    for _get_twin_path in (
+        "/search", "/translate", "/pdf", "/web-read", "/extract", "/summarize",
+        "/discover", "/decide", "/guard", "/verify", "/rank", "/token-risk",
+        "/v1/chat/completions",
+        # Same gap, found by auditing every Bazaar-listed resource rather than
+        # just the 2 days of probe logs that caught the first 13 (2026-10-01).
+        "/llm/llama", "/llm/gpt-mini", "/llm/claude-sonnet", "/pii-check",
+        "/language", "/toxicity", "/spam-check", "/intent", "/classify",
+        "/sentiment", "/research",
+    ):
+        _post_key = f"POST {_get_twin_path}"
+        if _post_key in _routes:
+            _routes[f"GET {_get_twin_path}"] = _routes[_post_key]
+
     return _routes
 
 
