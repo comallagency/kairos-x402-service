@@ -1,34 +1,29 @@
 #!/usr/bin/env python3
-"""Bazaar bootstrap for the 51 pure-compute routes added 2026-10-02 -
-PREPARED, NOT RUN.
+"""Bazaar bootstrap for the 41 REMAINING pure-compute routes (2026-10-02
+price split) - PREPARED, NOT RUN.
 
-Pay-as-you-go (2026-10-02 rewrite): unlike bootstrap_new_routes.py (funds
-B once for the SUM of all targets up front), this funds B via /x402-echo
-right before EACH route - same ping-pong dance as bootstrap_token_risk.py,
-looped - then pays that one route, before moving to the next. A's real
-balance (~$0.02) cannot cover the full $0.102 (51 x $0.002) up front, so
-funding per-route lets the script get as many routes live as the balance
-actually allows, stopping cleanly the moment A can no longer cover the
-next route's funding - printing exactly which routes were reached and
-which were not, rather than failing all-or-nothing.
+10 routes (validate/vin, hash/hash, encoding/transcode, text/slug,
+time/humanize, encoding/detect, validate/iban, hash/hmac, json/diff,
+validate/luhn) are already bootstrapped at $0.002 and removed from
+TARGET_PATHS here - this script only covers the 41 never-published-price
+routes, now at $0.001 each (see app/purecalc/routes/*.py - never settled,
+so dropping the price carries zero reputation risk).
 
-TARGET_PATHS is pre-ordered by priority: for each route, one realistic
-agent query was run against CDP's discovery search (top 5 results) and
-against our own description, both embedded with nomic-embed-text (local
-Ollama, same method as the earlier Bazaar description-optimization batch)
-and compared by cosine similarity. Ranked by gap = best_competitor_score -
-our_score, descending.
+Pay-as-you-go, one funding per route: at $0.001, a single /x402-echo
+funding (also $0.001) always exactly covers one route's price when B's
+own balance doesn't already - no multi-funding ceiling math needed like
+the 10-route $0.002 bootstrap required. Same ping-pong shape as
+bootstrap_token_risk.py, looped: fund B (0 or 1 payment) right before
+each route, pay that route, move to the next - stopping cleanly and
+printing every remaining route the moment A can no longer cover one more
+$0.001 funding, rather than failing all-or-nothing.
 
-Finding worth flagging before you run this: every one of the 51 gaps came
-back NEGATIVE - CDP's top-5 for all 51 queries are dominated by unrelated
-crypto/AI-infrastructure services (ERC20 balance checks, block height, AI
-chat completions), never a real competitor in these specific niches. There
-is currently no real competition for any of these 51 categories on the
-Bazaar - the order below reflects "closest topical overlap with whatever
-CDP does return" (least-negative gap first), not "most urgently contested
-niche," since no niche here is actually contested yet. See the ranking
-report for the full table and reasoning before deciding whether to keep
-this order as-is.
+TARGET_PATHS keeps the priority order from the original 51-route ranking
+(CDP discovery search + local-embedding cosine similarity vs our own
+description, gap = best_competitor_score - our_score, descending) with
+the 10 already-done routes filtered out - see bootstrap_new_routes.py-era
+git history for the full ranking table and the finding that every gap was
+negative (no real competitor exists yet for any of these niches).
 
 Funding step, retry logic: identical primitives to
 scripts/bootstrap_new_routes.py / bootstrap_token_risk.py - see those
@@ -38,9 +33,12 @@ printed).
 --dry-run
 ---------
 No real payment (DRY_RUN short-circuits before any signing/broadcast).
-Simulates the exact same balance bookkeeping as a real run and reports
-how many of the 51 routes the current on-chain balance would actually
-reach, in priority order, before stopping.
+Reads the REAL on-chain balance and simulates the exact same balance
+bookkeeping as a real run - reports how many of the 41 routes it would
+actually reach, in priority order, before stopping. If B's own balance
+already covers a route's $0.001, that route needs zero funding and pays
+directly from B - the same fund-if-needed logic already does this
+(n_fundings computes to 0 when B's balance covers the price).
 """
 
 from __future__ import annotations
@@ -62,13 +60,14 @@ USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 BASE_RPC = "https://mainnet.base.org"
 
 # Priority order from the CDP-search + local-embedding similarity ranking
-# (2026-10-02) - gap = best_competitor_score - our_score, descending (most
-# negative last). See this script's module docstring for the important
-# caveat: every gap is negative, there is no real competitor for any of
-# these 51 routes today.
-TARGET_PATHS = [
+# (2026-10-02), the 10 already-bootstrapped routes filtered out. See this
+# script's module docstring for the caveat: every gap was negative, there
+# is no real competitor for any of these routes today.
+ALREADY_BOOTSTRAPPED = {
     "validate/vin", "hash/hash", "encoding/transcode", "text/slug", "time/humanize",
     "encoding/detect", "validate/iban", "hash/hmac", "json/diff", "validate/luhn",
+}
+TARGET_PATHS = [
     "time/add", "text/diff", "geo/bbox", "time/between", "money/allocate",
     "validate/routing", "stats/percentile", "number/radix", "stats/regression",
     "geo/point-in-polygon", "stats/summary", "geo/geohash", "validate/imei",
@@ -79,7 +78,8 @@ TARGET_PATHS = [
     "json/flatten", "geo/bearing", "number/words", "regex/test", "number/roman",
     "stats/correlation", "validate/isin", "text/case", "geo/dms", "json/validate",
 ]
-assert len(TARGET_PATHS) == 51
+assert len(TARGET_PATHS) == 41
+assert not (set(TARGET_PATHS) & ALREADY_BOOTSTRAPPED)
 
 FUNDING_PATH = "x402-echo"
 FUNDING_PRICE = 0.001  # config.PRICE_X402_ECHO
@@ -213,10 +213,12 @@ async def _pay_with_retry(signer, route: dict) -> tuple[str, str | None, str | N
 def _fundings_needed_for_shortfall(shortfall: float) -> int:
     """Ceiling, not exact-multiple: unlike bootstrap_token_risk.py's
     one-shot single-route funding (where B starts clean), this loops over
-    51 routes and B accumulates small dust residue between them (e.g.
-    $0.000108 left over here before the first route even starts) - an
-    exact-multiple requirement would halt the whole run on that dust. A
-    small positive leftover in B after funding is fine and expected."""
+    many routes and B accumulates small dust residue between them (e.g.
+    $0.000108 left over before the first route of the original 51-route
+    run) - an exact-multiple requirement would halt the whole run on that
+    dust. A small positive leftover in B after funding is fine and
+    expected. At the current $0.001 price this almost always resolves to
+    0 or 1 funding anyway."""
     import math
 
     if shortfall <= EPSILON:
@@ -260,7 +262,7 @@ async def main() -> int:
     bal_b = await usdc_balance(ADDRESS_B)
     print(f"A balance (on-chain): {bal_a:.6f} USDC")
     print(f"B balance (on-chain): {bal_b:.6f} USDC")
-    print(f"{len(TARGET_PATHS)} routes en file, prix fixe $0.002 chacune, financement a la volee par route")
+    print(f"{len(TARGET_PATHS)} routes en file (deja faites: {sorted(ALREADY_BOOTSTRAPPED)}), prix fixe $0.001 chacune, financement a la volee par route")
     print()
 
     account_a = account_b = None

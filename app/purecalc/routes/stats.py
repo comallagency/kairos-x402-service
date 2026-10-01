@@ -34,7 +34,7 @@ def compute_summary(inp: SummaryInput) -> SummaryOutput:
 
 
 register(ComputeSpec(
-    slug="stats/summary", price="$0.002", service_name="stats-summary",
+    slug="stats/summary", price="$0.001", service_name="stats-summary",
     description="Descriptive statistics for a list of numbers: count, mean, median, sample stdev/variance, min, max.",
     tags=["statistics", "summary statistics", "mean", "median", "standard deviation"],
     input_model=SummaryInput, output_model=SummaryOutput, compute=compute_summary,
@@ -64,7 +64,7 @@ def compute_correlation(inp: CorrelationInput) -> CorrelationOutput:
 
 
 register(ComputeSpec(
-    slug="stats/correlation", price="$0.002", service_name="stats-correlation",
+    slug="stats/correlation", price="$0.001", service_name="stats-correlation",
     description="Pearson correlation coefficient between two equal-length numeric series.",
     tags=["statistics", "correlation", "pearson", "data analysis"],
     input_model=CorrelationInput, output_model=CorrelationOutput, compute=compute_correlation,
@@ -107,7 +107,7 @@ def compute_regression(inp: RegressionInput) -> RegressionOutput:
 
 
 register(ComputeSpec(
-    slug="stats/regression", price="$0.002", service_name="stats-regression",
+    slug="stats/regression", price="$0.001", service_name="stats-regression",
     description="Ordinary least squares simple linear regression (y = slope*x + intercept) with R-squared.",
     tags=["statistics", "linear regression", "least squares", "r squared", "data analysis"],
     input_model=RegressionInput, output_model=RegressionOutput, compute=compute_regression,
@@ -140,7 +140,7 @@ def compute_percentile(inp: PercentileInput) -> PercentileOutput:
 
 
 register(ComputeSpec(
-    slug="stats/percentile", price="$0.002", service_name="stats-percentile",
+    slug="stats/percentile", price="$0.001", service_name="stats-percentile",
     description="Nth percentile of a list of numbers (linear interpolation between closest ranks).",
     tags=["statistics", "percentile", "quantile", "data analysis"],
     input_model=PercentileInput, output_model=PercentileOutput, compute=compute_percentile,

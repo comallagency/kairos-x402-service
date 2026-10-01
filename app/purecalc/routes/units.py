@@ -61,7 +61,7 @@ def compute_unit_convert(inp: UnitConvertInput) -> UnitConvertOutput:
 
 
 register(ComputeSpec(
-    slug="unit/convert", price="$0.002", service_name="unit-convert",
+    slug="unit/convert", price="$0.001", service_name="unit-convert",
     description="Convert a value between units of length, mass, volume or temperature (C/F/K).",
     tags=["unit conversion", "length", "mass", "volume", "temperature", "metric", "imperial"],
     input_model=UnitConvertInput, output_model=UnitConvertOutput, compute=compute_unit_convert,
@@ -113,7 +113,7 @@ def compute_roman(inp: RomanInput) -> RomanOutput:
 
 
 register(ComputeSpec(
-    slug="number/roman", price="$0.002", service_name="number-roman",
+    slug="number/roman", price="$0.001", service_name="number-roman",
     description="Convert an integer (1-3999) to a Roman numeral, or a Roman numeral back to an integer.",
     tags=["roman numerals", "number conversion", "numeral system"],
     input_model=RomanInput, output_model=RomanOutput, compute=compute_roman,
@@ -169,7 +169,7 @@ def compute_words(inp: WordsInput) -> WordsOutput:
 
 
 register(ComputeSpec(
-    slug="number/words", price="$0.002", service_name="number-words",
+    slug="number/words", price="$0.001", service_name="number-words",
     description="Convert an integer into English words.",
     tags=["number to words", "spell out numbers", "english", "numerals"],
     input_model=WordsInput, output_model=WordsOutput, compute=compute_words,
@@ -211,7 +211,7 @@ def compute_radix(inp: RadixInput) -> RadixOutput:
 
 
 register(ComputeSpec(
-    slug="number/radix", price="$0.002", service_name="number-radix",
+    slug="number/radix", price="$0.001", service_name="number-radix",
     description="Convert a number's string representation from one base (2-36) to another.",
     tags=["base conversion", "radix", "hexadecimal", "binary", "number systems"],
     input_model=RadixInput, output_model=RadixOutput, compute=compute_radix,
@@ -239,7 +239,7 @@ def compute_ordinal(inp: OrdinalInput) -> OrdinalOutput:
 
 
 register(ComputeSpec(
-    slug="number/ordinal", price="$0.002", service_name="number-ordinal",
+    slug="number/ordinal", price="$0.001", service_name="number-ordinal",
     description="Convert an integer to its English ordinal form (1st, 2nd, 3rd, 4th, 11th, 21st...).",
     tags=["ordinal numbers", "english", "number formatting"],
     input_model=OrdinalInput, output_model=OrdinalOutput, compute=compute_ordinal,
@@ -268,7 +268,7 @@ def compute_fraction(inp: FractionInput) -> FractionOutput:
 
 
 register(ComputeSpec(
-    slug="fraction/simplify", price="$0.002", service_name="fraction-simplify",
+    slug="fraction/simplify", price="$0.001", service_name="fraction-simplify",
     description="Simplify a fraction to lowest terms and return its decimal value.",
     tags=["fraction", "simplify", "lowest terms", "gcd", "math"],
     input_model=FractionInput, output_model=FractionOutput, compute=compute_fraction,
@@ -297,7 +297,7 @@ def compute_money_format(inp: MoneyFormatInput) -> MoneyFormatOutput:
 
 
 register(ComputeSpec(
-    slug="money/format", price="$0.002", service_name="money-format",
+    slug="money/format", price="$0.001", service_name="money-format",
     description="Format a numeric amount with thousands separators, a chosen decimal precision and a currency symbol.",
     tags=["money formatting", "currency", "thousands separator", "number formatting"],
     input_model=MoneyFormatInput, output_model=MoneyFormatOutput, compute=compute_money_format,
@@ -338,7 +338,7 @@ def compute_money_allocate(inp: MoneyAllocateInput) -> MoneyAllocateOutput:
 
 
 register(ComputeSpec(
-    slug="money/allocate", price="$0.002", service_name="money-allocate",
+    slug="money/allocate", price="$0.001", service_name="money-allocate",
     description="Split an integer amount of cents among N ratios with zero rounding loss (Fowler's allocation algorithm) - the parts always sum back to the original amount.",
     tags=["money allocation", "split bill", "rounding", "fowler algorithm", "finance"],
     input_model=MoneyAllocateInput, output_model=MoneyAllocateOutput, compute=compute_money_allocate,

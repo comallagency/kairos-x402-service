@@ -43,7 +43,7 @@ def compute_distance(inp: DistanceInput) -> DistanceOutput:
 
 
 register(ComputeSpec(
-    slug="geo/distance", price="$0.002", service_name="geo-distance",
+    slug="geo/distance", price="$0.001", service_name="geo-distance",
     description="Great-circle distance between two lat/lon points (haversine formula). Returns km, mi or nm.",
     tags=["geospatial", "distance", "haversine", "great circle", "latitude longitude", "gps"],
     input_model=DistanceInput, output_model=DistanceOutput, compute=compute_distance,
@@ -74,7 +74,7 @@ def compute_bearing(inp: BearingInput) -> BearingOutput:
 
 
 register(ComputeSpec(
-    slug="geo/bearing", price="$0.002", service_name="geo-bearing",
+    slug="geo/bearing", price="$0.001", service_name="geo-bearing",
     description="Initial compass bearing (0-360 degrees, clockwise from true north) from point 1 to point 2.",
     tags=["geospatial", "bearing", "compass", "heading", "navigation", "gps"],
     input_model=BearingInput, output_model=BearingOutput, compute=compute_bearing,
@@ -113,7 +113,7 @@ def compute_midpoint(inp: MidpointInput) -> MidpointOutput:
 
 
 register(ComputeSpec(
-    slug="geo/midpoint", price="$0.002", service_name="geo-midpoint",
+    slug="geo/midpoint", price="$0.001", service_name="geo-midpoint",
     description="Geographic (great-circle) midpoint between two lat/lon points.",
     tags=["geospatial", "midpoint", "great circle", "latitude longitude", "gps"],
     input_model=MidpointInput, output_model=MidpointOutput, compute=compute_midpoint,
@@ -170,7 +170,7 @@ def compute_geohash(inp: GeohashInput) -> GeohashOutput:
 
 
 register(ComputeSpec(
-    slug="geo/geohash", price="$0.002", service_name="geo-geohash",
+    slug="geo/geohash", price="$0.001", service_name="geo-geohash",
     description="Encode a lat/lon point into a geohash string (precision 1-12 characters).",
     tags=["geospatial", "geohash", "encode", "latitude longitude", "gps", "spatial index"],
     input_model=GeohashInput, output_model=GeohashOutput, compute=compute_geohash,
@@ -203,7 +203,7 @@ def compute_point_in_polygon(inp: PointInPolygonInput) -> PointInPolygonOutput:
 
 
 register(ComputeSpec(
-    slug="geo/point-in-polygon", price="$0.002", service_name="geo-point-in-polygon",
+    slug="geo/point-in-polygon", price="$0.001", service_name="geo-point-in-polygon",
     description="Ray-casting point-in-polygon test (planar approximation - fine for city/region-scale polygons).",
     tags=["geospatial", "point in polygon", "geofence", "ray casting", "latitude longitude"],
     input_model=PointInPolygonInput, output_model=PointInPolygonOutput, compute=compute_point_in_polygon,
@@ -234,7 +234,7 @@ def compute_bbox(inp: BboxInput) -> BboxOutput:
 
 
 register(ComputeSpec(
-    slug="geo/bbox", price="$0.002", service_name="geo-bbox",
+    slug="geo/bbox", price="$0.001", service_name="geo-bbox",
     description="Bounding box (min/max lat and lon) enclosing a list of points.",
     tags=["geospatial", "bounding box", "bbox", "extent", "latitude longitude"],
     input_model=BboxInput, output_model=BboxOutput, compute=compute_bbox,
@@ -283,7 +283,7 @@ def compute_dms(inp: DmsInput) -> DmsOutput:
 
 
 register(ComputeSpec(
-    slug="geo/dms", price="$0.002", service_name="geo-dms",
+    slug="geo/dms", price="$0.001", service_name="geo-dms",
     description="Convert decimal degrees to degrees/minutes/seconds, or DMS back to decimal degrees.",
     tags=["geospatial", "dms", "degrees minutes seconds", "coordinate conversion", "latitude longitude"],
     input_model=DmsInput, output_model=DmsOutput, compute=compute_dms,
