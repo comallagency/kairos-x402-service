@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir \
     pypdf \
     pymupdf4llm \
     jsonschema \
+    jsonpath-ng \
     py3langid \
     tiktoken
 

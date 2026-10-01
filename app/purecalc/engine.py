@@ -92,7 +92,7 @@ def build_compute_router(spec: ComputeSpec) -> APIRouter:
             amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
         )
         receipt = make_receipt(None, UPSTREAM_KIND, t.elapsed_ms, price)
-        return {**result.model_dump(), "x402_receipt": receipt}
+        return {**result.model_dump(by_alias=True), "x402_receipt": receipt}
 
     return router
 
