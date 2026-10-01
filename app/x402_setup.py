@@ -3173,6 +3173,11 @@ def _core_route_configs() -> dict[str, RouteConfig]:
         "/llm/llama", "/llm/gpt-mini", "/llm/claude-sonnet", "/pii-check",
         "/language", "/toxicity", "/spam-check", "/intent", "/classify",
         "/sentiment", "/research",
+        # Caught by the first real run of scripts/probe_catalog_health.py
+        # (2026-10-01) - listed in /.well-known/x402 but not yet in CDP
+        # Bazaar's own index, so the earlier Bazaar-listing audit missed
+        # them; same gap, same fix.
+        "/agent-claim", "/fact-check", "/jobs",
     ):
         _post_key = f"POST {_get_twin_path}"
         if _post_key in _routes:

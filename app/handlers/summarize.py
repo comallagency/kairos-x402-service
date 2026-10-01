@@ -109,15 +109,15 @@ async def _summarize_content(content: str, length: str) -> tuple[str, str | None
 
 @router.get("/summarize/sample", openapi_extra={"security": []})
 async def summarize_sample():
-    if not config.OPENROUTER_API_KEY:
-        return JSONResponse({"error": {"reason": "upstream_not_configured"}}, status_code=503)
-    with Timer() as t:
-        try:
-            summary, model_served, fallback_used = await _summarize_content(SAMPLE_TEXT, "short")
-        except SummarizeError as exc:
-            return JSONResponse({"error": {"reason": exc.reason, "detail": exc.detail}}, status_code=502)
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, 0.0, fallback_used=fallback_used)
-    return {"summary": summary, "length": "short", "sources": [], "x402_receipt": receipt}
+    # Static capture (2026-10-01), not a live call: this was making a real
+    # OpenRouter summary on every anonymous hit, free - found during the
+    # gemini-flash/deepseek leak audit (same bug class, see CLAUDE.md).
+    return {
+        "summary": "The article explains how photosynthesis converts light energy into chemical energy in plants.",
+        "length": "short",
+        "sources": ["https://en.wikipedia.org/wiki/Photosynthesis"],
+        "x402_receipt": make_receipt(None, "llm", 1, 0.0),
+    }
 
 
 @router.post("/summarize", description=ROUTE_DESCRIPTIONS["summarize"])

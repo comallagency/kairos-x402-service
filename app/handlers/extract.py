@@ -122,15 +122,14 @@ async def _run_extract(content: str, schema: dict) -> tuple[dict, str | None, li
 
 @router.get("/extract/sample", openapi_extra={"security": []})
 async def extract_sample():
-    if not config.OPENROUTER_API_KEY:
-        return JSONResponse({"error": {"reason": "upstream_not_configured"}}, status_code=503)
-    with Timer() as t:
-        try:
-            data, model_served, missing_fields, fallback_used = await _run_extract(SAMPLE_TEXT, SAMPLE_SCHEMA)
-        except ExtractError as exc:
-            return JSONResponse({"error": {"reason": exc.reason, "detail": exc.detail}}, status_code=502)
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, 0.0, fallback_used=fallback_used)
-    return {"data": data, "missing_fields": missing_fields, "x402_receipt": receipt}
+    # Static capture (2026-10-01), not a live call: this was making a real
+    # OpenRouter extraction on every anonymous hit, free - found during the
+    # gemini-flash/deepseek leak audit (same bug class, see CLAUDE.md).
+    return {
+        "data": {"product_name": "Widget Pro", "price": 29.99, "in_stock": True},
+        "missing_fields": [],
+        "x402_receipt": make_receipt(None, "llm", 1, 0.0),
+    }
 
 
 @router.post("/extract", description=ROUTE_DESCRIPTIONS["extract"])

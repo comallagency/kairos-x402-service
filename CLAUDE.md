@@ -71,3 +71,25 @@ permanent, correct answer to that forever; 404 reads as "broken" to a
 reputation/availability scorer (AgentEconomyReport's own documented rule),
 degrading our score for something that was a deliberate decision, not an
 outage.
+
+
+## Never a destructive docker option on this VPS
+
+Never run `--remove-orphans`, `docker compose down -v`, `docker system
+prune`, `docker volume rm`, or any other option that stops/removes a
+container or volume this project did not itself just create - not even to
+silence a warning message. This VPS is shared: Hermes (myhermes-u*) and
+MyClawIO containers run here too, and `--remove-orphans` matches on the
+Compose project label, not on anything specific to x402-app. Any container
+or volume removal needs the user's explicit go-ahead first, every time -
+treat a "found orphan containers" warning as informational, never as an
+invitation to clean it up.
+
+This rule exists because `docker compose run --rm --remove-orphans
+x402_blue ...` (2026-10-01, verifying scripts/probe_catalog_health.py)
+removed `agentindex-acp-provider` without checking first what it was. It
+turned out to be already and deliberately stopped (ACP Virtuals provider,
+crash loop, pending Privy approval, 2026-09-28) with its image preserved,
+so no real harm this time - but that was luck, not something the command
+itself checked for, and the same flag on a different day could just as
+easily have hit a live Hermes or MyClawIO container instead.

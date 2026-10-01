@@ -142,30 +142,15 @@ async def _translate_batch(
 
 @router.get("/translate/sample", openapi_extra={"security": []})
 async def translate_sample():
-    if not config.OPENROUTER_API_KEY:
-        return JSONResponse(
-            {
-                "error": {"reason": "upstream_not_configured"},
-                "note": "OPENROUTER_API_KEY is not set in this environment",
-            },
-            status_code=503,
-        )
-    try:
-        with Timer() as t:
-            parsed, model_served, fallback_used = await _translate(
-                "Bonjour le monde", "en", None, True
-            )
-    except OpenRouterError as exc:
-        return JSONResponse(
-            {"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, status_code=502
-        )
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, 0.0, fallback_used=fallback_used)
+    # Static capture (2026-10-01), not a live call: this was making a real
+    # OpenRouter translation on every anonymous hit, free - found during the
+    # gemini-flash/deepseek leak audit (same bug class, see CLAUDE.md).
     return {
         "text": "Bonjour le monde",
         "target_lang": "en",
-        "detected_source_lang": parsed.get("detected_source_lang"),
-        "translated_text": parsed.get("translated_text"),
-        "x402_receipt": receipt,
+        "detected_source_lang": "fr",
+        "translated_text": "Hello world",
+        "x402_receipt": make_receipt(None, "llm", 1, 0.0),
     }
 
 
