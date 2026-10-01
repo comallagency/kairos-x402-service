@@ -9,3 +9,4 @@ from app.purecalc.routes import validations  # noqa: F401
 from app.purecalc.routes import units  # noqa: F401
 from app.purecalc.routes import text  # noqa: F401
 from app.purecalc.routes import data  # noqa: F401
+from app.purecalc.routes import stats  # noqa: F401
