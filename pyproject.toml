@@ -18,6 +18,8 @@ dependencies = [
     "pypdf",
     "pymupdf4llm",
     "jsonschema",
+    "jsonpath-ng",
+    "jsonpath-ng",
     "py3langid",
     "tiktoken",
 ]
