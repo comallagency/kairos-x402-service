@@ -6,3 +6,4 @@ are ever called."""
 from app.purecalc.routes import geo  # noqa: F401
 from app.purecalc.routes import dates  # noqa: F401
 from app.purecalc.routes import validations  # noqa: F401
+from app.purecalc.routes import units  # noqa: F401
