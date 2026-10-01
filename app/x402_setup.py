@@ -2191,10 +2191,12 @@ def build_route_configs() -> dict[str, RouteConfig]:
     # Merged here so x402 challenges, the well-known, and Bazaar/MCP discovery
     # never need a second source of truth for generated routes.
     from app.generated.dynamic_routes import build_dynamic_route_configs
+    from app.purecalc.engine import build_compute_route_configs
 
     return {
         **_core_route_configs(),
         **build_dynamic_route_configs(),
+        **build_compute_route_configs(),
     }
 
 
