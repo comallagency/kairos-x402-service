@@ -16,7 +16,7 @@ never 404, regardless of HTTP method.
 """
 import json
 
-RETIRED_ROUTES = {
+HAND_RETIRED_ROUTES = {
     "/llm/gemini-flash": {
         "sunset": "Wed, 30 Sep 2026 00:00:00 GMT",
         "successor": "/llm/gpt-mini",
@@ -28,6 +28,38 @@ RETIRED_ROUTES = {
         "reason": "Provider p95 ~20s even with automatic fallback (10 real calls, 2026-09-30) - withdrawn pending a reliable provider/model.",
     },
 }
+
+
+def _generated_retired_entries() -> dict:
+    """Usine routes Fossoyeur retires (app/generated/routes_registry.yaml,
+    status: retired) must answer 410 exactly like a hand-built one - without
+    this, a retired generated route simply stops being registered at all
+    (app/generated/dynamic_routes.py only builds routers for live_routes())
+    and falls through to a bare Starlette 404, the same "looks like an
+    outage, not a decision" problem this whole mechanism exists to prevent.
+    Read fresh at import time (process restarts on every Fossoyeur
+    rebuild+redeploy, so no hot-reload is needed)."""
+    try:
+        from app.generated.registry import retired_routes as _registry_retired
+    except ImportError:
+        return {}
+    entries = {}
+    for spec in _registry_retired():
+        retired_at = spec.retired_at or spec.born_at
+        try:
+            from datetime import datetime
+            sunset = datetime.fromisoformat(retired_at).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        except ValueError:
+            sunset = "Thu, 01 Jan 1970 00:00:00 GMT"
+        entries[f"/{spec.slug}"] = {
+            "sunset": sunset,
+            "successor": "/discover",
+            "reason": f"Retired by Fossoyeur: {spec.intention} (zero paid calls, 30+ days live).",
+        }
+    return entries
+
+
+RETIRED_ROUTES = {**HAND_RETIRED_ROUTES, **_generated_retired_entries()}
 
 
 def match_retired(path: str):
