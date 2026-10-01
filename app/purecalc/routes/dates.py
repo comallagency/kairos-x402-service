@@ -45,7 +45,7 @@ def compute_convert(inp: ConvertInput) -> ConvertOutput:
 
 
 register(ComputeSpec(
-    slug="time/convert", price="$0.002", service_name="time-convert",
+    slug="time/convert", price="$0.001", service_name="time-convert",
     description="Convert an ISO 8601 datetime from one IANA timezone to another (handles DST automatically).",
     tags=["datetime", "timezone", "convert", "iana", "dst"],
     input_model=ConvertInput, output_model=ConvertOutput, compute=compute_convert,
@@ -74,7 +74,7 @@ def compute_add(inp: AddInput) -> AddOutput:
 
 
 register(ComputeSpec(
-    slug="time/add", price="$0.002", service_name="time-add",
+    slug="time/add", price="$0.001", service_name="time-add",
     description="Add a fixed duration (days/hours/minutes/seconds) to an ISO 8601 datetime.",
     tags=["datetime", "add", "duration", "date math"],
     input_model=AddInput, output_model=AddOutput, compute=compute_add,
@@ -109,7 +109,7 @@ def compute_between(inp: BetweenInput) -> BetweenOutput:
 
 
 register(ComputeSpec(
-    slug="time/between", price="$0.002", service_name="time-between",
+    slug="time/between", price="$0.001", service_name="time-between",
     description="Duration between two ISO 8601 datetimes, as total seconds and a days/hours/minutes/seconds breakdown.",
     tags=["datetime", "duration", "difference", "elapsed time"],
     input_model=BetweenInput, output_model=BetweenOutput, compute=compute_between,
@@ -143,7 +143,7 @@ def compute_business_days(inp: BusinessDaysInput) -> BusinessDaysOutput:
 
 
 register(ComputeSpec(
-    slug="time/business-days", price="$0.002", service_name="time-business-days",
+    slug="time/business-days", price="$0.001", service_name="time-business-days",
     description="Count weekdays (Mon-Fri) between two dates, inclusive of both endpoints.",
     tags=["datetime", "business days", "weekdays", "working days"],
     input_model=BusinessDaysInput, output_model=BusinessDaysOutput, compute=compute_business_days,
@@ -170,7 +170,7 @@ def compute_iso_week(inp: IsoWeekInput) -> IsoWeekOutput:
 
 
 register(ComputeSpec(
-    slug="time/iso-week", price="$0.002", service_name="time-iso-week",
+    slug="time/iso-week", price="$0.001", service_name="time-iso-week",
     description="ISO 8601 week number, ISO year and ISO weekday (1=Monday) for a date.",
     tags=["datetime", "iso week", "week number", "iso 8601"],
     input_model=IsoWeekInput, output_model=IsoWeekOutput, compute=compute_iso_week,
@@ -210,7 +210,7 @@ def compute_parse(inp: ParseInput) -> ParseOutput:
 
 
 register(ComputeSpec(
-    slug="time/parse", price="$0.002", service_name="time-parse",
+    slug="time/parse", price="$0.001", service_name="time-parse",
     description="Parse a date/time string (ISO 8601 by default, or a given strptime format) into its components.",
     tags=["datetime", "parse", "strptime", "date string"],
     input_model=ParseInput, output_model=ParseOutput, compute=compute_parse,
@@ -239,7 +239,7 @@ def compute_format(inp: FormatInput) -> FormatOutput:
 
 
 register(ComputeSpec(
-    slug="time/format", price="$0.002", service_name="time-format",
+    slug="time/format", price="$0.001", service_name="time-format",
     description="Format an ISO 8601 datetime using a strftime pattern.",
     tags=["datetime", "format", "strftime", "date formatting"],
     input_model=FormatInput, output_model=FormatOutput, compute=compute_format,

@@ -49,7 +49,7 @@ def compute_json_query(inp: JsonQueryInput) -> JsonQueryOutput:
 
 
 register(ComputeSpec(
-    slug="json/query", price="$0.002", service_name="json-query",
+    slug="json/query", price="$0.001", service_name="json-query",
     description="Query a JSON document with a JSONPath expression.",
     tags=["jsonpath", "json query", "data extraction", "json"],
     input_model=JsonQueryInput, output_model=JsonQueryOutput, compute=compute_json_query,
@@ -144,7 +144,7 @@ def compute_json_flatten(inp: JsonFlattenInput) -> JsonFlattenOutput:
 
 
 register(ComputeSpec(
-    slug="json/flatten", price="$0.002", service_name="json-flatten",
+    slug="json/flatten", price="$0.001", service_name="json-flatten",
     description="Flatten a nested JSON document into single-level dotted-path keys.",
     tags=["json flatten", "nested json", "dot notation", "data transformation"],
     input_model=JsonFlattenInput, output_model=JsonFlattenOutput, compute=compute_json_flatten,
@@ -200,7 +200,7 @@ def compute_schema_infer(inp: SchemaInferInput) -> SchemaInferOutput:
 
 
 register(ComputeSpec(
-    slug="json/schema-infer", price="$0.002", service_name="json-schema-infer",
+    slug="json/schema-infer", price="$0.001", service_name="json-schema-infer",
     description="Infer a basic JSON Schema (types, object properties, array item type) from an example document.",
     tags=["json schema", "schema inference", "data modeling"],
     input_model=SchemaInferInput, output_model=SchemaInferOutput, compute=compute_schema_infer,
@@ -232,7 +232,7 @@ def compute_json_validate(inp: JsonValidateInput) -> JsonValidateOutput:
 
 
 register(ComputeSpec(
-    slug="json/validate", price="$0.002", service_name="json-validate",
+    slug="json/validate", price="$0.001", service_name="json-validate",
     description="Validate a JSON document against a JSON Schema.",
     tags=["json schema validation", "json validate", "data validation"],
     input_model=JsonValidateInput, output_model=JsonValidateOutput, compute=compute_json_validate,
@@ -266,7 +266,7 @@ def compute_regex_test(inp: RegexTestInput) -> RegexTestOutput:
 
 
 register(ComputeSpec(
-    slug="regex/test", price="$0.002", service_name="regex-test",
+    slug="regex/test", price="$0.001", service_name="regex-test",
     description="Test a regular expression against text; returns match status, capture groups and span.",
     tags=["regex", "pattern matching", "regular expression", "text matching"],
     input_model=RegexTestInput, output_model=RegexTestOutput, compute=compute_regex_test,
@@ -298,7 +298,7 @@ def compute_regex_replace(inp: RegexReplaceInput) -> RegexReplaceOutput:
 
 
 register(ComputeSpec(
-    slug="regex/replace", price="$0.002", service_name="regex-replace",
+    slug="regex/replace", price="$0.001", service_name="regex-replace",
     description="Replace regular expression matches in text, with an optional max-replacement count.",
     tags=["regex", "find and replace", "text substitution", "regular expression"],
     input_model=RegexReplaceInput, output_model=RegexReplaceOutput, compute=compute_regex_replace,

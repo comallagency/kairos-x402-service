@@ -134,7 +134,7 @@ def compute_isbn(inp: IsbnInput) -> IsbnOutput:
 
 
 register(ComputeSpec(
-    slug="validate/isbn", price="$0.002", service_name="validate-isbn",
+    slug="validate/isbn", price="$0.001", service_name="validate-isbn",
     description="ISBN-10 or ISBN-13 checksum validation (auto-detected by length).",
     tags=["isbn", "book", "validation", "checksum", "publishing"],
     input_model=IsbnInput, output_model=IsbnOutput, compute=compute_isbn,
@@ -191,7 +191,7 @@ def compute_ean(inp: EanInput) -> EanOutput:
 
 
 register(ComputeSpec(
-    slug="validate/ean", price="$0.002", service_name="validate-ean",
+    slug="validate/ean", price="$0.001", service_name="validate-ean",
     description="EAN-8 or EAN-13 barcode checksum validation (auto-detected by length).",
     tags=["ean", "barcode", "upc", "gtin", "checksum", "validation"],
     input_model=EanInput, output_model=EanOutput, compute=compute_ean,
@@ -214,7 +214,7 @@ def compute_imei(inp: ImeiInput) -> ImeiOutput:
 
 
 register(ComputeSpec(
-    slug="validate/imei", price="$0.002", service_name="validate-imei",
+    slug="validate/imei", price="$0.001", service_name="validate-imei",
     description="IMEI (15-digit mobile device identifier) Luhn checksum validation.",
     tags=["imei", "mobile device", "checksum", "luhn", "validation"],
     input_model=ImeiInput, output_model=ImeiOutput, compute=compute_imei,
@@ -240,7 +240,7 @@ def compute_routing(inp: RoutingInput) -> RoutingOutput:
 
 
 register(ComputeSpec(
-    slug="validate/routing", price="$0.002", service_name="validate-routing",
+    slug="validate/routing", price="$0.001", service_name="validate-routing",
     description="US ABA bank routing number (9-digit) checksum validation.",
     tags=["routing number", "aba", "bank", "checksum", "validation", "us banking"],
     input_model=RoutingInput, output_model=RoutingOutput, compute=compute_routing,
@@ -267,7 +267,7 @@ def compute_isin(inp: IsinInput) -> IsinOutput:
 
 
 register(ComputeSpec(
-    slug="validate/isin", price="$0.002", service_name="validate-isin",
+    slug="validate/isin", price="$0.001", service_name="validate-isin",
     description="ISIN (ISO 6166 security identifier) Luhn checksum validation.",
     tags=["isin", "securities", "finance", "checksum", "validation", "iso 6166"],
     input_model=IsinInput, output_model=IsinOutput, compute=compute_isin,
@@ -291,7 +291,7 @@ def compute_siret(inp: SiretInput) -> SiretOutput:
 
 
 register(ComputeSpec(
-    slug="validate/siret", price="$0.002", service_name="validate-siret",
+    slug="validate/siret", price="$0.001", service_name="validate-siret",
     description="French SIRET (14-digit business establishment number) Luhn checksum validation. Note: the rare La Poste SIREN exception to the standard rule is not applied.",
     tags=["siret", "siren", "french business id", "checksum", "validation", "france"],
     input_model=SiretInput, output_model=SiretOutput, compute=compute_siret,

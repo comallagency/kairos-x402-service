@@ -3,6 +3,7 @@ from fastapi.responses import PlainTextResponse
 
 from app import config
 from app.x402_setup import KIT_TAGLINE, build_route_configs, display_price, resolve_payment_requirements
+from app.purecalc.registry import COMPUTE_SPECS
 
 router = APIRouter()
 
@@ -417,6 +418,30 @@ def _llms_catalog() -> str:
         f"- [Llama]({base}/llm/llama): POST {{\"messages\":[...],\"max_tokens\":...}} - meta-llama/llama-4-maverick, pinned to DeepInfra",
         f"- [DeepSeek]({base}/llm/deepseek): POST {{\"messages\":[...],\"max_tokens\":...}} - deepseek/deepseek-v4-pro, pinned to Reka (2nd-provider fallback if the first is slow)",
         "",
+        "## Pure compute (<50ms, no LLM, no external dependency, $0.001-$0.002 USDC)",
+        "",
+        "51 small deterministic tools - math, dates, identifier checksums, text, JSON, stats. "
+        "Price shown is the live 402 challenge price - this section is generated from the route "
+        "registry, never hand-typed.",
+        "",
+    ]
+    _purecalc_categories = {
+        "geo": "Geospatial", "time": "Dates and time", "validate": "Identifier validation",
+        "unit": "Units", "number": "Numbers", "fraction": "Fractions", "money": "Money",
+        "text": "Text", "encoding": "Encoding", "hash": "Hashing", "json": "JSON",
+        "regex": "Regex", "stats": "Statistics",
+    }
+    _by_category: dict[str, list] = {}
+    for _spec in COMPUTE_SPECS:
+        _by_category.setdefault(_spec.slug.split("/", 1)[0], []).append(_spec)
+    for _cat, _specs in _by_category.items():
+        lines.append(f"### {_purecalc_categories.get(_cat, _cat.title())}")
+        lines.append("")
+        for _spec in _specs:
+            _label = _spec.service_name.replace("-", " ").title()
+            lines.append(f"- [{_label}]({base}/{_spec.slug}): {_spec.description} ({_spec.price})")
+        lines.append("")
+    lines += [
         "## Free samples (no payment)",
         "",
         f"- {base}/can-pay/sample",
@@ -448,6 +473,10 @@ def _llms_catalog() -> str:
         f"- {base}/llm/gemini-flash/sample",
         f"- {base}/llm/llama/sample",
         f"- {base}/llm/deepseek/sample",
+    ]
+    for _spec in COMPUTE_SPECS:
+        lines.append(f"- {base}/{_spec.slug}/sample")
+    lines += [
         "",
         "## Discovery manifests",
         "",

@@ -58,7 +58,7 @@ def compute_case(inp: CaseInput) -> CaseOutput:
 
 
 register(ComputeSpec(
-    slug="text/case", price="$0.002", service_name="text-case",
+    slug="text/case", price="$0.001", service_name="text-case",
     description="Convert text between case styles: snake_case, camelCase, PascalCase, kebab-case, Title Case, CONSTANT_CASE.",
     tags=["case conversion", "snake case", "camel case", "kebab case", "text formatting"],
     input_model=CaseInput, output_model=CaseOutput, compute=compute_case,
@@ -87,7 +87,7 @@ def compute_diff(inp: DiffInput) -> DiffOutput:
 
 
 register(ComputeSpec(
-    slug="text/diff", price="$0.002", service_name="text-diff",
+    slug="text/diff", price="$0.001", service_name="text-diff",
     description="Unified line diff between two texts, plus an overall similarity ratio (0-1).",
     tags=["text diff", "unified diff", "compare text", "similarity"],
     input_model=DiffInput, output_model=DiffOutput, compute=compute_diff,
@@ -335,7 +335,7 @@ def compute_readability(inp: ReadabilityInput) -> ReadabilityOutput:
 
 
 register(ComputeSpec(
-    slug="text/readability", price="$0.002", service_name="text-readability",
+    slug="text/readability", price="$0.001", service_name="text-readability",
     description="Flesch Reading Ease and Flesch-Kincaid Grade Level scores for English text (standard public formulas, heuristic syllable counting).",
     tags=["readability", "flesch reading ease", "flesch-kincaid", "text analysis"],
     input_model=ReadabilityInput, output_model=ReadabilityOutput, compute=compute_readability,
