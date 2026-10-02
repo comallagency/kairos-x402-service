@@ -58,42 +58,54 @@ async def chat_json(
         raise OllamaError(f"Ollama content is not valid JSON: {content[:300]}") from exc
 
 
+_EMBED_CONCURRENCY = 16  # local Ollama handles this fine; sequential (the
+# original shape) took ~1.6s/text - fine for 1 warmup query, but 178
+# routes (post 2026-10-02 payment-table fix, up from 76) made
+# warm_discover_cache()'s _load_own_routes() take ~5 minutes serially,
+# long enough to blow through deploy's healthcheck/smoke-test windows.
+
+
+async def _embed_one(client: httpx.AsyncClient, text: str) -> list[float]:
+    last_err: OllamaError | None = None
+    for attempt in range(2):
+        try:
+            resp = await client.post(
+                f"{config.OLLAMA_URL}/api/embeddings",
+                json={"model": "nomic-embed-text", "prompt": text},
+            )
+        except httpx.TimeoutException:
+            last_err = OllamaError("ollama_embed_timeout")
+        except httpx.RequestError as exc:
+            last_err = OllamaError(f"ollama_embed_failed: {exc}"[:200])
+        else:
+            if resp.status_code >= 400:
+                last_err = OllamaError(
+                    f"Ollama embed error {resp.status_code}: {resp.text[:300]}"
+                )
+            else:
+                data = resp.json()
+                embedding = data.get("embedding")
+                if not embedding:
+                    last_err = OllamaError(
+                        f"Ollama embed response missing 'embedding': {json.dumps(data)[:300]}"
+                    )
+                else:
+                    return embedding
+        if attempt == 0:
+            await asyncio.sleep(0.35)
+    raise last_err
+
+
 async def embed(texts: list[str], timeout: float = 30.0) -> list[list[float]]:
     """Appelle /api/embeddings pour chaque texte avec nomic-embed-text (deja
     tire sur ce VPS, sans cle ni quota - voir /discover, app/handlers/discover.py).
-    Un appel par texte : l'API Ollama /api/embeddings ne prend qu'une chaine a la fois."""
-    vectors = []
+    L'API Ollama /api/embeddings ne prend qu'une chaine a la fois, mais rien
+    n'empeche plusieurs appels concurrents - bornes a _EMBED_CONCURRENCY."""
+    semaphore = asyncio.Semaphore(_EMBED_CONCURRENCY)
+
+    async def bounded(client: httpx.AsyncClient, text: str) -> list[float]:
+        async with semaphore:
+            return await _embed_one(client, text)
+
     async with httpx.AsyncClient(timeout=timeout) as client:
-        for text in texts:
-            last_err: OllamaError | None = None
-            for attempt in range(2):
-                try:
-                    resp = await client.post(
-                        f"{config.OLLAMA_URL}/api/embeddings",
-                        json={"model": "nomic-embed-text", "prompt": text},
-                    )
-                except httpx.TimeoutException:
-                    last_err = OllamaError("ollama_embed_timeout")
-                except httpx.RequestError as exc:
-                    last_err = OllamaError(f"ollama_embed_failed: {exc}"[:200])
-                else:
-                    if resp.status_code >= 400:
-                        last_err = OllamaError(
-                            f"Ollama embed error {resp.status_code}: {resp.text[:300]}"
-                        )
-                    else:
-                        data = resp.json()
-                        embedding = data.get("embedding")
-                        if not embedding:
-                            last_err = OllamaError(
-                                f"Ollama embed response missing 'embedding': {json.dumps(data)[:300]}"
-                            )
-                        else:
-                            vectors.append(embedding)
-                            last_err = None
-                            break
-                if attempt == 0:
-                    await asyncio.sleep(0.35)
-            if last_err is not None:
-                raise last_err
-    return vectors
+        return list(await asyncio.gather(*(bounded(client, text) for text in texts)))
