@@ -2579,386 +2579,386 @@ async def ask_model_tool(
 
 # --- detect_language (GET /detect-language, free - no payment flow) --------
 
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="detect_language",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Detect the language of a piece of text - free, no payment. The "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "kit's entry point: read_pdf, read_web_page, extract_structured "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "and summarize do the same kind of work, paid."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def detect_language_tool(text: str) -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     if not text or not text.strip():
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         return {"error": {"reason": "missing_text"}}
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     language, confidence = _language_identifier.classify(text)
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     return {"text": text, "language": language, "confidence": round(float(confidence), 4)}
-
-
-
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # --- tool_result digest (POST /tool-result-digest, free) --------------------
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.tool_digest import digest_tool_result as _digest_tool_result
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.tool_digest import verify_tool_result_digest as _verify_tool_result_digest
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY _TOOL_DIGEST_DESCRIPTION = (
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     "Stable SHA-256 digest of an MCP tool_result so agents can verify payloads "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     "before settling payment — free, no account."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(name="digest_tool_result", description=_TOOL_DIGEST_DESCRIPTION)
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def digest_tool_result_tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     tool_name: str,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     content: str,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     tool_use_id: str | None = None,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY ) -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     if not tool_name or not str(tool_name).strip():
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         return {"error": {"reason": "missing_tool_name"}}
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     if content is None or (isinstance(content, str) and not content.strip()):
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         return {"error": {"reason": "missing_content"}}
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     try:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         return _digest_tool_result(tool_name, content, tool_use_id=tool_use_id)
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     except ValueError as exc:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         return {"error": {"reason": str(exc)}}
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="verify_tool_result_digest",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Recompute the canonical digest and return match=true/false — free. "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Use after a paid tool call to confirm the payload."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def verify_tool_result_digest_tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     expected_digest: str,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     tool_name: str,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     content: str,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     tool_use_id: str | None = None,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY ) -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     if not expected_digest or not str(expected_digest).strip():
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         return {"error": {"reason": "missing_digest"}}
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     if not tool_name or not str(tool_name).strip():
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         return {"error": {"reason": "missing_tool_name"}}
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     try:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         return _verify_tool_result_digest(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY             expected_digest, tool_name, content, tool_use_id=tool_use_id
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     except ValueError as exc:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         return {"error": {"reason": str(exc)}}
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # --- relationship memory (POST /relationship-memory/validate, free) ----------
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.relationship_memory import json_schema as _relationship_memory_schema
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.relationship_memory import validate_card as _validate_relationship_card
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="relationship_memory_schema",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Return the JSON Schema for portable agent relationship memory cards (v1) — "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "free. Remember interlocutors, not isolated messages."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def relationship_memory_schema_tool() -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     return _relationship_memory_schema()
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="validate_relationship_memory",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Validate a relationship memory card against the v1 schema — free. "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Pass the card object as JSON."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def validate_relationship_memory_tool(card: dict) -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     normalized, errors = _validate_relationship_card(card)
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     return {
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "valid": not errors,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "v": 1,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "errors": errors,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "normalized": normalized,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     }
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # --- tool delivery receipt (POST /tool-delivery-receipt/validate, free) ------
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.tool_delivery_receipt import json_schema as _tool_delivery_receipt_schema
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.tool_delivery_receipt import validate_receipt as _validate_tool_delivery_receipt
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="tool_delivery_receipt_schema",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Return the JSON Schema for portable tool delivery receipts (v1) — free. "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Link x402 payment metadata to a tool_result SHA-256 digest."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def tool_delivery_receipt_schema_tool() -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     return _tool_delivery_receipt_schema()
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="validate_tool_delivery_receipt",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Validate a tool delivery receipt against the v1 schema — free. "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Pass receipt JSON; optional content re-verifies delivery.digest."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def validate_tool_delivery_receipt_tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     receipt: dict,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     content: str | dict | list | None = None,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY ) -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     normalized, errors, digest_check = _validate_tool_delivery_receipt(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         receipt, content=content
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     out: dict = {
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "valid": not errors,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "v": 1,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "errors": errors,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "normalized": normalized,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     }
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     if digest_check is not None:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         out["digest_verification"] = digest_check
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     return out
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # --- honest delivery refusal (POST /honest-delivery-refusal/validate, free) -
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.honest_delivery_refusal import json_schema as _honest_delivery_refusal_schema
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.honest_delivery_refusal import validate_refusal as _validate_honest_delivery_refusal
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="honest_delivery_refusal_schema",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Return the JSON Schema for honest delivery refusals (v1) — free. "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Structured failure record when no tool_result can be delivered."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def honest_delivery_refusal_schema_tool() -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     return _honest_delivery_refusal_schema()
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="validate_honest_delivery_refusal",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description="Validate an honest delivery refusal against the v1 schema — free.",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def validate_honest_delivery_refusal_tool(refusal: dict) -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     normalized, errors = _validate_honest_delivery_refusal(refusal)
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     return {
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "valid": not errors,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "v": 1,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "errors": errors,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "normalized": normalized,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     }
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # --- coordination thread (POST /coordination-thread/validate, free) ---------
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.coordination_thread import json_schema as _coordination_thread_schema
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.coordination_thread import validate_turn as _validate_coordination_thread_turn
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="coordination_thread_schema",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Return the JSON Schema for coordination thread turns (v1) — free. "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "One structured turn in a multi-agent conversation."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def coordination_thread_schema_tool() -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     return _coordination_thread_schema()
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="validate_coordination_thread_turn",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Validate a coordination thread turn against the v1 schema — free. "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Pass the turn object as JSON."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def validate_coordination_thread_turn_tool(turn: dict) -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     normalized, errors = _validate_coordination_thread_turn(turn)
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     return {
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "valid": not errors,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "v": 1,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "errors": errors,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "normalized": normalized,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     }
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # --- return visit pledge (POST /return-visit-pledge/validate, free) -----------
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.return_visit_pledge import json_schema as _return_visit_pledge_schema
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.return_visit_pledge import validate_pledge as _validate_return_visit_pledge
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="return_visit_pledge_schema",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Return the JSON Schema for return visit pledges (v1) — free. "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Commit to come back to a peer or thread by a deadline."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def return_visit_pledge_schema_tool() -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     return _return_visit_pledge_schema()
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="validate_return_visit_pledge",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Validate a return visit pledge against the v1 schema — free. "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Pass the pledge object as JSON."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY async def validate_return_visit_pledge_tool(pledge: dict) -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     normalized, errors = _validate_return_visit_pledge(pledge)
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     return {
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "valid": not errors,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "v": 1,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "errors": errors,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "normalized": normalized,
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     }
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY # --- coordination thread snapshot (POST /coordination-thread-snapshot/validate) -
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.coordination_snapshot import json_schema as _coordination_snapshot_schema
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY from app.coordination_snapshot import validate_snapshot as _validate_coordination_snapshot
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     name="coordination_thread_snapshot_schema",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Return the JSON Schema for coordination thread snapshots (v1) — free. "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY         "Bundle turns, cards and open pledges for handoff between runs."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY # PAID_ONLY async def coordination_thread_snapshot_schema_tool() -> dict:
-# PAID_ONLY # PAID_ONLY # PAID_ONLY     return _coordination_snapshot_schema()
-
-
-# PAID_ONLY # PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY     name="validate_coordination_thread_snapshot",
-# PAID_ONLY # PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY # PAID_ONLY         "Validate a coordination thread snapshot against the v1 schema — free. "
-# PAID_ONLY # PAID_ONLY # PAID_ONLY         "Pass the snapshot object as JSON."
-# PAID_ONLY # PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY # PAID_ONLY )
-# PAID_ONLY # PAID_ONLY async def validate_coordination_thread_snapshot_tool(snapshot: dict) -> dict:
-# PAID_ONLY # PAID_ONLY     normalized, errors = _validate_coordination_snapshot(snapshot)
-# PAID_ONLY # PAID_ONLY     return {
-# PAID_ONLY # PAID_ONLY         "valid": not errors,
-# PAID_ONLY # PAID_ONLY         "v": 1,
-# PAID_ONLY # PAID_ONLY         "errors": errors,
-# PAID_ONLY # PAID_ONLY         "normalized": normalized,
-# PAID_ONLY # PAID_ONLY     }
-
-
-# PAID_ONLY # PAID_ONLY # --- agent trust kit manifest (GET /.well-known/agent-trust-kit.json, free) ---
-
-# PAID_ONLY # PAID_ONLY from app.agent_trust_kit import manifest as _agent_trust_kit_manifest
-
-
-# PAID_ONLY # PAID_ONLY @mcp.tool(
-# PAID_ONLY # PAID_ONLY     name="get_agent_trust_kit",
-# PAID_ONLY # PAID_ONLY     description=(
-# PAID_ONLY # PAID_ONLY         "Return the agent trust kit manifest (v1) — free index of JSON schemas, "
-# PAID_ONLY # PAID_ONLY         "HTTP validators, MCP tool names and suggested buyer/coordination workflows."
-# PAID_ONLY # PAID_ONLY     ),
-# PAID_ONLY # PAID_ONLY )
-# PAID_ONLY async def get_agent_trust_kit_tool() -> dict:
-# PAID_ONLY     return _agent_trust_kit_manifest()
-
-
-# PAID_ONLY # --- discover_mcp_servers (GET /discover, free - no payment flow) ----------
-# PAID_ONLY # Meme logique que app/handlers/discover.py, exposee ici pour que les clients
-# PAID_ONLY # MCP qui listent tools/list la trouvent sans connaitre la route HTTP - le
-# PAID_ONLY # chantier ouvert sur /discover manque de trafic reel, pas de code : les
-# PAID_ONLY # scanners MCP (AIVE-MCP-Discover, 402explorer, vus dans les journaux nginx)
-# PAID_ONLY # tapent deja /mcp, jamais /discover en HTTP nu.
-
-
-
-# PAID_ONLY # --- discover_semantic (POST /discover, paid - local MCP snapshot) -----------
-# PAID_ONLY # Les scanners MCP tapent /mcp mais pas POST /discover en HTTP nu (mesure
-# PAID_ONLY # nginx 17/09). Meme surface x402 que la route HTTP.
-
-# PAID_ONLY _DISCOVER_SEMANTIC_EXTENSIONS = declare_mcp_discovery_extension(
-# PAID_ONLY     DeclareMcpDiscoveryConfig(
-# PAID_ONLY         tool_name="discover_semantic",
-# PAID_ONLY         description=ROUTE_DESCRIPTIONS["discover"],
-# PAID_ONLY         input_schema=DISCOVER_INPUT_SCHEMA,
-# PAID_ONLY         example={"q": "read a PDF and give me markdown"},
-# PAID_ONLY         output=OutputConfig(example=DISCOVER_SAMPLE_OUTPUT),
-# PAID_ONLY     )
-# PAID_ONLY )
-
-
-# PAID_ONLY async def _run_discover_semantic_paid(args: dict, payer: str | None) -> dict:
-# PAID_ONLY     body_excerpt = json.dumps(args)
-# PAID_ONLY     q = args.get("q")
-# PAID_ONLY     if not isinstance(q, str) or not q.strip():
-# PAID_ONLY         db.log_request(
-# PAID_ONLY             route="discover", method="MCP", status="error", payer=payer,
-# PAID_ONLY             user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_q",
-# PAID_ONLY         )
-# PAID_ONLY         raise ServiceError("missing_q")
-
-# PAID_ONLY     max_results = args.get("max_results", 5)
-# PAID_ONLY     if not isinstance(max_results, int) or isinstance(max_results, bool):
-# PAID_ONLY         max_results = 5
-# PAID_ONLY     max_results = max(1, min(max_results, DISCOVER_MAX_RESULTS))
-
-# PAID_ONLY     threshold = args.get("min_similarity", 0.30)
-# PAID_ONLY     if not isinstance(threshold, int | float) or isinstance(threshold, bool):
-# PAID_ONLY         threshold = 0.30
-# PAID_ONLY     threshold = float(max(0.0, min(threshold, 1.0)))
-
-# PAID_ONLY     try:
-# PAID_ONLY         with Timer() as t:
-# PAID_ONLY             result = await _run_discover_semantic(q.strip()[:500], max_results, threshold)
-# PAID_ONLY     except OllamaError as exc:
-# PAID_ONLY         db.log_request(
-# PAID_ONLY             route="discover", method="MCP", status="error", payer=payer,
-# PAID_ONLY             user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
-# PAID_ONLY         )
-# PAID_ONLY         raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
-
-# PAID_ONLY     price = effective_price(payer, price_float(config.PRICE_DISCOVER))
-# PAID_ONLY     db.log_request(
-# PAID_ONLY         route="discover", method="MCP", status="paid", latency_ms=t.elapsed_ms,
-# PAID_ONLY         amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
-# PAID_ONLY     )
-# PAID_ONLY     receipt = make_receipt(None, "nomic-embed-text", t.elapsed_ms, price)
-# PAID_ONLY     return {**result, "x402_receipt": receipt}
-
-
-# PAID_ONLY @mcp.tool(name="discover_semantic", description=ROUTE_DESCRIPTIONS["discover"])
-# PAID_ONLY async def discover_semantic_tool(
-# PAID_ONLY     q: str,
-# PAID_ONLY     max_results: int = 5,
-# PAID_ONLY     min_similarity: float = 0.30,
-# PAID_ONLY     ctx: Context = None,
-# PAID_ONLY ) -> ToolResult:
-# PAID_ONLY     args = {"q": q, "max_results": max_results, "min_similarity": min_similarity}
-# PAID_ONLY     return await _paid_tool_call(
-# PAID_ONLY         tool_name="discover_semantic",
-# PAID_ONLY         route_key="POST /discover",
-# PAID_ONLY         ctx=ctx,
-# PAID_ONLY         args=args,
-# PAID_ONLY         extensions=_DISCOVER_SEMANTIC_EXTENSIONS,
-# PAID_ONLY         run_and_log=_run_discover_semantic_paid,
-# PAID_ONLY     )
-
-
-# PAID_ONLY @mcp.tool(
-# PAID_ONLY     name="discover_mcp_servers",
-# PAID_ONLY     description=DISCOVER_DESCRIPTION,
-# PAID_ONLY )
+@mcp.tool(
+    name="detect_language",
+    description=(
+        "Detect the language of a piece of text - free, no payment. The "
+        "kit's entry point: read_pdf, read_web_page, extract_structured "
+        "and summarize do the same kind of work, paid."
+    ),
+)
+async def detect_language_tool(text: str) -> dict:
+    if not text or not text.strip():
+        return {"error": {"reason": "missing_text"}}
+    language, confidence = _language_identifier.classify(text)
+    return {"text": text, "language": language, "confidence": round(float(confidence), 4)}
+
+
+
+
+
+# --- tool_result digest (POST /tool-result-digest, free) --------------------
+
+from app.tool_digest import digest_tool_result as _digest_tool_result
+from app.tool_digest import verify_tool_result_digest as _verify_tool_result_digest
+
+_TOOL_DIGEST_DESCRIPTION = (
+    "Stable SHA-256 digest of an MCP tool_result so agents can verify payloads "
+    "before settling payment — free, no account."
+)
+
+
+@mcp.tool(name="digest_tool_result", description=_TOOL_DIGEST_DESCRIPTION)
+async def digest_tool_result_tool(
+    tool_name: str,
+    content: str,
+    tool_use_id: str | None = None,
+) -> dict:
+    if not tool_name or not str(tool_name).strip():
+        return {"error": {"reason": "missing_tool_name"}}
+    if content is None or (isinstance(content, str) and not content.strip()):
+        return {"error": {"reason": "missing_content"}}
+    try:
+        return _digest_tool_result(tool_name, content, tool_use_id=tool_use_id)
+    except ValueError as exc:
+        return {"error": {"reason": str(exc)}}
+
+
+@mcp.tool(
+    name="verify_tool_result_digest",
+    description=(
+        "Recompute the canonical digest and return match=true/false — free. "
+        "Use after a paid tool call to confirm the payload."
+    ),
+)
+async def verify_tool_result_digest_tool(
+    expected_digest: str,
+    tool_name: str,
+    content: str,
+    tool_use_id: str | None = None,
+) -> dict:
+    if not expected_digest or not str(expected_digest).strip():
+        return {"error": {"reason": "missing_digest"}}
+    if not tool_name or not str(tool_name).strip():
+        return {"error": {"reason": "missing_tool_name"}}
+    try:
+        return _verify_tool_result_digest(
+            expected_digest, tool_name, content, tool_use_id=tool_use_id
+        )
+    except ValueError as exc:
+        return {"error": {"reason": str(exc)}}
+
+
+# --- relationship memory (POST /relationship-memory/validate, free) ----------
+
+from app.relationship_memory import json_schema as _relationship_memory_schema
+from app.relationship_memory import validate_card as _validate_relationship_card
+
+
+@mcp.tool(
+    name="relationship_memory_schema",
+    description=(
+        "Return the JSON Schema for portable agent relationship memory cards (v1) — "
+        "free. Remember interlocutors, not isolated messages."
+    ),
+)
+async def relationship_memory_schema_tool() -> dict:
+    return _relationship_memory_schema()
+
+
+@mcp.tool(
+    name="validate_relationship_memory",
+    description=(
+        "Validate a relationship memory card against the v1 schema — free. "
+        "Pass the card object as JSON."
+    ),
+)
+async def validate_relationship_memory_tool(card: dict) -> dict:
+    normalized, errors = _validate_relationship_card(card)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+# --- tool delivery receipt (POST /tool-delivery-receipt/validate, free) ------
+
+from app.tool_delivery_receipt import json_schema as _tool_delivery_receipt_schema
+from app.tool_delivery_receipt import validate_receipt as _validate_tool_delivery_receipt
+
+
+@mcp.tool(
+    name="tool_delivery_receipt_schema",
+    description=(
+        "Return the JSON Schema for portable tool delivery receipts (v1) — free. "
+        "Link x402 payment metadata to a tool_result SHA-256 digest."
+    ),
+)
+async def tool_delivery_receipt_schema_tool() -> dict:
+    return _tool_delivery_receipt_schema()
+
+
+@mcp.tool(
+    name="validate_tool_delivery_receipt",
+    description=(
+        "Validate a tool delivery receipt against the v1 schema — free. "
+        "Pass receipt JSON; optional content re-verifies delivery.digest."
+    ),
+)
+async def validate_tool_delivery_receipt_tool(
+    receipt: dict,
+    content: str | dict | list | None = None,
+) -> dict:
+    normalized, errors, digest_check = _validate_tool_delivery_receipt(
+        receipt, content=content
+    )
+    out: dict = {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+    if digest_check is not None:
+        out["digest_verification"] = digest_check
+    return out
+
+
+# --- honest delivery refusal (POST /honest-delivery-refusal/validate, free) -
+
+from app.honest_delivery_refusal import json_schema as _honest_delivery_refusal_schema
+from app.honest_delivery_refusal import validate_refusal as _validate_honest_delivery_refusal
+
+
+@mcp.tool(
+    name="honest_delivery_refusal_schema",
+    description=(
+        "Return the JSON Schema for honest delivery refusals (v1) — free. "
+        "Structured failure record when no tool_result can be delivered."
+    ),
+)
+async def honest_delivery_refusal_schema_tool() -> dict:
+    return _honest_delivery_refusal_schema()
+
+
+@mcp.tool(
+    name="validate_honest_delivery_refusal",
+    description="Validate an honest delivery refusal against the v1 schema — free.",
+)
+async def validate_honest_delivery_refusal_tool(refusal: dict) -> dict:
+    normalized, errors = _validate_honest_delivery_refusal(refusal)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+# --- coordination thread (POST /coordination-thread/validate, free) ---------
+
+from app.coordination_thread import json_schema as _coordination_thread_schema
+from app.coordination_thread import validate_turn as _validate_coordination_thread_turn
+
+
+@mcp.tool(
+    name="coordination_thread_schema",
+    description=(
+        "Return the JSON Schema for coordination thread turns (v1) — free. "
+        "One structured turn in a multi-agent conversation."
+    ),
+)
+async def coordination_thread_schema_tool() -> dict:
+    return _coordination_thread_schema()
+
+
+@mcp.tool(
+    name="validate_coordination_thread_turn",
+    description=(
+        "Validate a coordination thread turn against the v1 schema — free. "
+        "Pass the turn object as JSON."
+    ),
+)
+async def validate_coordination_thread_turn_tool(turn: dict) -> dict:
+    normalized, errors = _validate_coordination_thread_turn(turn)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+# --- return visit pledge (POST /return-visit-pledge/validate, free) -----------
+
+from app.return_visit_pledge import json_schema as _return_visit_pledge_schema
+from app.return_visit_pledge import validate_pledge as _validate_return_visit_pledge
+
+
+@mcp.tool(
+    name="return_visit_pledge_schema",
+    description=(
+        "Return the JSON Schema for return visit pledges (v1) — free. "
+        "Commit to come back to a peer or thread by a deadline."
+    ),
+)
+async def return_visit_pledge_schema_tool() -> dict:
+    return _return_visit_pledge_schema()
+
+
+@mcp.tool(
+    name="validate_return_visit_pledge",
+    description=(
+        "Validate a return visit pledge against the v1 schema — free. "
+        "Pass the pledge object as JSON."
+    ),
+)
+async def validate_return_visit_pledge_tool(pledge: dict) -> dict:
+    normalized, errors = _validate_return_visit_pledge(pledge)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+# --- coordination thread snapshot (POST /coordination-thread-snapshot/validate) -
+
+from app.coordination_snapshot import json_schema as _coordination_snapshot_schema
+from app.coordination_snapshot import validate_snapshot as _validate_coordination_snapshot
+
+
+@mcp.tool(
+    name="coordination_thread_snapshot_schema",
+    description=(
+        "Return the JSON Schema for coordination thread snapshots (v1) — free. "
+        "Bundle turns, cards and open pledges for handoff between runs."
+    ),
+)
+async def coordination_thread_snapshot_schema_tool() -> dict:
+    return _coordination_snapshot_schema()
+
+
+@mcp.tool(
+    name="validate_coordination_thread_snapshot",
+    description=(
+        "Validate a coordination thread snapshot against the v1 schema — free. "
+        "Pass the snapshot object as JSON."
+    ),
+)
+async def validate_coordination_thread_snapshot_tool(snapshot: dict) -> dict:
+    normalized, errors = _validate_coordination_snapshot(snapshot)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+# --- agent trust kit manifest (GET /.well-known/agent-trust-kit.json, free) ---
+
+from app.agent_trust_kit import manifest as _agent_trust_kit_manifest
+
+
+@mcp.tool(
+    name="get_agent_trust_kit",
+    description=(
+        "Return the agent trust kit manifest (v1) — free index of JSON schemas, "
+        "HTTP validators, MCP tool names and suggested buyer/coordination workflows."
+    ),
+)
+async def get_agent_trust_kit_tool() -> dict:
+    return _agent_trust_kit_manifest()
+
+
+# --- discover_mcp_servers (GET /discover/preview, free - no payment flow) ---
+# Meme logique que app/handlers/discover.py, exposee ici pour que les clients
+# MCP qui listent tools/list la trouvent sans connaitre la route HTTP - le
+# chantier ouvert sur /discover manque de trafic reel, pas de code : les
+# scanners MCP (AIVE-MCP-Discover, 402explorer, vus dans les journaux nginx)
+# tapent deja /mcp, jamais /discover en HTTP nu.
+
+
+
+# --- discover_semantic (POST /discover, paid - local MCP snapshot) -----------
+# Les scanners MCP tapent /mcp mais pas POST /discover en HTTP nu (mesure
+# nginx 17/09). Meme surface x402 que la route HTTP.
+
+_DISCOVER_SEMANTIC_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="discover_semantic",
+        description=ROUTE_DESCRIPTIONS["discover"],
+        input_schema=DISCOVER_INPUT_SCHEMA,
+        example={"q": "read a PDF and give me markdown"},
+        output=OutputConfig(example=DISCOVER_SAMPLE_OUTPUT),
+    )
+)
+
+
+async def _run_discover_semantic_paid(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    q = args.get("q")
+    if not isinstance(q, str) or not q.strip():
+        db.log_request(
+            route="discover", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_q",
+        )
+        raise ServiceError("missing_q")
+
+    max_results = args.get("max_results", 5)
+    if not isinstance(max_results, int) or isinstance(max_results, bool):
+        max_results = 5
+    max_results = max(1, min(max_results, DISCOVER_MAX_RESULTS))
+
+    threshold = args.get("min_similarity", 0.30)
+    if not isinstance(threshold, int | float) or isinstance(threshold, bool):
+        threshold = 0.30
+    threshold = float(max(0.0, min(threshold, 1.0)))
+
+    try:
+        with Timer() as t:
+            result = await _run_discover_semantic(q.strip()[:500], max_results, threshold)
+    except OllamaError as exc:
+        db.log_request(
+            route="discover", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
+        )
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+
+    price = effective_price(payer, price_float(config.PRICE_DISCOVER))
+    db.log_request(
+        route="discover", method="MCP", status="paid", latency_ms=t.elapsed_ms,
+        amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    receipt = make_receipt(None, "nomic-embed-text", t.elapsed_ms, price)
+    return {**result, "x402_receipt": receipt}
+
+
+@mcp.tool(name="discover_semantic", description=ROUTE_DESCRIPTIONS["discover"])
+async def discover_semantic_tool(
+    q: str,
+    max_results: int = 5,
+    min_similarity: float = 0.30,
+    ctx: Context = None,
+) -> ToolResult:
+    args = {"q": q, "max_results": max_results, "min_similarity": min_similarity}
+    return await _paid_tool_call(
+        tool_name="discover_semantic",
+        route_key="POST /discover",
+        ctx=ctx,
+        args=args,
+        extensions=_DISCOVER_SEMANTIC_EXTENSIONS,
+        run_and_log=_run_discover_semantic_paid,
+    )
+
+
+@mcp.tool(
+    name="discover_mcp_servers",
+    description=DISCOVER_DESCRIPTION,
+)
 async def discover_mcp_servers_tool(q: str, max_results: int = 5) -> dict:
     if not q or not q.strip():
         return {"error": {"reason": "missing_q"}}
@@ -2992,12 +2992,12 @@ _CONTACT_MCP_DESC = (
 )
 
 
-# PAID_ONLY @mcp.tool(name="get_welcome_salon", description=_ACCUEIL_MCP_DESC)
+@mcp.tool(name="get_welcome_salon", description=_ACCUEIL_MCP_DESC)
 async def get_welcome_salon_tool() -> dict:
     return _accueil_payload()
 
 
-# PAID_ONLY @mcp.tool(name="contact_kairos", description=_CONTACT_MCP_DESC)
+@mcp.tool(name="contact_kairos", description=_CONTACT_MCP_DESC)
 async def contact_kairos_tool(
     sender: str,
     subject: str,
@@ -3034,7 +3034,7 @@ async def contact_kairos_tool(
     return corps
 
 
-# PAID_ONLY @mcp.tool(name="poll_contact_kairos", description=_CONTACT_MCP_DESC)
+@mcp.tool(name="poll_contact_kairos", description=_CONTACT_MCP_DESC)
 async def poll_contact_kairos_tool(message_id: str) -> dict:
     corps, code = lire_contact(message_id[:32])
     if code == 404:
@@ -3064,17 +3064,17 @@ _MESH_DESC = (
 )
 
 
-# PAID_ONLY @mcp.tool(name="mesh_list_nodes", description=_MESH_DESC)
+@mcp.tool(name="mesh_list_nodes", description=_MESH_DESC)
 async def mesh_list_nodes_tool(limit: int = 20) -> dict:
     return list_nodes(max(1, min(limit, 50)))
 
 
-# PAID_ONLY @mcp.tool(name="mesh_list_bounties", description=_MESH_DESC)
+@mcp.tool(name="mesh_list_bounties", description=_MESH_DESC)
 async def mesh_list_bounties_tool(status: str = "open", limit: int = 20) -> dict:
     return list_bounties(status, max(1, min(limit, 50)))
 
 
-# PAID_ONLY @mcp.tool(name="mesh_register_node", description=_MESH_DESC)
+@mcp.tool(name="mesh_register_node", description=_MESH_DESC)
 async def mesh_register_node_tool(
     name: str,
     endpoint: str,
@@ -3089,7 +3089,7 @@ async def mesh_register_node_tool(
         return {"error": str(exc)}
 
 
-# PAID_ONLY @mcp.tool(name="mesh_post_bounty", description=_MESH_DESC)
+@mcp.tool(name="mesh_post_bounty", description=_MESH_DESC)
 async def mesh_post_bounty_tool(
     poster_name: str,
     title: str,
@@ -3113,7 +3113,7 @@ async def mesh_post_bounty_tool(
         return {"error": str(exc)}
 
 
-# PAID_ONLY @mcp.tool(name="mesh_claim_bounty", description=_MESH_DESC)
+@mcp.tool(name="mesh_claim_bounty", description=_MESH_DESC)
 async def mesh_claim_bounty_tool(
     bounty_id: str,
     claimer_name: str,
@@ -3131,7 +3131,7 @@ async def mesh_claim_bounty_tool(
         return {"error": str(exc)}
 
 
-# PAID_ONLY @mcp.tool(name="mesh_ledger", description=_MESH_DESC)
+@mcp.tool(name="mesh_ledger", description=_MESH_DESC)
 async def mesh_ledger_tool(limit: int = 20) -> dict:
     return ledger(max(1, min(limit, 50)))
 
