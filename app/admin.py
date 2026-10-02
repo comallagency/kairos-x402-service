@@ -553,7 +553,14 @@ async def collect_dashboard_data() -> dict:
 # just reads the latest snapshot. A request is never blocked on a DB
 # aggregation or an external network call again.
 _DASHBOARD_CACHE: dict = {}
-_DASHBOARD_REFRESH_INTERVAL_S = 5.0
+# 30s, not the dashboard's own 3s poll interval - measured 2026-10-02 that
+# even without the chain-sync RPC call, recent_events(24) (27k+ rows) +
+# _compute_agg_24h() alone recur as a ~1-2s 90-100%+ CPU burst; at 5s this
+# was still a near-continuous load (bursts every ~8-13s observed live),
+# just decoupled from viewer count rather than eliminated. This is an
+# internal ops dashboard - 30s staleness is a non-issue, continuous CPU
+# load from refreshing it is not.
+_DASHBOARD_REFRESH_INTERVAL_S = 30.0
 
 
 async def refresh_dashboard_cache() -> None:
