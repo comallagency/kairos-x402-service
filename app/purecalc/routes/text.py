@@ -124,8 +124,8 @@ register(ComputeSpec(
     description="Slugify text: strip accents, lowercase, replace non-alphanumerics with a separator.",
     tags=["slugify", "url slug", "text normalization", "seo"],
     input_model=SlugInput, output_model=SlugOutput, compute=compute_slug,
-    sample_input={"text": "Café é la Mode!"},
-    sample_output={"slug": "cafe-e-la-mode"},
+    sample_input={"text": "Café à la Mode!"},
+    sample_output={"slug": "cafe-a-la-mode"},
 ))
 
 
