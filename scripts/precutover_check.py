@@ -54,7 +54,13 @@ def check_catalog_samples(base_url: str) -> list[str]:
         return [f"{base_url}/.well-known/x402 (catalog read)"]
 
     print(f"Checking {len(paths)} catalog route(s) for a working /sample...")
-    with httpx.Client(timeout=15.0) as client:
+    # 90s, not 15s: /discover/sample's first call per process computes
+    # embeddings for every own route via Ollama (app/handlers/discover_paid.py
+    # _load_own_routes(), cached forever after) - a known, accepted cold
+    # start (same category as /admin/data.json's documented ~5s one), just
+    # slower now that there are 178 routes to embed instead of 76. Every
+    # other sample is fast; only the one genuinely slow cold path pays this.
+    with httpx.Client(timeout=150.0) as client:
         for path in paths:
             sample_url = f"{base_url}{path}/sample"
             try:
