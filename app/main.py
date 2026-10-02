@@ -118,7 +118,18 @@ async def app_lifespan(app: FastAPI):
     invalidate_route_configs_cache()
     from app.capacity import refresh_route_keys
     refresh_route_keys()
-    await warm_discover_cache()
+    # Best-effort only (precomputes an embedding cache so the first paying
+    # /discover caller doesn't eat Ollama's cold-start cost) - must never be
+    # able to block startup itself. Discovered 2026-10-02 blocking a deploy:
+    # Ollama was unreachable in a way that hangs rather than fails fast
+    # (not a quick connection-refused), and warm_discover_cache() had no
+    # overall bound, only a per-HTTP-call one - multiplied across every
+    # route's embedding call, the wait was long enough for Docker's
+    # healthcheck to kill the container before startup ever finished.
+    try:
+        await asyncio.wait_for(warm_discover_cache(), timeout=20.0)
+    except asyncio.TimeoutError:
+        logger.warning("warm_discover_cache() timed out after 20s - continuing startup without it")
     tasks = [
         asyncio.create_task(worker_loop()),
         asyncio.create_task(heartbeat_loop()),
