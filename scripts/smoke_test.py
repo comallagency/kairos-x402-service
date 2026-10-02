@@ -85,9 +85,10 @@ def check_admin_live(base_url: str) -> list[str]:
     return []
 
 
-def run_all(base_url: str) -> list[str]:
+def run_all(base_url: str, include_admin_live: bool = True) -> list[str]:
     failed = check_status_codes(base_url)
-    failed += check_admin_live(base_url)
+    if include_admin_live:
+        failed += check_admin_live(base_url)
     return failed
 
 

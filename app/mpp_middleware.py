@@ -22,6 +22,7 @@ Route prices/assets/recipients are read fresh from build_route_configs() on
 every request - never hand-copied, matching the rest of this project.
 """
 
+import contextvars
 import json
 import logging
 
@@ -30,6 +31,19 @@ from app.capacity import ROUTE_KEYS
 from app.x402_setup import build_route_configs, resolve_payment_requirements
 
 logger = logging.getLogger("x402.mpp_middleware")
+
+# Same pattern as app/client_ip.py's contextvar: an MPP-settled request goes
+# straight to inner_app, bypassing x402's PaymentMiddlewareASGI entirely, so
+# request.state.payment_payload is never set for it. A handler that only
+# checks payment_payload (incident 2026-10-02's fix in app/purecalc/engine.py)
+# would wrongly 402 a legitimately-paid MPP buyer without this second signal.
+_mpp_verified_payer: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "mpp_verified_payer", default=None
+)
+
+
+def current_mpp_verified_payer() -> str | None:
+    return _mpp_verified_payer.get()
 
 
 def _route_payment_terms(route_key: str):
@@ -166,4 +180,8 @@ class MPPMiddleware:
                 message = {**message, "headers": headers}
             await send(message)
 
-        await self.inner_app(scope, receive, receipt_injecting_send)
+        token = _mpp_verified_payer.set(verified["from"])
+        try:
+            await self.inner_app(scope, receive, receipt_injecting_send)
+        finally:
+            _mpp_verified_payer.reset(token)

@@ -131,6 +131,22 @@ _BALANCE_CACHE_TTL_SECONDS = 60.0
 _balance_cache: dict[str, float] = {}
 _balance_lock = asyncio.Lock()
 
+# Incident 2026-10-02: a transient /api/v1/credits read failure (network
+# blip, OpenRouter hiccup - confirmed not a real balance problem: the account
+# had $7.65 available both times) tripped the circuit breaker on a single
+# bad read, rejecting LLM routes with openrouter_balance_below_floor while
+# real balance was fine. get_balance_usd() still fails closed on a single
+# read error (raises), but has_sufficient_balance() now only reports
+# "insufficient" after _CONSECUTIVE_FAILURES_TO_TRIP consecutive bad reads
+# (failed fetch OR genuinely-low balance), and falls back to the last known
+# GOOD balance for up to _LAST_GOOD_GRACE_SECONDS on a failed read in the
+# meantime - a real balance drop still trips the breaker, just not on one
+# flaky HTTP call.
+_LAST_GOOD_GRACE_SECONDS = 600.0
+_CONSECUTIVE_FAILURES_TO_TRIP = 3
+_last_good_balance: dict[str, float] = {}
+_consecutive_bad_reads = 0
+
 
 async def get_balance_usd() -> float:
     """Real OpenRouter balance (total_credits - total_usage), cached for
@@ -160,19 +176,45 @@ async def get_balance_usd() -> float:
         balance = float(data["total_credits"]) - float(data["total_usage"])
         _balance_cache["value"] = balance
         _balance_cache["at"] = now
+        _last_good_balance["value"] = balance
+        _last_good_balance["at"] = now
         return balance
 
 
 async def has_sufficient_balance(min_usd: float) -> bool:
-    """True only if the (cached) balance is confirmed >= min_usd. Fails
-    closed - any error reading the balance (network, missing key, OpenRouter
-    down) returns False, since the whole point is to avoid charging a buyer
-    for a call we can't confirm we can afford."""
+    """True if the balance is confirmed >= min_usd, with two layers of
+    tolerance for a flaky read (see module comment above) before actually
+    reporting insufficient:
+
+    1. A failed fetch (network/missing key/OpenRouter down) falls back to
+       the last known-good balance if it's less than _LAST_GOOD_GRACE_SECONDS
+       old, rather than failing closed immediately.
+    2. Even with no usable last-good value, insufficient is only reported
+       after _CONSECUTIVE_FAILURES_TO_TRIP consecutive bad reads in a row -
+       a single bad read returns True (assume OK) so one flaky HTTP call
+       can't trip the breaker.
+
+    A genuinely low balance that persists IS still enforced: once the grace
+    window expires or _CONSECUTIVE_FAILURES_TO_TRIP is reached, this returns
+    False like before.
+    """
+    global _consecutive_bad_reads
     try:
         balance = await get_balance_usd()
     except Exception:
-        return False
-    return balance >= min_usd
+        last_value = _last_good_balance.get("value")
+        last_at = _last_good_balance.get("at")
+        if last_value is not None and last_at is not None:
+            if time.monotonic() - last_at < _LAST_GOOD_GRACE_SECONDS:
+                return last_value >= min_usd
+        _consecutive_bad_reads += 1
+        return _consecutive_bad_reads < _CONSECUTIVE_FAILURES_TO_TRIP
+
+    if balance >= min_usd:
+        _consecutive_bad_reads = 0
+        return True
+    _consecutive_bad_reads += 1
+    return _consecutive_bad_reads < _CONSECUTIVE_FAILURES_TO_TRIP
 
 
 # --- model catalog, for POST /v1/models and the LLM gateway's per-request
