@@ -560,7 +560,7 @@ _DASHBOARD_CACHE: dict = {}
 # just decoupled from viewer count rather than eliminated. This is an
 # internal ops dashboard - 30s staleness is a non-issue, continuous CPU
 # load from refreshing it is not.
-_DASHBOARD_REFRESH_INTERVAL_S = 60.0
+_DASHBOARD_REFRESH_INTERVAL_S = 120.0
 
 
 async def refresh_dashboard_cache() -> None:
