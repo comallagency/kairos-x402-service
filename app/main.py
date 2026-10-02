@@ -89,6 +89,12 @@ async def heartbeat_loop(interval_seconds: float = 60.0):
 
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
+    # build_route_configs() peut avoir ete appele une 1ere fois pendant
+    # l'import du module (PaymentMiddlewareASGI), avant que les routes
+    # purecalc aient fini de s'enregistrer - on force un rebuild propre
+    # maintenant que l'import complet de l'app est termine.
+    from app.x402_setup import invalidate_route_configs_cache
+    invalidate_route_configs_cache()
     await warm_discover_cache()
     tasks = [
         asyncio.create_task(worker_loop()),
