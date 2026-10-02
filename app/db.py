@@ -2,6 +2,7 @@ import json
 import re
 import sqlite3
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -1494,6 +1495,16 @@ def _is_scanner_ua(user_agent: str | None) -> bool:
     return any(pattern.search(ua) for pattern in _SCANNER_UA_PATTERNS)
 
 
+_HISTORY_7D_CACHE: dict = {}
+_HISTORY_7D_CACHE_TTL_S = 300.0  # incident 2026-10-02: scans every row from
+# the last 7 days (150k+ at current traffic) and calls _is_scanner_ua() per
+# row in Python - measured 2.28s, by far the single most expensive piece of
+# the admin dashboard's aggregate (itself now on a 30s background refresh,
+# see app.admin.dashboard_cache_loop - this cache means that loop only pays
+# the 2.28s cost once per 5 min instead of every tick). A per-UTC-day
+# historical view has no reason to be fresher than this.
+
+
 def history_7d() -> list[dict]:
     """Per UTC day, last 7 days: total requests, distinct client IPs that are
     neither a known scanner UA nor our own VPS (config.VPS_PUBLIC_IP - our own
@@ -1509,6 +1520,12 @@ def history_7d() -> list[dict]:
     app/handlers/search.py), but this filter is the actual guarantee: a row
     with no payer at all is never a real payment, regardless of what wrote
     it or what status it carries."""
+    now = time.monotonic()
+    cached = _HISTORY_7D_CACHE.get("value")
+    cached_at = _HISTORY_7D_CACHE.get("at")
+    if cached is not None and cached_at is not None and now - cached_at < _HISTORY_7D_CACHE_TTL_S:
+        return cached
+
     mechanical = _mechanical_wallets()
     with cursor() as cur:
         cur.execute(
@@ -1529,7 +1546,7 @@ def history_7d() -> list[dict]:
         if row["status"] == "paid" and payer and payer not in mechanical:
             bucket["payments_real"] += 1
 
-    return [
+    result = [
         {
             "day": day,
             "requests_total": bucket["requests_total"],
@@ -1538,6 +1555,9 @@ def history_7d() -> list[dict]:
         }
         for day, bucket in sorted(by_day.items())
     ]
+    _HISTORY_7D_CACHE["value"] = result
+    _HISTORY_7D_CACHE["at"] = now
+    return result
 
 
 # --- GET /admin/daily support (2026-09-29) --------------------------------

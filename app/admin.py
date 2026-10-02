@@ -534,9 +534,61 @@ async def collect_dashboard_data() -> dict:
     return data
 
 
+# Incident 2026-10-02 (severe): collect_dashboard_data() ran fresh on every
+# GET /admin/data.json - 27,524 rows re-queried and re-aggregated in Python
+# (recent_events + _compute_agg_24h: ~670ms), plus an uncached OpenRouter
+# call (~175ms) and, every 5 minutes, a blocking Base RPC chain sync
+# (measured 21.9s cold) - all synchronous, on a single uvicorn worker. With
+# /admin/live's own JS polling this every 3s, that's ~850ms of guaranteed
+# work per 3000ms window (~28% of one core) continuously whenever the
+# dashboard is open, plus periodic multi-second stalls from chain sync -
+# confirmed root cause of sustained ~100% CPU blocking 6 deploys in a row
+# (py-spy: 37% thread-pool DB work, 26% socket I/O, ~12% specific
+# aggregation functions, all under collect_dashboard_data()'s call tree).
+#
+# Fixed per the same principle used everywhere else data gets cached in
+# this app: no dashboard or probe computes its own aggregate on request -
+# a single background task (dashboard_cache_loop, started in
+# app_lifespan()) recomputes this on a fixed interval and every request
+# just reads the latest snapshot. A request is never blocked on a DB
+# aggregation or an external network call again.
+_DASHBOARD_CACHE: dict = {}
+# 30s, not the dashboard's own 3s poll interval - measured 2026-10-02 that
+# even without the chain-sync RPC call, recent_events(24) (27k+ rows) +
+# _compute_agg_24h() alone recur as a ~1-2s 90-100%+ CPU burst; at 5s this
+# was still a near-continuous load (bursts every ~8-13s observed live),
+# just decoupled from viewer count rather than eliminated. This is an
+# internal ops dashboard - 30s staleness is a non-issue, continuous CPU
+# load from refreshing it is not.
+_DASHBOARD_REFRESH_INTERVAL_S = 120.0
+
+
+async def refresh_dashboard_cache() -> None:
+    try:
+        data = await collect_dashboard_data()
+    except Exception:
+        logger.exception("dashboard_cache_loop: collect_dashboard_data() failed, serving last known snapshot")
+        return
+    _DASHBOARD_CACHE["data"] = data
+    _DASHBOARD_CACHE["at"] = time.monotonic()
+
+
+async def dashboard_cache_loop() -> None:
+    while True:
+        await refresh_dashboard_cache()
+        await asyncio.sleep(_DASHBOARD_REFRESH_INTERVAL_S)
+
+
 @router.get("/admin/data.json", include_in_schema=False)
 async def admin_data(_: None = Depends(check_auth)):
-    return await collect_dashboard_data()
+    data = _DASHBOARD_CACHE.get("data")
+    if data is None:
+        # Nothing computed yet (background loop hasn't run its first pass -
+        # only possible in the few seconds right after startup). Compute
+        # once, synchronously, rather than serve an empty dashboard.
+        await refresh_dashboard_cache()
+        data = _DASHBOARD_CACHE.get("data", {})
+    return data
 
 
 # Read-only on all data below (no route this touches is payable, no write

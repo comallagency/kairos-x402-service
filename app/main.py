@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from fastmcp.utilities.lifespan import combine_lifespans
 
 from app import db
-from app.admin import router as admin_router
+from app.admin import dashboard_cache_loop, router as admin_router
 from app.capacity import CapacityGateMiddleware, JobsCircuitBreakerMiddleware, LLMGatewayCircuitBreakerMiddleware, PinnedModelCircuitBreakerMiddleware
 from app.client_ip import ClientIpMiddleware
 from app.retired_routes import RetiredRouteMiddleware
@@ -134,6 +134,7 @@ async def app_lifespan(app: FastAPI):
         asyncio.create_task(worker_loop()),
         asyncio.create_task(heartbeat_loop()),
         asyncio.create_task(marketplace_loop()),
+        asyncio.create_task(dashboard_cache_loop()),
     ]
     try:
         yield
