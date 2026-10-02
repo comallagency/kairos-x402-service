@@ -1,4 +1,5 @@
 import logging
+import time
 
 from cdp.x402 import create_facilitator_config
 from x402 import SettleContext, SettleResponse, SkipSettleResult
@@ -2185,19 +2186,47 @@ def _upto_payment_option(price) -> PaymentOption:
     )
 
 
+_route_configs_cache: dict[str, RouteConfig] | None = None
+_route_configs_cache_at = 0.0
+_ROUTE_CONFIGS_TTL_SECONDS = 300  # incident 2026-10-02 : 178 routes recalculees
+# (~45-440ms, bloquant sur le worker unique) a chaque appel de /, /llms.txt,
+# /.well-known/x402, /openapi.json, /admin/live ET de chaque paiement
+# (mpp_middleware). Rien ne mute le dict retourne (verifie sur tous les
+# appelants) donc un cache partage est sans danger ; le TTL de 5 min est une
+# marge de securite, un redemarrage (seul moment ou les routes changent)
+# vide de toute facon le cache au reimport du module.
 def build_route_configs() -> dict[str, RouteConfig]:
     # The 3 hand-built core routes, plus anything the usine (Prospecteur/
     # Ouvrier/Crieur - see usine/) has added to app/generated/routes_registry.yaml.
     # Merged here so x402 challenges, the well-known, and Bazaar/MCP discovery
     # never need a second source of truth for generated routes.
+    global _route_configs_cache, _route_configs_cache_at
+    now = time.monotonic()
+    if _route_configs_cache is not None and (now - _route_configs_cache_at) < _ROUTE_CONFIGS_TTL_SECONDS:
+        return _route_configs_cache
+
     from app.generated.dynamic_routes import build_dynamic_route_configs
     from app.purecalc.engine import build_compute_route_configs
 
-    return {
+    _route_configs_cache = {
         **_core_route_configs(),
         **build_dynamic_route_configs(),
         **build_compute_route_configs(),
     }
+    _route_configs_cache_at = now
+    return _route_configs_cache
+
+
+def invalidate_route_configs_cache() -> None:
+    # x402_setup.py est importe (et PaymentMiddlewareASGI construit, donc
+    # build_route_configs() deja appele une 1ere fois) avant que les modules
+    # de routes purecalc aient fini de peupler leur registre - un 1er appel
+    # premature se figerait sinon dans le cache pour tout le TTL. app_lifespan
+    # (main.py) appelle ceci une fois l'import complet termine pour forcer un
+    # rebuild correct.
+    global _route_configs_cache, _route_configs_cache_at
+    _route_configs_cache = None
+    _route_configs_cache_at = 0.0
 
 
 def _core_route_configs() -> dict[str, RouteConfig]:
