@@ -116,6 +116,8 @@ async def app_lifespan(app: FastAPI):
     # maintenant que l'import complet de l'app est termine.
     from app.x402_setup import invalidate_route_configs_cache
     invalidate_route_configs_cache()
+    from app.capacity import refresh_route_keys
+    refresh_route_keys()
     await warm_discover_cache()
     tasks = [
         asyncio.create_task(worker_loop()),

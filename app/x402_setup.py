@@ -2186,33 +2186,56 @@ def _upto_payment_option(price) -> PaymentOption:
     )
 
 
+def _build_route_configs_uncached() -> dict[str, RouteConfig]:
+    # The 3 hand-built core routes, plus anything the usine (Prospecteur/
+    # Ouvrier/Crieur - see usine/) has added to app/generated/routes_registry.yaml.
+    # Merged here so x402 challenges, the well-known, and Bazaar/MCP discovery
+    # never need a second source of truth for generated routes.
+    #
+    # Incident 2026-10-02 (severe): app/capacity.py takes its OWN one-time
+    # snapshot of this same dict at module-import time (ROUTE_KEYS, by
+    # design - see its own comment), which runs before purecalc/dynamic
+    # routes exist. Before the cache below existed that was harmless (every
+    # OTHER caller, including build_payment_middleware() a few lines later
+    # in main.py's import, recomputed fresh and got the complete set). Once
+    # a shared cache was added, capacity.py's early incomplete snapshot got
+    # memoized and silently became the PERMANENT route table for
+    # PaymentMiddlewareASGI too - 102 purecalc routes plus every usine route
+    # ran with ZERO payment enforcement until this was caught (status="paid"
+    # written unconditionally by the handler, with no settlement, no payer).
+    # Fix: this raw builder is never cached. build_route_configs() (below)
+    # adds the cache for high-frequency discovery-endpoint callers; anything
+    # security-sensitive (build_payment_middleware, capacity.py's own
+    # snapshot) calls this uncached version directly instead, so no caller
+    # can ever poison another caller's view of the route table again.
+    from app.generated.dynamic_routes import build_dynamic_route_configs
+    from app.purecalc.engine import build_compute_route_configs
+
+    return {
+        **_core_route_configs(),
+        **build_dynamic_route_configs(),
+        **build_compute_route_configs(),
+    }
+
+
 _route_configs_cache: dict[str, RouteConfig] | None = None
 _route_configs_cache_at = 0.0
 _ROUTE_CONFIGS_TTL_SECONDS = 300  # incident 2026-10-02 : 178 routes recalculees
 # (~45-440ms, bloquant sur le worker unique) a chaque appel de /, /llms.txt,
 # /.well-known/x402, /openapi.json, /admin/live ET de chaque paiement
 # (mpp_middleware). Rien ne mute le dict retourne (verifie sur tous les
-# appelants) donc un cache partage est sans danger ; le TTL de 5 min est une
-# marge de securite, un redemarrage (seul moment ou les routes changent)
-# vide de toute facon le cache au reimport du module.
+# appelants) donc un cache partage est sans danger pour CES usages-la ; le
+# TTL de 5 min est une marge de securite, un redemarrage (seul moment ou les
+# routes changent) vide de toute facon le cache au reimport du module.
+# N'est PAS utilise par build_payment_middleware() ni capacity.py - voir
+# _build_route_configs_uncached() ci-dessus.
 def build_route_configs() -> dict[str, RouteConfig]:
-    # The 3 hand-built core routes, plus anything the usine (Prospecteur/
-    # Ouvrier/Crieur - see usine/) has added to app/generated/routes_registry.yaml.
-    # Merged here so x402 challenges, the well-known, and Bazaar/MCP discovery
-    # never need a second source of truth for generated routes.
     global _route_configs_cache, _route_configs_cache_at
     now = time.monotonic()
     if _route_configs_cache is not None and (now - _route_configs_cache_at) < _ROUTE_CONFIGS_TTL_SECONDS:
         return _route_configs_cache
 
-    from app.generated.dynamic_routes import build_dynamic_route_configs
-    from app.purecalc.engine import build_compute_route_configs
-
-    _route_configs_cache = {
-        **_core_route_configs(),
-        **build_dynamic_route_configs(),
-        **build_compute_route_configs(),
-    }
+    _route_configs_cache = _build_route_configs_uncached()
     _route_configs_cache_at = now
     return _route_configs_cache
 
@@ -3347,5 +3370,8 @@ def resolve_payment_requirements(payment_option: PaymentOption):
 
 def build_payment_middleware(app):
     server = get_resource_server()
-    routes = build_route_configs()
+    # Uncached on purpose (see _build_route_configs_uncached's docstring,
+    # incident 2026-10-02): this is the one call where a stale/incomplete
+    # route table means unpaid requests get served and marked paid.
+    routes = _build_route_configs_uncached()
     return PaymentMiddlewareASGI(app, routes, server)

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from app import config, db
 from app.upstream.openrouter import has_sufficient_balance
 from app.generated.dynamic_routes import dynamic_daily_capacity
-from app.x402_setup import build_route_configs
+from app.x402_setup import _build_route_configs_uncached
 
 # Every hand-built route (search/translate/jobs/pdf/web-read/extract/
 # summarize/fact-check) plus anything the usine (see usine/) has added to
@@ -16,8 +16,22 @@ from app.x402_setup import build_route_configs
 # matching how every other route-registration in this app already behaves.
 ROUTE_KEYS = {
     tuple(route_key.split(" ", 1)): route_key.split(" ", 1)[1].lstrip("/")
-    for route_key in build_route_configs()
+    for route_key in _build_route_configs_uncached()
 }
+
+
+def refresh_route_keys() -> None:
+    """ROUTE_KEYS is computed once at import time, before purecalc/dynamic
+    routes exist (see its own comment above) - mutated in place (not
+    reassigned) so app.mpp_middleware's own `from app.capacity import
+    ROUTE_KEYS` reference, bound once at ITS import time, sees the update
+    too. Called from app_lifespan() once the app has fully imported, same
+    pattern as x402_setup.invalidate_route_configs_cache()."""
+    ROUTE_KEYS.clear()
+    ROUTE_KEYS.update({
+        tuple(route_key.split(" ", 1)): route_key.split(" ", 1)[1].lstrip("/")
+        for route_key in _build_route_configs_uncached()
+    })
 
 
 def _next_utc_midnight() -> str:

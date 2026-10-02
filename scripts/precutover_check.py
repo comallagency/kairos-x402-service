@@ -28,6 +28,7 @@ import httpx
 from smoke_test import run_all  # sibling module; works when run as `python3 scripts/precutover_check.py`
 import check_paid_upstream
 import check_catalog_completeness
+import check_payment_enforcement
 
 
 def _catalog_sample_paths(base_url: str) -> list[str]:
@@ -79,6 +80,7 @@ def main() -> int:
     failed += check_catalog_samples(base_url)
     failed += check_paid_upstream.run(base_url)
     failed += check_catalog_completeness.run(base_url)
+    failed += check_payment_enforcement.run(base_url)
 
     if failed:
         print(f"\nPRE-CUTOVER CHECK FAILED: {len(failed)} check(s): {failed}", file=sys.stderr)
