@@ -73,8 +73,18 @@ def test_diff_addition_only():
 
 # ------------------------------------------------------------------ text/slug
 def test_slug_accents_stripped():
-    r = compute_slug(SlugInput(text="Café é la Mode!"))
-    assert r.slug == "cafe-e-la-mode"
+    r = compute_slug(SlugInput(text="Café à la Mode!"))
+    assert r.slug == "cafe-a-la-mode"
+
+
+def test_slug_french_spanish_accent_matrix():
+    cases = [
+        ("à", "a"), ("â", "a"), ("ä", "a"),
+        ("ñ", "n"), ("ç", "c"), ("ü", "u"), ("é", "e"),
+    ]
+    for accented, base in cases:
+        r = compute_slug(SlugInput(text=f"mot{accented}mot"))
+        assert r.slug == f"mot{base}mot", f"{accented!r} -> expected mot{base}mot, got {r.slug!r}"
 
 
 def test_slug_basic():
