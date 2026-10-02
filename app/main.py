@@ -1,7 +1,12 @@
-"""Application FastAPI — kit x402 payant uniquement.
+"""Application FastAPI — kit x402 payant + capacités gratuites de confiance.
 
-Surfaces de discours public (accueil, place, mesh, trust-kit, contact, etc.)
-retirées : seuls les services payants USDC + découverte technique minimale.
+Services payants USDC (x402) a cote de surfaces publiques gratuites, sans
+compte ni paiement : accueil/salon, place, contact, mesh, et le kit de
+confiance portable (relationship-memory, coordination-thread et son
+instantane, honest-delivery-refusal, return-visit-pledge, tool-delivery-
+receipt, tool-result-digest, agent-trust-kit). Branchees le 2026-10-02 apres
+verification individuelle (completude, tests, tables SQLite deja migrees) -
+voir le rapport de cette date pour le detail route par route.
 """
 
 from __future__ import annotations
@@ -63,10 +68,26 @@ from app.handlers.wallet_balance import router as wallet_balance_router
 from app.handlers.wallet_intelligence import router as wallet_intelligence_router
 from app.handlers.x402_echo import router as x402_echo_router
 from app.handlers.web_read import router as web_read_router
+from app.handlers.accueil import router as accueil_router
+from app.handlers.contact import router as contact_router
+from app.handlers.place import router as place_router
+from app.handlers.relationship_memory import router as relationship_memory_router
+from app.handlers.coordination_thread import router as coordination_thread_router
+from app.handlers.coordination_snapshot import router as coordination_snapshot_router
+from app.handlers.honest_delivery_refusal import router as honest_delivery_refusal_router
+from app.handlers.return_visit_pledge import router as return_visit_pledge_router
+from app.handlers.tool_delivery_receipt import router as tool_delivery_receipt_router
+from app.handlers.tool_digest import router as tool_digest_router
+from app.handlers.agent_trust_kit import router as agent_trust_kit_router
+from app.handlers.agent_mesh import router as agent_mesh_router
+from app.handlers.detect_language import router as detect_language_router
+from app.handlers.discover import router as discover_preview_router
 from app.intent_logging import IntentLoggingMiddleware
 from app.jobs_worker import worker_loop
 from app.mcp_accept_compat import McpAcceptCompatMiddleware
 from app.mcp_server import mcp
+from app.mcp_relationship_memory import mcp as relationship_memory_mcp
+from app.mcp_coordination_thread import mcp as coordination_thread_mcp
 from app.mpp_middleware import MPPMiddleware
 from app.marketplace_worker import marketplace_loop
 from app.openapi_custom import build_custom_openapi
@@ -114,7 +135,14 @@ async def app_lifespan(app: FastAPI):
 
 
 mcp_app = mcp.http_app(path="/")
-lifespan = combine_lifespans(app_lifespan, mcp_app.lifespan)
+relationship_memory_mcp_app = relationship_memory_mcp.http_app(path="/")
+coordination_thread_mcp_app = coordination_thread_mcp.http_app(path="/")
+lifespan = combine_lifespans(
+    app_lifespan,
+    mcp_app.lifespan,
+    relationship_memory_mcp_app.lifespan,
+    coordination_thread_mcp_app.lifespan,
+)
 
 inner_app = FastAPI(
     title="AgentIndex x402",
@@ -167,6 +195,20 @@ inner_app.include_router(llm_gateway_router)
 inner_app.include_router(capabilities_router)
 inner_app.include_router(discovery_router)
 inner_app.include_router(admin_router)
+inner_app.include_router(accueil_router)
+inner_app.include_router(contact_router)
+inner_app.include_router(place_router)
+inner_app.include_router(relationship_memory_router)
+inner_app.include_router(coordination_thread_router)
+inner_app.include_router(coordination_snapshot_router)
+inner_app.include_router(honest_delivery_refusal_router)
+inner_app.include_router(return_visit_pledge_router)
+inner_app.include_router(tool_delivery_receipt_router)
+inner_app.include_router(tool_digest_router)
+inner_app.include_router(agent_trust_kit_router)
+inner_app.include_router(agent_mesh_router)
+inner_app.include_router(detect_language_router)
+inner_app.include_router(discover_preview_router)
 for _generated_router in build_dynamic_routers():
     inner_app.include_router(_generated_router)
 
@@ -175,6 +217,8 @@ for _compute_router in build_compute_routers():
 inner_app.openapi = build_custom_openapi(inner_app)
 
 inner_app.mount("/mcp", mcp_app)
+inner_app.mount("/mcp/relationship-memory", relationship_memory_mcp_app)
+inner_app.mount("/mcp/coordination-thread", coordination_thread_mcp_app)
 
 
 @inner_app.get("/health", openapi_extra={"security": []})

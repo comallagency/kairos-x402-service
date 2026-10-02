@@ -223,6 +223,42 @@ def _ai_catalog_manifest() -> dict:
                 ],
             },
             {
+                "identifier": f"urn:air:{host_id}:mcp:relationship-memory",
+                "displayName": "Kairos Relationship Memory (free MCP)",
+                "type": "application/mcp-server-card+json",
+                "url": f"{base}/mcp/relationship-memory/",
+                "description": (
+                    "Free, no-account MCP surface for portable agent relationship "
+                    "memory cards (v1): relationship_memory.validate/store/retrieve. "
+                    f"HTTP mirror: {base}/relationship-memory/."
+                ),
+                "tags": ["mcp", "free", "relationship-memory", "trust-kit"],
+            },
+            {
+                "identifier": f"urn:air:{host_id}:mcp:coordination-thread",
+                "displayName": "Kairos Coordination Thread (free MCP)",
+                "type": "application/mcp-server-card+json",
+                "url": f"{base}/mcp/coordination-thread/",
+                "description": (
+                    "Free, no-account MCP surface for portable multi-agent "
+                    "coordination thread turns (v1): coordination_thread.validate/"
+                    f"retrieve. HTTP mirror: {base}/coordination-thread/."
+                ),
+                "tags": ["mcp", "free", "coordination-thread", "trust-kit"],
+            },
+            {
+                "identifier": f"urn:air:{host_id}:discover:free",
+                "displayName": "Semantic MCP discovery (free preview)",
+                "type": "application/json",
+                "url": f"{base}/discover/preview",
+                "description": (
+                    "Same ranked MCP-server matches as the paid POST /discover, "
+                    "capped at 10 results, no account, no payment. "
+                    f"Sample: GET {base}/discover/preview/sample."
+                ),
+                "tags": ["discovery", "mcp", "free"],
+            },
+            {
                 "identifier": f"urn:air:{host_id}:agent:kairos",
                 "displayName": "Kairos A2A agent card",
                 "type": "application/a2a-agent-card+json",
@@ -302,6 +338,25 @@ def _sitemap_urls() -> list[str]:
         "/.well-known/agent.json",
         "/.well-known/mcp.json",
         "/.well-known/glama.json",
+        "/.well-known/security.txt",
+        "/transparency",
+        "/accueil",
+        "/salon",
+        "/place",
+        "/place/discover-exemple-post-payant",
+        "/contact/sample",
+        "/discover/preview",
+        "/discover/preview/sample",
+        "/detect-language/sample",
+        "/mesh/sample",
+        "/relationship-memory/sample",
+        "/coordination-thread/sample",
+        "/coordination-thread-snapshot/sample",
+        "/honest-delivery-refusal/sample",
+        "/return-visit-pledge/sample",
+        "/tool-delivery-receipt/sample",
+        "/tool-result-digest/sample",
+        "/.well-known/agent-trust-kit.json",
     ]
     return [f"{base}{p}" for p in paths]
 
@@ -688,7 +743,7 @@ def _relationship_memory_mcp_card() -> dict:
     openapi_extra={"security": []},
 )
 async def well_known_mcp_relationship_memory():
-    raise HTTPException(status_code=404, detail="removed")
+    return _relationship_memory_mcp_card()
 
 
 def _coordination_thread_mcp_card() -> dict:
@@ -722,7 +777,7 @@ def _coordination_thread_mcp_card() -> dict:
     openapi_extra={"security": []},
 )
 async def well_known_mcp_coordination_thread():
-    raise HTTPException(status_code=404, detail="removed")
+    return _coordination_thread_mcp_card()
 
 
 @router.get(
@@ -730,7 +785,22 @@ async def well_known_mcp_coordination_thread():
     openapi_extra={"security": []},
 )
 async def server_coordination_thread_manifest():
-    raise HTTPException(status_code=404, detail="removed")
+    base = config.BASE_URL.rstrip("/")
+    schema_key = "$" + "schema"
+    return {
+        schema_key: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "world.agentindex/coordination-thread",
+        "title": "Kairos Coordination Thread",
+        "description": (
+            "Free, no-account MCP server for portable multi-agent coordination "
+            "thread turns (v1): coordination_thread.validate, .retrieve."
+        ),
+        "version": "1.0.0",
+        "websiteUrl": f"{base}/.well-known/coordination-thread-turn.json",
+        "remotes": [
+            {"type": "streamable-http", "url": f"{base}/mcp/coordination-thread/"},
+        ],
+    }
 
 
 
@@ -739,4 +809,70 @@ async def server_coordination_thread_manifest():
     openapi_extra={"security": []},
 )
 async def server_relationship_memory_manifest():
-    raise HTTPException(status_code=404, detail="removed")
+    base = config.BASE_URL.rstrip("/")
+    schema_key = "$" + "schema"
+    return {
+        schema_key: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "world.agentindex/relationship-memory",
+        "title": "Kairos Relationship Memory",
+        "description": (
+            "Free, no-account MCP server for portable agent relationship memory "
+            "cards (v1): relationship_memory.validate, .store, .retrieve."
+        ),
+        "version": "1.0.0",
+        "websiteUrl": f"{base}/.well-known/relationship-memory.json",
+        "remotes": [
+            {"type": "streamable-http", "url": f"{base}/mcp/relationship-memory/"},
+        ],
+    }
+
+
+@router.get(
+    "/.well-known/security.txt",
+    response_class=PlainTextResponse,
+    openapi_extra={"security": []},
+)
+async def security_txt():
+    """RFC 9116 - vulnerability disclosure contact. Minimal, no PGP key yet."""
+    base = config.BASE_URL.rstrip("/")
+    return (
+        f"Contact: {base}/contact\n"
+        "Expires: 2027-10-02T00:00:00.000Z\n"
+        "Preferred-Languages: en, fr\n"
+        f"Canonical: {base}/.well-known/security.txt\n"
+    )
+
+
+@router.get("/transparency", openapi_extra={"security": []})
+async def transparency():
+    """Qui opere le service, ce qui est journalise, politique de remboursement."""
+    base = config.BASE_URL.rstrip("/")
+    return {
+        "operator": {
+            "name": "Kairos (Comall)",
+            "github": "comallagency",
+            "contact": f"{base}/contact",
+        },
+        "logging": {
+            "what": (
+                "Chaque requete HTTP : route, methode, statut, latence, horodatage, "
+                "User-Agent, IP cliente, un extrait du corps de requete, et pour les "
+                "appels payes : portefeuille payeur et montant USDC. Les visites sur "
+                "/accueil et /salon sont journalisees separement (User-Agent, horodatage)."
+            ),
+            "why": (
+                "Diagnostic de pannes, detection d'abus (rate-limit sur /mesh), et "
+                "mesure du trafic agent reel vs sondes de disponibilite."
+            ),
+            "retention": "Pas de purge automatique a ce jour.",
+            "shared_with_third_parties": False,
+        },
+        "refund_policy": (
+            "x402 : le paiement est capture apres verification et execution reussies "
+            "(verify -> run -> settle), jamais avant. Un appel qui echoue cote serveur "
+            "n'est normalement pas facture. Pas de remboursement a posteriori au-dela de "
+            f"ce que ce flux garantit deja. Voir {base}/honest-delivery-refusal pour un "
+            f"refus structure si un appel paye n'a pas livre, et {base}/contact pour "
+            "toute contestation."
+        ),
+    }

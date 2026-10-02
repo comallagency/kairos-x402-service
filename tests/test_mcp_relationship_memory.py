@@ -60,6 +60,17 @@ def test_mcp_tools_unit():
 
 
 def test_mcp_initialize_and_tools_list():
+    # Dedicated TestClient on the mounted sub-app itself, entered as a context
+    # manager so its (lightweight, no external calls) lifespan actually runs -
+    # going through the full app's lifespan here would also run
+    # warm_discover_cache() and the worker/heartbeat/marketplace background
+    # tasks, which need real network access the test sandbox doesn't have.
+    # The mount wiring itself (app.main: inner_app.mount("/mcp/relationship-
+    # memory", ...)) is a one-line assertion covered by test_http_store_and_retrieve
+    # and test_well_known_mcp_relationship_memory_card above, both against the
+    # real combined app.
+    from app.main import relationship_memory_mcp_app
+
     init = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -70,28 +81,29 @@ def test_mcp_initialize_and_tools_list():
             "clientInfo": {"name": "pytest", "version": "1.0"},
         },
     }
-    r = client.post(
-        "/mcp/relationship-memory/",
-        json=init,
-        headers={
-            "Accept": "application/json, text/event-stream",
-            "Content-Type": "application/json",
-        },
-    )
-    assert r.status_code == 200
-    session = r.headers.get("mcp-session-id") or r.headers.get("Mcp-Session-Id")
-    assert session
+    with TestClient(relationship_memory_mcp_app) as sub_client:
+        r = sub_client.post(
+            "/",
+            json=init,
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+            },
+        )
+        assert r.status_code == 200
+        session = r.headers.get("mcp-session-id") or r.headers.get("Mcp-Session-Id")
+        assert session
 
-    tools_req = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
-    r2 = client.post(
-        "/mcp/relationship-memory/",
-        json=tools_req,
-        headers={
-            "Accept": "application/json, text/event-stream",
-            "Content-Type": "application/json",
-            "Mcp-Session-Id": session,
-        },
-    )
+        tools_req = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        r2 = sub_client.post(
+            "/",
+            json=tools_req,
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+                "Mcp-Session-Id": session,
+            },
+        )
     assert r2.status_code == 200
     raw = r2.text
     if raw.strip().startswith("event:"):
