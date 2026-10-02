@@ -320,11 +320,29 @@ async def chat_completion_raw(
     return data
 
 
+_KEY_INFO_CACHE_TTL_SECONDS = 60.0  # incident 2026-10-02: this was called
+# fresh on every GET /admin/data.json - a real OpenRouter network call
+# every 3s while the dashboard was open. Now also decoupled from the
+# request path entirely (app.admin's background cache loop), but cached
+# here too as defense in depth against any other caller doing the same.
+_key_info_cache: dict[str, Any] = {}
+
+
 async def get_key_info() -> dict[str, Any]:
+    now = time.monotonic()
+    cached = _key_info_cache.get("value")
+    cached_at = _key_info_cache.get("at")
+    if cached is not None and cached_at is not None and now - cached_at < _KEY_INFO_CACHE_TTL_SECONDS:
+        return cached
+
     if not config.OPENROUTER_API_KEY:
         raise OpenRouterError("OPENROUTER_API_KEY is not set")
     headers = {"Authorization": f"Bearer {config.OPENROUTER_API_KEY}"}
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(KEY_URL, headers=headers)
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+
+    _key_info_cache["value"] = data
+    _key_info_cache["at"] = now
+    return data
