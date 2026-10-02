@@ -45,6 +45,25 @@ def _catalog_sample_paths(base_url: str) -> list[str]:
     return sorted(paths)
 
 
+def _prewarm_discover_sample(base_url: str) -> None:
+    """/discover/sample's first call per process computes embeddings for
+    every own route via Ollama (app/handlers/discover_paid.py's
+    _load_own_routes(), cached forever after) - a known, accepted cold
+    start (same category as /admin/data.json's documented ~5s one), just
+    much slower now that there are 178 routes to embed instead of 76
+    (measured ~97s-150s+, and Ollama serializes internally so client-side
+    concurrency barely helps - see app/upstream/ollama.py's embed()).
+    Paid once, explicitly, with its own generous timeout, BEFORE the
+    generic per-sample loop below - so that loop can keep a normal timeout
+    for the 88 routes that are actually fast, instead of every sample
+    paying a timeout sized for the one slow one."""
+    try:
+        with httpx.Client(timeout=240.0) as client:
+            client.get(f"{base_url}/discover/sample")
+    except httpx.HTTPError:
+        pass  # the real check below reports this properly if it's still broken
+
+
 def check_catalog_samples(base_url: str) -> list[str]:
     failed = []
     try:
@@ -53,14 +72,11 @@ def check_catalog_samples(base_url: str) -> list[str]:
         print(f"FAIL reading catalog from {base_url}/.well-known/x402: {exc}")
         return [f"{base_url}/.well-known/x402 (catalog read)"]
 
+    if "/discover" in paths:
+        _prewarm_discover_sample(base_url)
+
     print(f"Checking {len(paths)} catalog route(s) for a working /sample...")
-    # 90s, not 15s: /discover/sample's first call per process computes
-    # embeddings for every own route via Ollama (app/handlers/discover_paid.py
-    # _load_own_routes(), cached forever after) - a known, accepted cold
-    # start (same category as /admin/data.json's documented ~5s one), just
-    # slower now that there are 178 routes to embed instead of 76. Every
-    # other sample is fast; only the one genuinely slow cold path pays this.
-    with httpx.Client(timeout=150.0) as client:
+    with httpx.Client(timeout=15.0) as client:
         for path in paths:
             sample_url = f"{base_url}{path}/sample"
             try:
