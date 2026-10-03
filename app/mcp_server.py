@@ -3286,3 +3286,89 @@ def _register_compute_tool(spec: ComputeSpec) -> None:
 for _compute_spec in COMPUTE_SPECS:
     _register_compute_tool(_compute_spec)
 
+
+# --- Base read-only RPC pack (2026-10-03) - same generic-tool pattern as
+# the pure-compute loop above, but compute() is a coroutine (RPC is I/O)
+# and a timeout is a declined tool call, never a billed one. See
+# app/base_chain/registry.py and app/base_chain/engine.py.
+from app.base_chain.registry import BaseRpcSpec, RpcComputeError as _RpcComputeError, BASE_RPC_SPECS  # noqa: E402
+from app.base_chain.rpc_client import RpcTimeout as _RpcTimeout  # noqa: E402
+from app.base_chain.engine import UPSTREAM_KIND as _RPC_KIND  # noqa: E402
+
+
+async def _run_rpc(spec: BaseRpcSpec, args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        parsed = spec.input_model(**args)
+    except _PurecalcValidationError as exc:
+        db.log_request(
+            route=spec.slug, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason="invalid_input",
+        )
+        raise ServiceError("invalid_input", detail=str(exc)[:500]) from exc
+
+    try:
+        with Timer() as t:
+            result = await spec.compute(parsed)
+    except _RpcTimeout as exc:
+        db.log_request(
+            route=spec.slug, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+        )
+        raise ServiceError("upstream_timeout", detail="Base RPC did not answer in time; not charged.") from exc
+    except _RpcComputeError as exc:
+        db.log_request(
+            route=spec.slug, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=exc.reason,
+        )
+        raise ServiceError(exc.reason, detail=exc.detail) from exc
+    except Exception as exc:
+        db.log_request(
+            route=spec.slug, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
+        )
+        raise ServiceError("compute_error", detail=str(exc)[:200]) from exc
+
+    price = effective_price(payer, price_float(spec.price))
+    db.log_request(
+        route=spec.slug, method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price,
+        payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    receipt = make_receipt(None, _RPC_KIND, t.elapsed_ms, price)
+    return {**result.model_dump(), "x402_receipt": receipt}
+
+
+def _register_rpc_tool(spec: BaseRpcSpec) -> None:
+    route_key = f"POST /{spec.slug}"
+    extensions = declare_mcp_discovery_extension(
+        DeclareMcpDiscoveryConfig(
+            tool_name=spec.mcp_tool_name,
+            description=spec.description,
+            input_schema=inline_json_schema(spec.input_model),
+            example=spec.sample_input,
+            output=OutputConfig(schema=inline_json_schema(spec.output_model)),
+        )
+    )
+
+    async def handler(payload: dict, ctx: Context = None) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name=spec.mcp_tool_name,
+            route_key=route_key,
+            ctx=ctx,
+            args=payload,
+            extensions=extensions,
+            run_and_log=lambda args, payer: _run_rpc(spec, args, payer),
+        )
+
+    tool = FunctionTool.from_function(handler, name=spec.mcp_tool_name, description=spec.description)
+    tool.parameters = {
+        "type": "object",
+        "properties": {"payload": inline_json_schema(spec.input_model)},
+        "required": ["payload"],
+    }
+    mcp.add_tool(tool)
+
+
+for _rpc_spec in BASE_RPC_SPECS:
+    _register_rpc_tool(_rpc_spec)
+

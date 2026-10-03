@@ -2210,11 +2210,13 @@ def _build_route_configs_uncached() -> dict[str, RouteConfig]:
     # can ever poison another caller's view of the route table again.
     from app.generated.dynamic_routes import build_dynamic_route_configs
     from app.purecalc.engine import build_compute_route_configs
+    from app.base_chain.engine import build_rpc_route_configs
 
     return {
         **_core_route_configs(),
         **build_dynamic_route_configs(),
         **build_compute_route_configs(),
+        **build_rpc_route_configs(),
     }
 
 

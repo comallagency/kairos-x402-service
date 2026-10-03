@@ -19,6 +19,7 @@ from x402.mechanisms.evm.default_assets import get_default_asset
 
 from app import config
 from app.purecalc.registry import COMPUTE_SPECS, inline_json_schema
+from app.base_chain.registry import BASE_RPC_SPECS
 from app.handlers.llm_gateway import MIN_SETTLE_USD
 from app.generated.registry import live_routes
 from app.x402_setup import (
@@ -393,6 +394,7 @@ def build_custom_openapi(app):
         # missing x-payment-info for exactly that reason: no entry existed
         # in _INPUT_SCHEMAS/_OUTPUT_SCHEMAS and nobody had hand-added one).
         purecalc_specs = {spec.slug: spec for spec in COMPUTE_SPECS}
+        base_rpc_specs = {spec.slug: spec for spec in BASE_RPC_SPECS}
 
         for route_key, route_config in build_route_configs().items():
             method, path = route_key.split(" ", 1)
@@ -402,6 +404,7 @@ def build_custom_openapi(app):
             route_name = path.lstrip("/")
             generated = generated_specs.get(route_name)
             purecalc_spec = purecalc_specs.get(route_name)
+            base_rpc_spec = base_rpc_specs.get(route_name)
             payment_option = route_config.accepts
             if isinstance(payment_option, list):
                 payment_option = payment_option[0]
@@ -428,6 +431,9 @@ def build_custom_openapi(app):
             elif purecalc_spec:
                 input_schema = inline_json_schema(purecalc_spec.input_model)
                 output_schema = inline_json_schema(purecalc_spec.output_model)
+            elif base_rpc_spec:
+                input_schema = inline_json_schema(base_rpc_spec.input_model)
+                output_schema = inline_json_schema(base_rpc_spec.output_model)
             else:
                 input_schema = _INPUT_SCHEMAS.get(route_name)
                 output_schema = _OUTPUT_SCHEMAS.get(route_name)
@@ -455,6 +461,9 @@ def build_custom_openapi(app):
                 operation["x-use-cases"] = generated.use_cases
             elif purecalc_spec:
                 operation["summary"] = purecalc_spec.service_name
+                operation["x-use-cases"] = []
+            elif base_rpc_spec:
+                operation["summary"] = base_rpc_spec.service_name
                 operation["x-use-cases"] = []
             else:
                 operation["summary"] = ROUTE_SUMMARIES.get(route_name, route_name)

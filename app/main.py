@@ -30,6 +30,8 @@ from app.discovery import router as discovery_router
 from app.generated.dynamic_routes import build_dynamic_routers
 import app.purecalc.routes  # noqa: F401 - populates app.purecalc.registry.COMPUTE_SPECS
 from app.purecalc.engine import build_compute_routers
+import app.base_chain.routes  # noqa: F401 - populates app.base_chain.registry.BASE_RPC_SPECS
+from app.base_chain.engine import build_rpc_routers
 from app.handlers.can_pay import router as can_pay_router
 from app.handlers.capabilities import router as capabilities_router
 from app.handlers.crypto import router as crypto_router
@@ -228,6 +230,9 @@ for _generated_router in build_dynamic_routers():
 
 for _compute_router in build_compute_routers():
     inner_app.include_router(_compute_router)
+
+for _rpc_router in build_rpc_routers():
+    inner_app.include_router(_rpc_router)
 inner_app.openapi = build_custom_openapi(inner_app)
 
 inner_app.mount("/mcp", mcp_app)
