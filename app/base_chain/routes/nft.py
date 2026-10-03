@@ -109,8 +109,8 @@ async def compute_erc721_tokens(inp: Erc721TokensInput) -> Erc721TokensOutput:
 
 
 register(BaseRpcSpec(
-    slug="base/erc721-tokens", price="$0.008", service_name="base-erc721-tokens",
-    description="List ERC721 token IDs held by a wallet on Base mainnet via ERC721Enumerable (tokenOfOwnerByIndex), up to 20 tokens - requires the collection to implement Enumerable.",
+    slug="base/erc721-tokens", price="$0.008", service_name="base-nft-holdings",
+    description="NFT holdings for a wallet in one Base ERC721 collection, owned token IDs via ERC721Enumerable (tokenOfOwnerByIndex) - up to 20 tokens, requires the collection to implement Enumerable.",
     tags=["erc721 tokens base", "nft holdings", "base rpc", "tokenOfOwnerByIndex", "base mainnet"],
     input_model=Erc721TokensInput, output_model=Erc721TokensOutput, compute=compute_erc721_tokens,
     sample_input={"token": "0xdcfeb48770c42a20428f025a69c093155829a11c", "wallet": "0xf70da97812CB96acDF810712Aa562db8dfA3dbEF"},
@@ -148,7 +148,7 @@ async def compute_nft_metadata(inp: NftTokenInput) -> NftMetadataOutput:
 
 register(BaseRpcSpec(
     slug="base/nft-metadata", price="$0.008", service_name="base-nft-metadata",
-    description="Fetch an ERC721 token's on-chain metadata URI (tokenURI) on Base mainnet - the URI itself, not the document it points to.",
+    description="NFT metadata URI for an ERC721 token on Base mainnet via tokenURI - the on-chain pointer (IPFS, HTTP, or data URI), not a fetch of the document itself.",
     tags=["nft metadata base", "tokenURI", "base rpc", "erc721 metadata", "base mainnet"],
     input_model=NftTokenInput, output_model=NftMetadataOutput, compute=compute_nft_metadata,
     sample_input={"token": "0x217Ec1aC929a17481446a76Ff9B95B9A64f298Cf", "token_id": 1},
@@ -179,7 +179,7 @@ async def compute_nft_owner(inp: NftTokenInput) -> NftOwnerOutput:
 
 register(BaseRpcSpec(
     slug="base/nft-owner", price="$0.003", service_name="base-nft-owner",
-    description="Current owner of an ERC721 token on Base mainnet via ownerOf(uint256).",
+    description="Who owns this NFT? ERC721 owner lookup on Base mainnet via ownerOf(tokenId).",
     tags=["nft owner base", "ownerOf", "base rpc", "erc721 owner", "base mainnet"],
     input_model=NftTokenInput, output_model=NftOwnerOutput, compute=compute_nft_owner,
     sample_input={"token": "0xdcfeb48770c42a20428f025a69c093155829a11c", "token_id": 129},

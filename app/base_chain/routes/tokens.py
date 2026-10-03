@@ -253,7 +253,7 @@ async def compute_allowance(inp: AllowanceInput) -> AllowanceOutput:
 
 register(BaseRpcSpec(
     slug="base/allowance", price="$0.003", service_name="base-allowance",
-    description="ERC20 spending allowance an owner has granted a spender on Base mainnet, via allowance(owner,spender).",
+    description="ERC20 allowance on Base mainnet via RPC: how much a spender is approved to move from an owner balance, read with allowance(owner,spender) eth_call.",
     tags=["allowance base", "erc20 approval", "base rpc", "spending limit", "base mainnet"],
     input_model=AllowanceInput, output_model=AllowanceOutput, compute=compute_allowance,
     sample_input={

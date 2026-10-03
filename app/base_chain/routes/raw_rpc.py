@@ -62,7 +62,7 @@ async def compute_storage(inp: StorageInput) -> StorageOutput:
 
 register(BaseRpcSpec(
     slug="base/storage", price="$0.005", service_name="base-storage",
-    description="Read a single 32-byte storage slot from a Base mainnet contract via eth_getStorageAt - always returns a value, zero-filled if unset.",
+    description="Read a contract storage slot on Base mainnet via eth_getStorageAt - the raw 32-byte value, decoded as hex and unsigned integer, zero-filled if unset.",
     tags=["base rpc", "storage slot", "eth_getStorageAt", "base mainnet", "raw contract state"],
     input_model=StorageInput, output_model=StorageOutput, compute=compute_storage,
     sample_input={"address": "0xb125e6687d4313864e53df431d5425969c15eb2f", "slot": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"},

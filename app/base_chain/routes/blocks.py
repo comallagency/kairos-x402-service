@@ -113,7 +113,7 @@ async def compute_pending(inp: PendingInput) -> BlockOutput:
 
 register(BaseRpcSpec(
     slug="base/pending", price="$0.01", service_name="base-pending-block",
-    description="The current pending (not-yet-mined) Base mainnet block via eth_getBlockByNumber('pending').",
+    description="The current pending Base mainnet block (mempool, not yet mined) - unconfirmed transactions via eth_getBlockByNumber('pending').",
     tags=["base rpc", "pending block", "mempool", "base mainnet", "unconfirmed transactions"],
     input_model=PendingInput, output_model=BlockOutput, compute=compute_pending,
     sample_input={},
