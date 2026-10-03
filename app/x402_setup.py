@@ -9,7 +9,7 @@ from x402.extensions.bazaar import (
     bazaar_resource_server_extension,
     declare_discovery_extension,
 )
-from x402.http.facilitator_client import HTTPFacilitatorClient
+from x402.http.facilitator_client import FacilitatorConfig, HTTPFacilitatorClient
 from x402.http.middleware.fastapi import PaymentMiddlewareASGI
 from x402.http.types import PaymentOption, RouteConfig
 from x402.server import x402ResourceServer
@@ -3296,7 +3296,21 @@ def build_resource_server() -> x402ResourceServer:
 
         facilitator_client = LocalDevFacilitatorClient(config.X402_NETWORK)
 
-    server = x402ResourceServer(facilitator_client)
+    # PayAI (facilitator.payai.network) as a SECOND facilitator, CDP listed
+    # first: x402ResourceServer resolves one facilitator per (network,
+    # scheme) and keeps the first client registered for any combo more than
+    # one facilitator supports (x402/server_base.py's
+    # _facilitator_clients_map - "if scheme not in map: map[scheme] = client"),
+    # so Base/exact traffic keeps resolving to CDP exactly as before. PayAI
+    # only engages for a network/scheme CDP does not serve. Free tier, no
+    # API key needed to start (docs.payai.network/x402/quickstart,
+    # 2026-10-03) - added for PayAI's own Bazaar-style discovery listing
+    # (facilitator.payai.network/discovery/resources), not for settlement
+    # on routes CDP already covers.
+    payai_facilitator_client = HTTPFacilitatorClient(
+        FacilitatorConfig(url="https://facilitator.payai.network")
+    )
+    server = x402ResourceServer([facilitator_client, payai_facilitator_client])
     register_exact_evm_server(server, networks=config.X402_NETWORK)
     from x402.mechanisms.evm.upto.server import UptoEvmScheme as UptoEvmServerScheme
 
