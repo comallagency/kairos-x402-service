@@ -18,6 +18,8 @@ from fastapi.openapi.utils import get_openapi
 from x402.mechanisms.evm.default_assets import get_default_asset
 
 from app import config
+from app.purecalc.registry import COMPUTE_SPECS, inline_json_schema
+from app.handlers.llm_gateway import MIN_SETTLE_USD
 from app.generated.registry import live_routes
 from app.x402_setup import (
     CRYPTO_INPUT_SCHEMA,
@@ -28,6 +30,27 @@ from app.x402_setup import (
     FACT_CHECK_OUTPUT_SCHEMA,
     JOBS_INPUT_SCHEMA,
     JOBS_OUTPUT_SCHEMA,
+    LLM_GATEWAY_INPUT_SCHEMA,
+    LLM_GATEWAY_OUTPUT_SCHEMA,
+    LLM_PER_MODEL_INPUT_SCHEMA,
+    TOKEN_RISK_INPUT_SCHEMA,
+    TOKEN_RISK_OUTPUT_SCHEMA,
+    RESEARCH_INPUT_SCHEMA,
+    RESEARCH_OUTPUT_SCHEMA,
+    SENTIMENT_INPUT_SCHEMA,
+    SENTIMENT_OUTPUT_SCHEMA,
+    CLASSIFY_INPUT_SCHEMA,
+    CLASSIFY_OUTPUT_SCHEMA,
+    INTENT_INPUT_SCHEMA,
+    INTENT_OUTPUT_SCHEMA,
+    SPAM_CHECK_INPUT_SCHEMA,
+    SPAM_CHECK_OUTPUT_SCHEMA,
+    TOXICITY_INPUT_SCHEMA,
+    TOXICITY_OUTPUT_SCHEMA,
+    LANGUAGE_INPUT_SCHEMA,
+    LANGUAGE_OUTPUT_SCHEMA,
+    PII_CHECK_INPUT_SCHEMA,
+    PII_CHECK_OUTPUT_SCHEMA,
     NEWS_INPUT_SCHEMA,
     NEWS_OUTPUT_SCHEMA,
     PDF_INPUT_SCHEMA,
@@ -96,6 +119,21 @@ _INPUT_SCHEMAS = {
     "probe": PROBE_INPUT_SCHEMA,
     "wallet-balance": WALLET_BALANCE_INPUT_SCHEMA,
     "gas-price": GAS_PRICE_INPUT_SCHEMA,
+    "v1/chat/completions": LLM_GATEWAY_INPUT_SCHEMA,
+    "llm/claude-sonnet": LLM_PER_MODEL_INPUT_SCHEMA,
+    "llm/gpt-mini": LLM_PER_MODEL_INPUT_SCHEMA,
+    "llm/llama": LLM_PER_MODEL_INPUT_SCHEMA,
+    "llm/gemini-flash": LLM_PER_MODEL_INPUT_SCHEMA,
+    "llm/deepseek": LLM_PER_MODEL_INPUT_SCHEMA,
+    "token-risk": TOKEN_RISK_INPUT_SCHEMA,
+    "research": RESEARCH_INPUT_SCHEMA,
+    "sentiment": SENTIMENT_INPUT_SCHEMA,
+    "classify": CLASSIFY_INPUT_SCHEMA,
+    "intent": INTENT_INPUT_SCHEMA,
+    "spam-check": SPAM_CHECK_INPUT_SCHEMA,
+    "toxicity": TOXICITY_INPUT_SCHEMA,
+    "language": LANGUAGE_INPUT_SCHEMA,
+    "pii-check": PII_CHECK_INPUT_SCHEMA,
     "wallet-intelligence": WALLET_INTELLIGENCE_INPUT_SCHEMA,
     "x402-echo": X402_ECHO_INPUT_SCHEMA,
     "tip": X402_ECHO_INPUT_SCHEMA,
@@ -132,6 +170,21 @@ _OUTPUT_SCHEMAS = {
     "probe": PROBE_OUTPUT_SCHEMA,
     "wallet-balance": WALLET_BALANCE_OUTPUT_SCHEMA,
     "gas-price": GAS_PRICE_OUTPUT_SCHEMA,
+    "v1/chat/completions": LLM_GATEWAY_OUTPUT_SCHEMA,
+    "llm/claude-sonnet": LLM_GATEWAY_OUTPUT_SCHEMA,
+    "llm/gpt-mini": LLM_GATEWAY_OUTPUT_SCHEMA,
+    "llm/llama": LLM_GATEWAY_OUTPUT_SCHEMA,
+    "llm/gemini-flash": LLM_GATEWAY_OUTPUT_SCHEMA,
+    "llm/deepseek": LLM_GATEWAY_OUTPUT_SCHEMA,
+    "token-risk": TOKEN_RISK_OUTPUT_SCHEMA,
+    "research": RESEARCH_OUTPUT_SCHEMA,
+    "sentiment": SENTIMENT_OUTPUT_SCHEMA,
+    "classify": CLASSIFY_OUTPUT_SCHEMA,
+    "intent": INTENT_OUTPUT_SCHEMA,
+    "spam-check": SPAM_CHECK_OUTPUT_SCHEMA,
+    "toxicity": TOXICITY_OUTPUT_SCHEMA,
+    "language": LANGUAGE_OUTPUT_SCHEMA,
+    "pii-check": PII_CHECK_OUTPUT_SCHEMA,
     "wallet-intelligence": WALLET_INTELLIGENCE_OUTPUT_SCHEMA,
     "x402-echo": X402_ECHO_OUTPUT_SCHEMA,
     "tip": X402_ECHO_OUTPUT_SCHEMA,
@@ -197,7 +250,7 @@ def _payment_response(payment_option) -> dict:
     }
 
 
-def _x_payment_info(payment_option) -> dict:
+def _x_payment_info(payment_option, dynamic: bool = False) -> dict:
     protocols = [{"x402": {"version": 2}}]
     if config.CDP_WALLET_SECRET:
         protocols.append(
@@ -209,20 +262,29 @@ def _x_payment_info(payment_option) -> dict:
                 }
             }
         )
-    return {
-        # AgentCash's x-payment-info.price.currency is decimal-USD pricing
-        # metadata (ISO 4217, so a strict 3-letter code) - a different field
-        # from the runtime x402 challenge's on-chain asset (USDC on Base,
-        # unaffected by this). Using "USDC" here fails their currency regex,
-        # which silently discards this whole price+protocols block during
-        # their validator's schema parse - not just a cosmetic mismatch.
-        "price": {
+    # Dynamic-price routes (currently only POST /v1/chat/completions, see
+    # app/handlers/llm_gateway.py::compute_ceiling_price) have no single
+    # real price - x402scan's discovery spec has a dedicated "dynamic"
+    # price mode for exactly this (DISCOVERY.md, OpenAPI-first section).
+    # Only MIN_SETTLE_USD is quoted: it's a real, already-public floor the
+    # runtime itself enforces (never below it), not a fabricated ceiling -
+    # a wrong "max" would be a worse inaccuracy than an absent one.
+    price_block = (
+        {"mode": "dynamic", "currency": "USD", "min": f"{MIN_SETTLE_USD:.6f}"}
+        if dynamic
+        else {
+            # AgentCash's x-payment-info.price.currency is decimal-USD pricing
+            # metadata (ISO 4217, so a strict 3-letter code) - a different field
+            # from the runtime x402 challenge's on-chain asset (USDC on Base,
+            # unaffected by this). Using "USDC" here fails their currency regex,
+            # which silently discards this whole price+protocols block during
+            # their validator's schema parse - not just a cosmetic mismatch.
             "mode": "fixed",
             "currency": "USD",
             "amount": _price_to_amount_string(payment_option.price),
-        },
-        "protocols": protocols,
-    }
+        }
+    )
+    return {"price": price_block, "protocols": protocols}
 
 
 def _request_body(input_schema: dict, example: dict | None = None) -> dict:
@@ -323,6 +385,14 @@ def build_custom_openapi(app):
         schema["x-agentcash-provenance"] = ownership_proof
 
         generated_specs = {spec.slug: spec for spec in live_routes()}
+        # purecalc's own ComputeSpec registry (see app/purecalc/registry.py)
+        # is a third schema source, same priority tier as generated_specs -
+        # a real, type-checked Pydantic model per route, never a hand-copied
+        # dict that can drift from app/purecalc/routes/*.py (the 2026-10-03
+        # agentcash-discovery audit found every one of these ~65 routes
+        # missing x-payment-info for exactly that reason: no entry existed
+        # in _INPUT_SCHEMAS/_OUTPUT_SCHEMAS and nobody had hand-added one).
+        purecalc_specs = {spec.slug: spec for spec in COMPUTE_SPECS}
 
         for route_key, route_config in build_route_configs().items():
             method, path = route_key.split(" ", 1)
@@ -331,18 +401,41 @@ def build_custom_openapi(app):
                 continue
             route_name = path.lstrip("/")
             generated = generated_specs.get(route_name)
+            purecalc_spec = purecalc_specs.get(route_name)
             payment_option = route_config.accepts
             if isinstance(payment_option, list):
                 payment_option = payment_option[0]
-            input_schema = generated.input_schema if generated else _INPUT_SCHEMAS.get(route_name)
-            if not input_schema:
+            # POST /v1/chat/completions' accepts.price is a DynamicPrice
+            # callable (see app/handlers/llm_gateway.py::compute_ceiling_price),
+            # not a dollar-string - build a stand-in with the same scheme/
+            # network/pay_to for the illustrative 402 example body, and tell
+            # _x_payment_info to emit a "dynamic" price block instead of a
+            # fixed amount it can't compute statically.
+            price_is_dynamic = callable(payment_option.price)
+            example_payment_option = payment_option
+            if price_is_dynamic:
+                from types import SimpleNamespace
+
+                example_payment_option = SimpleNamespace(
+                    scheme=payment_option.scheme,
+                    network=payment_option.network,
+                    pay_to=payment_option.pay_to,
+                    price=f"${MIN_SETTLE_USD:.6f}",
+                )
+            if generated:
+                input_schema = generated.input_schema
+                output_schema = generated.output_schema
+            elif purecalc_spec:
+                input_schema = inline_json_schema(purecalc_spec.input_model)
+                output_schema = inline_json_schema(purecalc_spec.output_model)
+            else:
+                input_schema = _INPUT_SCHEMAS.get(route_name)
+                output_schema = _OUTPUT_SCHEMAS.get(route_name)
+            if not input_schema or not output_schema:
                 continue
-            output_schema = generated.output_schema if generated else _OUTPUT_SCHEMAS.get(route_name)
-            if not output_schema:
-                continue
-            operation["x-payment-info"] = _x_payment_info(payment_option)
+            operation["x-payment-info"] = _x_payment_info(example_payment_option, dynamic=price_is_dynamic)
             operation.setdefault("security", [])
-            operation.setdefault("responses", {})["402"] = _payment_response(payment_option)
+            operation.setdefault("responses", {})["402"] = _payment_response(example_payment_option)
             input_example = DISCOVER_INPUT_EXAMPLE if route_name == "discover" else None
             operation["requestBody"] = _request_body(input_schema, example=input_example)
             # Discoverability material for AgentCash's semantic search (see
@@ -357,9 +450,16 @@ def build_custom_openapi(app):
             # summary/use-cases/output_schema on the RouteSpec itself, set by
             # Ouvrier when the route was created - same treatment, different
             # source, never a third copy of this logic.
-            operation["summary"] = generated.summary if generated else ROUTE_SUMMARIES.get(route_name, route_name)
+            if generated:
+                operation["summary"] = generated.summary
+                operation["x-use-cases"] = generated.use_cases
+            elif purecalc_spec:
+                operation["summary"] = purecalc_spec.service_name
+                operation["x-use-cases"] = []
+            else:
+                operation["summary"] = ROUTE_SUMMARIES.get(route_name, route_name)
+                operation["x-use-cases"] = ROUTE_USE_CASES.get(route_name, [])
             operation["tags"] = route_config.tags
-            operation["x-use-cases"] = generated.use_cases if generated else ROUTE_USE_CASES.get(route_name, [])
             success_json: dict = {"schema": output_schema}
             if route_name == "discover":
                 success_json["example"] = DISCOVER_SAMPLE_OUTPUT
@@ -368,24 +468,17 @@ def build_custom_openapi(app):
                 "content": {"application/json": success_json},
             }
 
-        # /token-risk, /research and /v1/chat/completions are hand-built
-        # routes with no entry in _INPUT_SCHEMAS/_OUTPUT_SCHEMAS and no
-        # generated-routes RouteSpec - the loop above never reaches them
-        # (its own `security` default is gated behind BOTH schemas being
-        # found, since it also builds requestBody/200-response from them).
-        # agentcash discover flagged exactly these three as
-        # L2/L3_AUTH_MODE_MISSING (2026-09-29). Setting `security: []`
-        # directly here - the same value every other operation gets -
-        # doesn't require inventing a fake input/output schema pair for
-        # routes that were never built around one.
-        for _path, _method in (
-            ("/token-risk", "post"),
-            ("/research", "post"),
-            ("/v1/chat/completions", "post"),
-        ):
-            _operation = ((schema.get("paths") or {}).get(_path) or {}).get(_method)
-            if _operation is not None:
-                _operation.setdefault("security", [])
+        # /token-risk, /research, the six sentiment/classify/intent/
+        # spam-check/toxicity/language/pii-check routes, and the per-model
+        # llm/* shortcuts all had the same gap as /v1/chat/completions: a
+        # real schema already existed (reused by their own
+        # declare_discovery_extension call) but no entry in
+        # _INPUT_SCHEMAS/_OUTPUT_SCHEMAS, so the loop above skipped them
+        # and this file used to patch just security: [] in here instead -
+        # agentcash discover flagged exactly this set as L2/L3_AUTH_MODE_
+        # MISSING or outright "unprotected" (2026-09-29 / 2026-10-03). All
+        # now wired into _INPUT_SCHEMAS/_OUTPUT_SCHEMAS above, reusing each
+        # route's existing constant - nothing left needing this fallback.
 
         _enrich_free_discover_operations(schema)
 
