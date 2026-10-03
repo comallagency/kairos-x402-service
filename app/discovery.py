@@ -825,7 +825,13 @@ def _agent_card() -> dict:
                 "name": route_config.service_name,
                 "resource": f"{config.BASE_URL}{path}",
                 "method": method,
-                "price": payment_option.price,
+                # payment_option.price can be a DynamicPrice callable
+                # (POST /v1/chat/completions and the three llm/* per-model
+                # shortcuts) - display_price() gives the same illustrative
+                # static string used at /.well-known/x402 (see
+                # _route_entries() above) instead of a raw function object
+                # that silently serializes as {} here.
+                "price": display_price(payment_option.price),
                 "description": route_config.description,
                 "sample": f"{config.BASE_URL}{path}/sample",
                 "input_example": bazaar_info.get("input", {}).get("body"),
