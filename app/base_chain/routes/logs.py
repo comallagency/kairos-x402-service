@@ -174,7 +174,7 @@ async def compute_events(inp: EventsInput) -> EventsOutput:
 
 register(BaseRpcSpec(
     slug="base/events", price="$0.005", service_name="base-events",
-    description="Generic Base mainnet event log search via eth_getLogs - filter by contract address and/or up to 4 topics over a block range (max 2,000 blocks).",
+    description="Smart contract event logs on Base mainnet (Base contract events) via eth_getLogs - filter by contract address and up to 4 topics, up to 2,000 blocks, raw logs with topics, data, block and tx hash.",
     tags=["base rpc", "event logs base", "eth_getLogs", "filter logs", "base mainnet"],
     input_model=EventsInput, output_model=EventsOutput, compute=compute_events,
     sample_input={

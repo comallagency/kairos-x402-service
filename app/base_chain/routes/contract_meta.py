@@ -150,7 +150,7 @@ async def compute_proxy(inp: AddressInput) -> ProxyOutput:
 
 register(BaseRpcSpec(
     slug="base/proxy", price="$0.005", service_name="base-proxy",
-    description="Detect EIP-1967 (transparent/UUPS), EIP-1967 beacon, or EIP-1822 proxy patterns on a Base mainnet contract and return its implementation address.",
+    description="Is this Base contract an upgradeable proxy? Proxy contract detection for EIP-1967 (transparent/UUPS), beacon, or EIP-1822 patterns, returning the implementation address.",
     tags=["base rpc", "proxy detection", "eip-1967", "upgradeable contract", "base mainnet"],
     input_model=AddressInput, output_model=ProxyOutput, compute=compute_proxy,
     sample_input={"address": "0xb125e6687d4313864e53df431d5425969c15eb2f"},

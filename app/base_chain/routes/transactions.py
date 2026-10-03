@@ -54,7 +54,7 @@ async def compute_tx(inp: HashInput) -> TxOutput:
 
 register(BaseRpcSpec(
     slug="base/tx", price="$0.008", service_name="base-tx",
-    description="Full Base mainnet transaction details by hash via eth_getTransactionByHash - from, to, value, calldata, gas, block.",
+    description="Base transaction lookup by hash - sender, recipient, value, calldata, gas and block, live from Base mainnet via eth_getTransactionByHash.",
     tags=["base rpc", "transaction", "base mainnet", "eth_getTransactionByHash", "tx lookup"],
     input_model=HashInput, output_model=TxOutput, compute=compute_tx,
     sample_input={"hash": "0xc2490a8a0aedd1196617a0e52111f82d6059986db7f1713ab23221c91c42f5c4"},

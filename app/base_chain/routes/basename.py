@@ -74,7 +74,7 @@ async def compute_basename(inp: BasenameInput) -> BasenameOutput:
 
 register(BaseRpcSpec(
     slug="base/basename", price="$0.005", service_name="base-basename",
-    description="Resolve a Basename (Base's native ENS-equivalent, e.g. 'jesse.base.eth') to its wallet address via the L2 Basenames resolver.",
+    description="Resolve a Basename, Base's native ENS-equivalent, to its wallet address via the L2 Basenames resolver.",
     tags=["basename", "base rpc", "ens base", "name resolution", "address lookup", "base mainnet"],
     input_model=BasenameInput, output_model=BasenameOutput, compute=compute_basename,
     sample_input={"name": "jesse.base.eth"},
