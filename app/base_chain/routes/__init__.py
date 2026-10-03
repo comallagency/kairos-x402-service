@@ -10,3 +10,7 @@ from app.base_chain.routes import transactions  # noqa: F401
 from app.base_chain.routes import tokens  # noqa: F401
 from app.base_chain.routes import logs  # noqa: F401
 from app.base_chain.routes import gas  # noqa: F401
+from app.base_chain.routes import basename  # noqa: F401
+from app.base_chain.routes import contract_meta  # noqa: F401
+from app.base_chain.routes import raw_rpc  # noqa: F401
+from app.base_chain.routes import nft  # noqa: F401
