@@ -37,6 +37,39 @@ class RpcTimeout(Exception):
     the route handler must turn this into a free 504, not a 422 or 5xx."""
 
 
+class RpcApplicationError(Exception):
+    """The upstream node returned a well-formed JSON-RPC error that is
+    deterministic given the query and the chain's current state - EVM
+    execution reverted (code 3) - not a transient provider fault. Raised
+    immediately by call() instead of retrying the other providers (an
+    identical call reverts on any full node tracking the same chain state)
+    and burning the whole RPC_TIMEOUT_S budget on a retry that cannot
+    succeed differently. Route handlers turn this into a free 422.
+
+    Deliberately NOT extended to response-too-large / block-range-too-wide
+    errors (-32020, -32614, -32602, etc.): those are per-provider operator
+    policy, not chain truth - measured directly (2026-10-03) that
+    base.drpc.org (tried first) caps eth_getLogs at 50 blocks while
+    mainnet.base.org allows 2,000 for the exact same query. Fail-fasting on
+    the first provider's policy would defeat the "plusieurs fournisseurs en
+    secours, bascule automatique" requirement outright - the whole point of
+    a second provider is that it may succeed where the first's policy
+    refused. These stay on the normal per-provider retry path; if every
+    provider's limit is tighter than the request within RPC_TIMEOUT_S, the
+    loop exhausts into the ordinary RpcTimeout -> free 504, which is exactly
+    the pack's own "can't deliver in time, don't charge" contract - no
+    special-casing needed."""
+
+    def __init__(self, code, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(f"{code}: {message}")
+
+
+def _is_fail_fast_error(err: dict) -> bool:
+    return err.get("code") == 3  # EVM execution reverted
+
+
 # Same provider set as app.upstream.evm_rpc.NETWORKS["base"] (the shared
 # client already used by /wallet-balance, /gas-price, /token-risk) -
 # reordered, not replaced. Measured directly (2026-10-03): base.drpc.org
@@ -53,6 +86,55 @@ _PROVIDER_ORDER = (
     "https://1rpc.io/base",
 )
 
+# One shared, long-lived client per event loop instead of opening a fresh
+# connection (TCP + TLS handshake) on every single RPC call - measured
+# directly (2026-10-03) against base.drpc.org: a new httpx.AsyncClient() per
+# call averaged ~270ms with spikes to 430ms+, a reused client with
+# connection pooling settled to ~95-120ms after the first request. This was
+# the main reason several batch-2 routes (live-balance, total-supply,
+# erc20-transfers) initially missed the pack's 500ms p95 target.
+#
+# Keyed by the running event loop (not just created once) because an
+# httpx.AsyncClient's connections are bound to the loop that opened them -
+# production has exactly one loop for the process lifetime, so this is a
+# create-once client there, but pytest-asyncio gives each test function its
+# own loop, and reusing a client across loops raises "attached to a
+# different loop" - recreating it when the loop changes makes this correct
+# in both environments.
+_client: httpx.AsyncClient | None = None
+_client_loop: asyncio.AbstractEventLoop | None = None
+
+
+async def _get_client() -> httpx.AsyncClient:
+    global _client, _client_loop
+    loop = asyncio.get_running_loop()
+    if _client is None or _client_loop is not loop:
+        if _client is not None:
+            # closing the stale client (bound to a now-dead loop, e.g. the
+            # previous pytest-asyncio test) matters, not just hygiene: left
+            # unclosed, its open connections/file descriptors accumulate
+            # across every loop switch - with pytest giving each test its
+            # own loop, a full suite run leaks one per test. Found this by
+            # reproducing a rare, otherwise-inexplicable RpcTimeout with an
+            # empty last_error (2026-10-03) only under the full batch1+2
+            # suite (91 tests), never in small isolated runs - consistent
+            # with resource exhaustion building up over the run, not a
+            # per-call bug.
+            try:
+                await _client.aclose()
+            except Exception:
+                pass
+        # retries=1 at the transport level absorbs a stale pooled keep-alive
+        # connection transparently (the server closing an idle connection
+        # right as we reuse it) - a handful of otherwise-inexplicable
+        # RpcTimeouts with an empty last_error surfaced only after this
+        # module started reusing a client (2026-10-03), consistent with
+        # that exact class of error; httpx's built-in retry is the standard
+        # fix rather than teaching our own provider-fallback loop about it.
+        _client = httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(retries=1))
+        _client_loop = loop
+    return _client
+
 
 async def call(method: str, params: list):
     """One JSON-RPC call against Base, trying each provider in
@@ -60,31 +142,34 @@ async def call(method: str, params: list):
     RPC_TIMEOUT_S regardless of how many providers it tries."""
     deadline = time.monotonic() + RPC_TIMEOUT_S
     last_error: Exception | None = None
-    async with httpx.AsyncClient() as client:
-        for i, url in enumerate(_PROVIDER_ORDER):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            providers_left = len(_PROVIDER_ORDER) - i
-            per_call_timeout = min(remaining, max(_MIN_PER_PROVIDER_S, remaining / providers_left))
-            try:
-                response = await client.post(
-                    url,
-                    json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
-                    timeout=per_call_timeout,
-                )
-                response.raise_for_status()
-                payload = response.json()
-                if payload.get("error"):
-                    last_error = RuntimeError(f"rpc_error: {payload['error']}")
-                    continue
-                if "result" not in payload:
-                    last_error = RuntimeError("rpc_invalid_response")
-                    continue
-                return payload["result"]
-            except (httpx.HTTPError, ValueError) as exc:
-                last_error = exc
+    client = await _get_client()
+    for i, url in enumerate(_PROVIDER_ORDER):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        providers_left = len(_PROVIDER_ORDER) - i
+        per_call_timeout = min(remaining, max(_MIN_PER_PROVIDER_S, remaining / providers_left))
+        try:
+            response = await client.post(
+                url,
+                json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+                timeout=per_call_timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if payload.get("error"):
+                err = payload["error"]
+                if _is_fail_fast_error(err):
+                    raise RpcApplicationError(err.get("code"), err.get("message", "rpc error"))
+                last_error = RuntimeError(f"rpc_error: {err}")
                 continue
+            if "result" not in payload:
+                last_error = RuntimeError("rpc_invalid_response")
+                continue
+            return payload["result"]
+        except (httpx.HTTPError, ValueError) as exc:
+            last_error = exc
+            continue
     raise RpcTimeout(f"rpc_unavailable: {last_error}")
 
 
