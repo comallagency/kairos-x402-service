@@ -92,7 +92,7 @@ register(BaseRpcSpec(
     sample_output={
         "number": 0, "hash": "0xf712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd",
         "parent_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-        "timestamp": 1686789859, "miner": "0x4200000000000000000000000000000000000011",
+        "timestamp": 1686789347, "miner": "0x4200000000000000000000000000000000000011",
         "gas_used": 0, "gas_limit": 30000000, "base_fee_per_gas": 1000000000,
         "transaction_count": 0, "transaction_hashes": [],
     },

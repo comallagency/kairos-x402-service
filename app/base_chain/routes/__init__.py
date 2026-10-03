@@ -7,3 +7,6 @@ from app.base_chain.routes import chain_meta  # noqa: F401
 from app.base_chain.routes import blocks  # noqa: F401
 from app.base_chain.routes import accounts  # noqa: F401
 from app.base_chain.routes import transactions  # noqa: F401
+from app.base_chain.routes import tokens  # noqa: F401
+from app.base_chain.routes import logs  # noqa: F401
+from app.base_chain.routes import gas  # noqa: F401
