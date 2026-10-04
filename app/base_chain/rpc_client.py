@@ -40,11 +40,21 @@ class RpcTimeout(Exception):
 class RpcApplicationError(Exception):
     """The upstream node returned a well-formed JSON-RPC error that is
     deterministic given the query and the chain's current state - EVM
-    execution reverted (code 3) - not a transient provider fault. Raised
-    immediately by call() instead of retrying the other providers (an
-    identical call reverts on any full node tracking the same chain state)
-    and burning the whole RPC_TIMEOUT_S budget on a retry that cannot
-    succeed differently. Route handlers turn this into a free 422.
+    execution reverted (code 3), or a pre-execution balance check failure
+    (code -32003, "OutOfFunds" - the call's `value` exceeds `from`'s real
+    balance) - not a transient provider fault. Raised immediately by call()
+    instead of retrying the other providers (an identical call gets the
+    same answer from any node tracking the same chain state) and burning
+    the whole RPC_TIMEOUT_S budget on a retry that cannot succeed
+    differently. Route handlers turn this into a free 422.
+
+    -32003 found the hard way (2026-10-04) while testing base/simulate with
+    an unrealistic value_wei: without this, base.drpc.org and
+    mainnet.base.org both answered in well under 100ms with -32003, but
+    _is_fail_fast_error didn't recognize it (only code 3), so call() kept
+    retrying into 1rpc.io - which didn't reject quickly, it hung until a
+    Cloudflare 524 almost 60s later, consuming most of RPC_TIMEOUT_S on a
+    request whose answer was already known after the very first try.
 
     Deliberately NOT extended to response-too-large / block-range-too-wide
     errors (-32020, -32614, -32602, etc.): those are per-provider operator
@@ -67,8 +77,11 @@ class RpcApplicationError(Exception):
         super().__init__(f"{code}: {message}")
 
 
+_FAIL_FAST_CODES = {3, -32003}  # EVM execution reverted; pre-execution OutOfFunds
+
+
 def _is_fail_fast_error(err: dict) -> bool:
-    return err.get("code") == 3  # EVM execution reverted
+    return err.get("code") in _FAIL_FAST_CODES
 
 
 # Same provider set as app.upstream.evm_rpc.NETWORKS["base"] (the shared
