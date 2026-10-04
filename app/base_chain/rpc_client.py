@@ -60,9 +60,10 @@ class RpcApplicationError(Exception):
     the pack's own "can't deliver in time, don't charge" contract - no
     special-casing needed."""
 
-    def __init__(self, code, message: str):
+    def __init__(self, code, message: str, data: str | None = None):
         self.code = code
         self.message = message
+        self.data = data
         super().__init__(f"{code}: {message}")
 
 
@@ -160,7 +161,7 @@ async def call(method: str, params: list):
             if payload.get("error"):
                 err = payload["error"]
                 if _is_fail_fast_error(err):
-                    raise RpcApplicationError(err.get("code"), err.get("message", "rpc error"))
+                    raise RpcApplicationError(err.get("code"), err.get("message", "rpc error"), err.get("data"))
                 last_error = RuntimeError(f"rpc_error: {err}")
                 continue
             if "result" not in payload:
@@ -239,6 +240,90 @@ async def multicall(calls: list[tuple[str, bool, bytes]]) -> list[tuple[bool, by
     calldata = _encode_aggregate3(calls)
     result = await call("eth_call", [{"to": MULTICALL3, "data": calldata}, "latest"])
     return _decode_aggregate3_result(result)
+
+
+_AGGREGATE3_VALUE_SELECTOR = bytes.fromhex("174dea71")  # aggregate3Value(Call3Value[])
+
+
+def _encode_aggregate3_value(calls: list[tuple[str, bool, int, bytes]]) -> str:
+    """Same shape as _encode_aggregate3, one more static head field (value)
+    per tuple - Call3Value is (address,bool,uint256,bytes), so the dynamic
+    bytes field now sits at offset 0x80 (4 head words) instead of 0x60."""
+    n = len(calls)
+    tuple_encodings = []
+    for target, allow_failure, value, calldata in calls:
+        tuple_encodings.append(
+            _word(int(target, 16))
+            + _word(1 if allow_failure else 0)
+            + _word(value)
+            + _word(0x80)
+            + _word(len(calldata))
+            + _pad_right(calldata)
+        )
+    offsets = []
+    running = n * 32
+    for enc in tuple_encodings:
+        offsets.append(_word(running))
+        running += len(enc)
+    array_encoding = _word(n) + b"".join(offsets) + b"".join(tuple_encodings)
+    return "0x" + (_AGGREGATE3_VALUE_SELECTOR + _word(0x20) + array_encoding).hex()
+
+
+async def multicall_value(
+    calls: list[tuple[str, bool, int, bytes]], state_override: dict | None = None
+) -> list[tuple[bool, bytes]]:
+    """Payable counterpart to multicall() - calls: list of (target,
+    allow_failure, value_wei, calldata). The top-level eth_call's own
+    "value" is the sum of every sub-call's value (Multicall3 requires
+    msg.value to match exactly). state_override lets the caller give
+    Multicall3 itself a fake ETH balance (eth_call's 3rd param, confirmed
+    supported by all 3 providers in _PROVIDER_ORDER, 2026-10-04) - needed
+    because Multicall3 holds no real funds of its own to forward.
+    Multicall3's Result[] return shape (success, returnData) is identical
+    to aggregate3's, so _decode_aggregate3_result is reused as-is."""
+    calldata = _encode_aggregate3_value(calls)
+    total_value = sum(c[2] for c in calls)
+    call_obj = {"to": MULTICALL3, "data": calldata, "value": hex(total_value)}
+    params = [call_obj, "latest"] + ([state_override] if state_override else [])
+    result = await call("eth_call", params)
+    return _decode_aggregate3_result(result)
+
+
+_ERROR_STRING_SELECTOR = bytes.fromhex("08c379a0")  # Error(string)
+_PANIC_SELECTOR = bytes.fromhex("4e487b71")  # Panic(uint256)
+_PANIC_MESSAGES = {
+    0x01: "assertion failed",
+    0x11: "arithmetic overflow or underflow",
+    0x12: "division or modulo by zero",
+    0x21: "invalid enum value",
+    0x22: "invalid storage byte array access (incorrectly encoded storage byte array)",
+    0x31: "pop() called on an empty array",
+    0x32: "array index out of bounds",
+    0x41: "out of memory (too much memory allocated)",
+    0x51: "called a zero-initialized variable of internal function type",
+}
+
+
+def decode_revert_reason(data: bytes) -> str:
+    """Decodes the standard Solidity revert encodings - Error(string) (a
+    plain require(cond, "msg") / revert("msg")) and Panic(uint256) (an
+    internal Solidity check like overflow or an out-of-bounds array
+    access). Anything else is a custom error (Solidity >=0.8.4's `error
+    Foo(...)` - no generic way to decode its arguments without the
+    contract's own ABI, so only the selector is reported) or a bare revert
+    with no data at all (common for a low-level ABI-decode failure, e.g.
+    reading a struct from a call to an address with no code)."""
+    if not data:
+        return "reverted with no data (no reason provided)"
+    if data[:4] == _ERROR_STRING_SELECTOR and len(data) >= 68:
+        length = decode_uint256(data[36:68])
+        return data[68 : 68 + length].decode("utf-8", errors="replace")
+    if data[:4] == _PANIC_SELECTOR and len(data) >= 36:
+        code = decode_uint256(data[4:36])
+        return _PANIC_MESSAGES.get(code, f"panic code 0x{code:x}")
+    if len(data) >= 4:
+        return f"custom error (selector 0x{data[:4].hex()}, not decodable without the contract's ABI)"
+    return "reverted with malformed/truncated data"
 
 
 def selector(signature: str) -> bytes:
