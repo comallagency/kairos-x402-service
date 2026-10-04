@@ -76,7 +76,7 @@ async def compute_estimate_gas(inp: EstimateGasInput) -> EstimateGasOutput:
 
 register(BaseRpcSpec(
     slug="base/estimate-gas", price="$0.004", service_name="base-estimate-gas",
-    description="Gas estimate for a Base mainnet call (to/from/value/data) via eth_estimateGas, without broadcasting a transaction.",
+    description="Gas estimate for a Base mainnet swap or any other call (to/from/value/data) via eth_estimateGas, without broadcasting a transaction.",
     tags=["base rpc", "gas estimate", "eth_estimateGas", "base mainnet", "transaction cost"],
     input_model=EstimateGasInput, output_model=EstimateGasOutput, compute=compute_estimate_gas,
     sample_input={"to": "0xdb6882db2A406Bc1541988715842906Dfd4FD590", "from_address": "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d", "value_wei": 0},

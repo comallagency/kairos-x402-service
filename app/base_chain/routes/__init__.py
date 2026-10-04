@@ -14,3 +14,6 @@ from app.base_chain.routes import basename  # noqa: F401
 from app.base_chain.routes import contract_meta  # noqa: F401
 from app.base_chain.routes import raw_rpc  # noqa: F401
 from app.base_chain.routes import nft  # noqa: F401
+from app.base_chain.routes import simulate  # noqa: F401
+from app.base_chain.routes import quote  # noqa: F401
+from app.base_chain.routes import can_sell  # noqa: F401
