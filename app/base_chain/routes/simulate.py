@@ -46,6 +46,19 @@ def _check_address(v: str) -> str:
     return v
 
 
+# 32 KB of calldata is already far beyond any realistic single-call use case
+# (EIP-170 caps a whole CONTRACT's bytecode at 24 KB; even this pack's own
+# heaviest multicall batches - 16+ sub-calls in base/quote - produce a few
+# KB at most) - bounded here, cheaply, before the int(v, 16) parse below
+# which would otherwise do real work on an attacker-sized string. nginx's
+# own default client_max_body_size (1 MB, unset/unoverridden for this
+# vhost - checked directly, 2026-10-04) already stops anything larger from
+# reaching the app at all; this is a second, tighter line of defense that
+# answers with a clear 422 instead of relying on nginx's opaque 413.
+MAX_DATA_BYTES = 32_768
+_MAX_DATA_HEX_LEN = 2 + MAX_DATA_BYTES * 2
+
+
 class SimulateInput(BaseModel):
     from_address: str
     to: str
@@ -60,6 +73,8 @@ class SimulateInput(BaseModel):
     @field_validator("data")
     @classmethod
     def _validate_data(cls, v):
+        if len(v) > _MAX_DATA_HEX_LEN:
+            raise ValueError(f"data must be at most {MAX_DATA_BYTES} bytes ({_MAX_DATA_HEX_LEN} hex chars)")
         if not v.startswith("0x") or len(v) % 2 != 0:
             raise ValueError("data must be a 0x-prefixed, even-length hex string")
         try:
