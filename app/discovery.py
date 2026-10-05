@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 
 from app import config
-from app.x402_setup import KIT_TAGLINE, build_route_configs, display_price, resolve_payment_requirements
+from app.x402_setup import KIT_TAGLINE, build_route_configs, display_price, price_label, resolve_payment_requirements
 from app.purecalc.registry import COMPUTE_SPECS
 from app.handlers.llm_gateway import MIN_SETTLE_USD
 
@@ -36,12 +36,12 @@ def _route_entries() -> list[dict]:
                         "asset": r.asset,
                         "amount": str(r.amount),
                         # a.price can be a DynamicPrice callable (POST
-                        # /v1/chat/completions) - display_price() gives the
-                        # same illustrative static string used to resolve
-                        # asset/amount above (see resolve_payment_requirements),
-                        # rather than a raw function object jsonschema can't
-                        # serialize.
-                        "price": display_price(a.price),
+                        # /v1/chat/completions) - price_label() explains how
+                        # it's actually computed instead of display_price()'s
+                        # bare SDK-safe floor (that one stays reserved for
+                        # resolve_payment_requirements, which needs a string
+                        # parse_money can parse into a numeric amount).
+                        "price": price_label(a.price),
                         "payTo": r.pay_to,
                         "maxTimeoutSeconds": r.max_timeout_seconds,
                         "extra": r.extra,
@@ -398,6 +398,22 @@ def _deepseek_enabled() -> bool:
 
 def _llms_catalog() -> str:
     base = config.BASE_URL.rstrip("/")
+    _llm_post_cfgs = {
+        path.lstrip("/"): cfg
+        for key, cfg in build_route_configs().items()
+        for method, path in [key.split(" ", 1)]
+        if method == "POST"
+    }
+
+    def _llm_price(slug: str) -> str:
+        cfg = _llm_post_cfgs.get(slug)
+        if cfg is None:
+            return "?"
+        accepts = cfg.accepts
+        if isinstance(accepts, list):
+            accepts = accepts[0]
+        return price_label(accepts.price)
+
     lines = [
         "# AgentIndex x402",
         "",
@@ -464,15 +480,16 @@ def _llms_catalog() -> str:
         f"- [Language]({base}/language): POST {{\"text\":\"...\"}} - detects 1 of 20 common languages with a confidence score ($0.002)",
         f"- [PII Check]({base}/pii-check): POST {{\"text\":\"...\"}} - flags personally identifiable information with a confidence score ($0.003)",
         "",
-        "## Pay-per-call LLM APIs (price from max_tokens, no API key)",
+        "## Pay-per-call LLM APIs: chat completions and AI inference gateway (price from max_tokens, no API key)",
         "",
-        "Same OpenAI-format chat completions engine as POST /v1/chat/completions, each pinned to a single measured-reliable OpenRouter provider. 20s server-side timeout, never charged on timeout - set your client timeout to 30s.",
+        "OpenAI-compatible chat completions and AI inference, 437 models (Claude, GPT, Gemini, Llama, Mistral and more) behind one gateway, plus 5 pinned single-model shortcuts on the same engine. 20s server-side timeout, never charged on timeout - set your client timeout to 30s.",
         "",
-        f"- [Claude Sonnet]({base}/llm/claude-sonnet): POST {{\"messages\":[...],\"max_tokens\":...}} - anthropic/claude-sonnet-5.5, pinned to Anthropic",
-        f"- [GPT Mini]({base}/llm/gpt-mini): POST {{\"messages\":[...],\"max_tokens\":...}} - openai/gpt-5.4-mini, pinned to OpenAI",
-        f"- [Gemini Flash]({base}/llm/gemini-flash): POST {{\"messages\":[...],\"max_tokens\":...}} - google/gemini-3.8-flash, pinned to Google AI Studio (2nd-provider fallback if the first is slow)",
-        f"- [Llama]({base}/llm/llama): POST {{\"messages\":[...],\"max_tokens\":...}} - meta-llama/llama-4-maverick, pinned to DeepInfra",
-        f"- [DeepSeek]({base}/llm/deepseek): POST {{\"messages\":[...],\"max_tokens\":...}} - deepseek/deepseek-v4-pro, pinned to Reka (2nd-provider fallback if the first is slow)",
+        f"- [Chat Completions Gateway]({base}/v1/chat/completions): POST {{\"model\":\"...\",\"messages\":[...],\"max_tokens\":...}} - any of 437 models, OpenAI-compatible ({_llm_price('v1/chat/completions')})",
+        f"- [Claude Sonnet]({base}/llm/claude-sonnet): POST {{\"messages\":[...],\"max_tokens\":...}} - anthropic/claude-sonnet-5.5, pinned to Anthropic ({_llm_price('llm/claude-sonnet')})",
+        f"- [GPT Mini]({base}/llm/gpt-mini): POST {{\"messages\":[...],\"max_tokens\":...}} - openai/gpt-5.4-mini, pinned to OpenAI ({_llm_price('llm/gpt-mini')})",
+        f"- [Gemini Flash]({base}/llm/gemini-flash): POST {{\"messages\":[...],\"max_tokens\":...}} - google/gemini-3.8-flash, pinned to Google AI Studio (2nd-provider fallback if the first is slow) ({_llm_price('llm/gemini-flash')})",
+        f"- [Llama]({base}/llm/llama): POST {{\"messages\":[...],\"max_tokens\":...}} - meta-llama/llama-4-maverick, pinned to DeepInfra ({_llm_price('llm/llama')})",
+        f"- [DeepSeek]({base}/llm/deepseek): POST {{\"messages\":[...],\"max_tokens\":...}} - deepseek/deepseek-v4-pro, pinned to Reka (2nd-provider fallback if the first is slow) ({_llm_price('llm/deepseek')})",
         "",
         "## Pure compute (<50ms, no LLM, no external dependency, $0.001-$0.002 USDC)",
         "",
@@ -500,6 +517,7 @@ def _llms_catalog() -> str:
     lines += [
         "## Free samples (no payment)",
         "",
+        f"- {base}/v1/models (free - lists all 437 priced LLM models before you call POST /v1/chat/completions)",
         f"- {base}/can-pay/sample",
         f"- {base}/probe/sample",
         f"- {base}/wallet-balance/sample",
@@ -752,6 +770,13 @@ def _agentindex_wallet_mcp_skill() -> str:
             desc = (cfg.description or "").strip()
             lines.append(f'| `POST /{slug}` | {price} | `"{max_payment}"` | {desc} |')
         lines.append("")
+        if section_title == "Pay-per-call LLMs (dynamic price from max_tokens)":
+            lines.append(
+                "**Free:** `GET /v1/models` lists all 437 priced models "
+                "with per-token rates - call it before you pay to pick a "
+                "model and estimate your own ceiling."
+            )
+            lines.append("")
 
     lines.append("### Pure compute (<50ms, no LLM, no external dependency)")
     lines.append("")
@@ -827,11 +852,11 @@ def _agent_card() -> dict:
                 "method": method,
                 # payment_option.price can be a DynamicPrice callable
                 # (POST /v1/chat/completions and the three llm/* per-model
-                # shortcuts) - display_price() gives the same illustrative
-                # static string used at /.well-known/x402 (see
-                # _route_entries() above) instead of a raw function object
-                # that silently serializes as {} here.
-                "price": display_price(payment_option.price),
+                # shortcuts) - price_label() explains how it's actually
+                # computed instead of a raw function object that silently
+                # serializes as {} here (see _route_entries() above for the
+                # same substitution at /.well-known/x402).
+                "price": price_label(payment_option.price),
                 "description": route_config.description,
                 "sample": f"{config.BASE_URL}{path}/sample",
                 "input_example": bazaar_info.get("input", {}).get("body"),
@@ -846,7 +871,8 @@ def _agent_card() -> dict:
             f"{KIT_TAGLINE} Start with GET /wallet-intelligence ($0.001): "
             "one signature replaces wallet and gas reads on five EVM networks. "
             "Cheapest single reads cost $0.001. USDC on Base (x402), no "
-            "account, no API key."
+            "account, no API key. Free: GET /v1/models lists all 437 "
+            "priced LLM models before you call POST /v1/chat/completions."
         ),
         "url": base,
         "repository": "https://github.com/comallagency/kairos-x402-service",

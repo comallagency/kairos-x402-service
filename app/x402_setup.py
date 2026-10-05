@@ -597,12 +597,13 @@ ROUTE_DESCRIPTIONS = {
         "no OpenRouter or TypeSafe account needed. Try GET /rank/sample."
     ),
     "llm-gateway": (
-        "OpenAI-compatible chat completion API: call 400+ LLMs (Claude, GPT, "
-        "Gemini, Llama, Mistral) per request, pay with x402, no API key. You "
-        "sign a fixed price computed from your max_tokens; unused tokens are "
-        "not refunded. 20s server-side timeout - never charged if it "
-        "fires; set your client timeout to 30s. Try GET "
-        "/v1/chat/completions/sample."
+        "437 models, no account, no API key, pay per call in USDC - "
+        "OpenAI-compatible chat completions and AI inference gateway "
+        "(Claude, GPT, Gemini, Llama, Mistral and more in one endpoint). "
+        "Price: from $0.001, computed from your max_tokens × model rate "
+        "× 1.10 (you sign a ceiling; unused tokens are not refunded). "
+        "20s server-side timeout - never charged if it fires; set your "
+        "client timeout to 30s. Try GET /v1/chat/completions/sample."
     ),
     "token-risk": (
         "Base token risk scan: on-chain rug check and honeypot-style flag "
@@ -2983,9 +2984,9 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             resource=f"{config.BASE_URL}/v1/chat/completions",
             description=ROUTE_DESCRIPTIONS["llm-gateway"],
             mime_type="application/json",
-            service_name="llm-gateway",
+            service_name="chat-completions-api",
             icon_url=ICON_URL,
-            tags=["llm", "inference", "openai-compatible"],
+            tags=["chat completions", "ai inference", "llm api", "pay per token llm", "openai compatible"],
             extensions=declare_discovery_extension(
                 input=SAMPLE_REQUEST,
                 input_schema=LLM_GATEWAY_INPUT_SCHEMA,
@@ -3357,6 +3358,25 @@ def display_price(price) -> str:
     if isinstance(price, str):
         return price
     return "$0.001"
+
+
+def price_label(price) -> str:
+    """Human-readable price shown in buyer-facing discovery surfaces
+    (/.well-known/x402's accepts[].price, the agent card's skills[].price,
+    GET /llms.txt) - NOT fed to the x402 SDK's parse_money (that stays
+    display_price() above, unchanged, since resolve_payment_requirements()
+    needs a bare "$X" string it can parse into a numeric amount). A static
+    route's own price string passes through unchanged. For a DynamicPrice
+    callable (POST /v1/chat/completions and the llm/* per-model routes),
+    display_price()'s bare "$0.001" floor looks identical to every other
+    route's real fixed price - an agent comparing numbers has no way to
+    know this one is a floor, not the real cost. This explains how it's
+    actually computed instead."""
+    if isinstance(price, str):
+        return price
+    from app.handlers.llm_gateway import MARKUP, MIN_SETTLE_USD
+
+    return f"from ${MIN_SETTLE_USD:.3f}, computed from your max_tokens × model rate × {MARKUP:.2f}"
 
 
 def resolve_payment_requirements(payment_option: PaymentOption):
