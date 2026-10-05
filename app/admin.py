@@ -15,7 +15,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, model_validator
 
 from app import config, db
-from app.upstream.openrouter import OpenRouterError, get_key_info
+from app.upstream.openrouter import OpenRouterError, get_balance_usd, get_key_info
 
 logger = logging.getLogger("x402.admin")
 
@@ -823,21 +823,51 @@ async def collect_usine_data() -> dict:
     }
 
 
+# Highest of app.capacity's own circuit-breaker floors (LLMGatewayCircuitBreaker
+# and the Claude Sonnet pinned route both gate at $1.00) - below this, no
+# operator-visible warning exists today: the breakers fail each call clean
+# (503, never a silent/charged failure - confirmed by reading the x402 SDK's
+# own middleware, which skips settlement on any response >= 400), but
+# nothing surfaces the real account balance dropping toward that floor until
+# buyers are already being turned away. REAL_BALANCE_WARNING_USD gives a
+# human 2x the tightest floor's worth of headroom to top up first.
+REAL_BALANCE_WARNING_USD = 3.00
+
+
 async def _openrouter_budget_status() -> dict:
     """Checked by usine/loop_run.sh before every cycle (drift-stop condition
     6: "le quota OpenRouter passe sous 10% de la journée"). This key has no
     OpenRouter-side `limit` configured (verified against /api/v1/key -
     limit/limit_remaining are null), so there is no native "% remaining" to
     read - pct_remaining here is against OUR OWN configured daily budget
-    (config.OPENROUTER_DAILY_BUDGET_USD), not an OpenRouter-enforced cap."""
+    (config.OPENROUTER_DAILY_BUDGET_USD), not an OpenRouter-enforced cap.
+
+    real_balance_usd/real_balance_warning added 2026-10-05: usage_daily/
+    pct_remaining above track SPEND RATE against a self-imposed budget, not
+    REMAINING FUNDS - an operator watching only those could see a healthy
+    "100% of daily budget remaining" right up until the real account balance
+    hits capacity.py's circuit-breaker floors and routes start 503ing."""
     try:
         key_info = (await get_key_info())["data"]
     except OpenRouterError as exc:
-        return {"usage_daily": None, "daily_budget_usd": config.OPENROUTER_DAILY_BUDGET_USD, "pct_remaining": None, "error": str(exc)[:200]}
+        return {
+            "usage_daily": None, "daily_budget_usd": config.OPENROUTER_DAILY_BUDGET_USD,
+            "pct_remaining": None, "real_balance_usd": None, "real_balance_warning": None,
+            "error": str(exc)[:200],
+        }
     usage_daily = key_info.get("usage_daily") or 0.0
     budget = config.OPENROUTER_DAILY_BUDGET_USD
     pct_remaining = max(0.0, 1.0 - (usage_daily / budget)) if budget > 0 else None
-    return {"usage_daily": usage_daily, "daily_budget_usd": budget, "pct_remaining": pct_remaining, "error": None}
+    try:
+        real_balance_usd = await get_balance_usd()
+    except OpenRouterError:
+        real_balance_usd = None
+    real_balance_warning = real_balance_usd is not None and real_balance_usd < REAL_BALANCE_WARNING_USD
+    return {
+        "usage_daily": usage_daily, "daily_budget_usd": budget, "pct_remaining": pct_remaining,
+        "real_balance_usd": real_balance_usd, "real_balance_warning": real_balance_warning,
+        "error": None,
+    }
 
 
 @router.get("/admin/usine.json", include_in_schema=False)
