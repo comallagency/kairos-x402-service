@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS requests (
 );
 CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests(ts);
 CREATE INDEX IF NOT EXISTS idx_requests_route ON requests(route);
+CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
+CREATE INDEX IF NOT EXISTS idx_requests_payer ON requests(payer);
 
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
@@ -546,6 +548,22 @@ def count_paid_today(route: str) -> int:
             (route, f"{today}%"),
         )
         return cur.fetchone()["n"]
+
+
+def anthropic_monthly_spend_usd(route: str = "token-card") -> float:
+    """Real Anthropic spend this calendar month, summed from requests.db's
+    own upstream_cost_usd column (set on every real Claude call this
+    route made, success or not - see app/handlers/token_card.py). No
+    stateful counter to reset: "resets on the 1st" falls out of this
+    query's date filter. Anthropic's API has no "get my usage" endpoint to
+    cross-check against, unlike OpenRouter's /api/v1/key."""
+    start_of_month = datetime.now(timezone.utc).strftime("%Y-%m-01T00:00:00+00:00")
+    with cursor() as cur:
+        cur.execute(
+            "SELECT COALESCE(SUM(upstream_cost_usd), 0) AS total FROM requests WHERE route=? AND ts >= ?",
+            (route, start_of_month),
+        )
+        return float(cur.fetchone()["total"])
 
 
 def create_job(input_data: dict, amount_usdc: float | None = None, payer: str | None = None) -> str:
@@ -1877,3 +1895,162 @@ def last_real_payment() -> dict | None:
                 "payer": payer, "amount_usdc": row["amount_usdc"],
             }
     return None
+
+
+def suivi_snapshot() -> dict:
+    """Hourly (24h) and daily (7d) visit/payment series for GET /admin/suivi.
+
+    Cheap GROUP BY on idx_requests_ts — never walks 24h rows in Python and
+    never shares a cache with collect_dashboard_data / /admin/data.json, so
+    polling this page cannot revive the 2026-10-02 CPU incident.
+    Paid totals exclude MECHANICAL_WALLETS the same way as history_7d()."""
+    mechanical = _mechanical_wallets()
+    since_24 = _since(24)
+    since_7d = _since(24 * 7)
+    now = datetime.now(timezone.utc)
+
+    with cursor() as cur:
+        cur.execute(
+            """SELECT substr(ts, 1, 13) AS bucket, status,
+                      COUNT(*) AS n, SUM(ifnull(amount_usdc, 0)) AS usdc
+               FROM requests WHERE ts >= ? GROUP BY 1, 2""",
+            (since_24,),
+        )
+        hour_rows = cur.fetchall()
+        cur.execute(
+            """SELECT substr(ts, 1, 13) AS bucket, lower(payer) AS payer,
+                      COUNT(*) AS n, SUM(ifnull(amount_usdc, 0)) AS usdc
+               FROM requests
+               WHERE ts >= ? AND status='paid' AND payer IS NOT NULL AND trim(payer) != ''
+               GROUP BY 1, 2""",
+            (since_24,),
+        )
+        hour_paid_rows = cur.fetchall()
+        cur.execute(
+            """SELECT substr(ts, 1, 10) AS bucket, status,
+                      COUNT(*) AS n, SUM(ifnull(amount_usdc, 0)) AS usdc
+               FROM requests WHERE ts >= ? GROUP BY 1, 2""",
+            (since_7d,),
+        )
+        day_rows = cur.fetchall()
+        cur.execute(
+            """SELECT substr(ts, 1, 10) AS bucket, lower(payer) AS payer,
+                      COUNT(*) AS n, SUM(ifnull(amount_usdc, 0)) AS usdc
+               FROM requests
+               WHERE ts >= ? AND status='paid' AND payer IS NOT NULL AND trim(payer) != ''
+               GROUP BY 1, 2""",
+            (since_7d,),
+        )
+        day_paid_rows = cur.fetchall()
+        cur.execute(
+            """SELECT ts, route, method, status, amount_usdc, payer, user_agent
+               FROM requests ORDER BY id DESC LIMIT 20"""
+        )
+        recent = [dict(r) for r in cur.fetchall()]
+
+    def _status_buckets(rows) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for row in rows:
+            b = out.setdefault(
+                row["bucket"],
+                {"visits": 0, "unpaid": 0, "errors": 0, "paid_all": 0, "usdc_all": 0.0},
+            )
+            n = int(row["n"] or 0)
+            usdc = float(row["usdc"] or 0)
+            b["visits"] += n
+            if row["status"] == "unpaid":
+                b["unpaid"] += n
+            elif row["status"] in ("error", "payment_failed", "capacity_reached"):
+                b["errors"] += n
+            elif row["status"] == "paid":
+                b["paid_all"] += n
+                b["usdc_all"] += usdc
+        return out
+
+    def _real_paid(rows) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for row in rows:
+            payer = (row["payer"] or "").strip().lower()
+            if not payer or payer in mechanical:
+                continue
+            b = out.setdefault(row["bucket"], {"paid": 0, "paid_usdc": 0.0})
+            b["paid"] += int(row["n"] or 0)
+            b["paid_usdc"] += float(row["usdc"] or 0)
+        return out
+
+    hour_status = _status_buckets(hour_rows)
+    hour_paid = _real_paid(hour_paid_rows)
+    hour_keys = [
+        (now - timedelta(hours=i)).strftime("%Y-%m-%dT%H")
+        for i in range(23, -1, -1)
+    ]
+    hours_24 = []
+    for key in hour_keys:
+        st = hour_status.get(key, {})
+        pd = hour_paid.get(key, {})
+        hours_24.append({
+            "hour": key,
+            "label": key[11:13] + "h",
+            "visits": st.get("visits", 0),
+            "unpaid": st.get("unpaid", 0),
+            "errors": st.get("errors", 0),
+            "paid": pd.get("paid", 0),
+            "paid_usdc": round(pd.get("paid_usdc", 0.0), 6),
+        })
+
+    day_status = _status_buckets(day_rows)
+    day_paid = _real_paid(day_paid_rows)
+    day_keys = [
+        (now.date() - timedelta(days=i)).isoformat()
+        for i in range(6, -1, -1)
+    ]
+    days_7 = []
+    for key in day_keys:
+        st = day_status.get(key, {})
+        pd = day_paid.get(key, {})
+        days_7.append({
+            "day": key,
+            "label": key[5:],
+            "visits": st.get("visits", 0),
+            "unpaid": st.get("unpaid", 0),
+            "errors": st.get("errors", 0),
+            "paid": pd.get("paid", 0),
+            "paid_usdc": round(pd.get("paid_usdc", 0.0), 6),
+        })
+
+    totals = {
+        "visits": sum(h["visits"] for h in hours_24),
+        "unpaid": sum(h["unpaid"] for h in hours_24),
+        "errors": sum(h["errors"] for h in hours_24),
+        "paid": sum(h["paid"] for h in hours_24),
+        "paid_usdc": round(sum(h["paid_usdc"] for h in hours_24), 6),
+        "visits_7d": sum(d["visits"] for d in days_7),
+        "paid_7d": sum(d["paid"] for d in days_7),
+        "paid_usdc_7d": round(sum(d["paid_usdc"] for d in days_7), 6),
+    }
+
+    def _short_ts(ts: str | None) -> str:
+        if not ts or len(ts) < 19:
+            return ts or ""
+        return ts[11:19]
+
+    feed = []
+    for row in recent:
+        feed.append({
+            "ts": row["ts"],
+            "when": _short_ts(row["ts"]),
+            "route": row["route"],
+            "method": row["method"] or "",
+            "status": row["status"],
+            "amount_usdc": row["amount_usdc"],
+            "payer": row["payer"],
+            "user_agent": (row["user_agent"] or "")[:180],
+        })
+
+    return {
+        "generated_at": now.isoformat(),
+        "hours_24": hours_24,
+        "days_7": days_7,
+        "totals": totals,
+        "feed": feed,
+    }
