@@ -51,6 +51,18 @@ async def intent_sample():
     }
 
 
+@router.get("/intent", description=ROUTE_DESCRIPTIONS["intent"])
+async def intent_get(request: Request):
+    # GET-twin delivery fix (2026-10-09): query params become the body,
+    # or SAMPLE_REQUEST if none were sent (same "listing default" shape
+    # used across every GET-twin fix this day).
+    body = dict(request.query_params) or dict(SAMPLE_REQUEST)
+    return await respond_http(
+        request, body, route="intent", price_str=config.PRICE_INTENT,
+        lookup=lambda: _lookup(body),
+    )
+
+
 @router.post("/intent", description=ROUTE_DESCRIPTIONS["intent"])
 async def intent_post(request: Request):
     try:

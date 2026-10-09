@@ -48,6 +48,18 @@ async def toxicity_sample():
     }
 
 
+@router.get("/toxicity", description=ROUTE_DESCRIPTIONS["toxicity"])
+async def toxicity_get(request: Request):
+    # GET-twin delivery fix (2026-10-09): query params become the body,
+    # or SAMPLE_REQUEST if none were sent (same "listing default" shape
+    # used across every GET-twin fix this day).
+    body = dict(request.query_params) or dict(SAMPLE_REQUEST)
+    return await respond_http(
+        request, body, route="toxicity", price_str=config.PRICE_TOXICITY,
+        lookup=lambda: _lookup(body),
+    )
+
+
 @router.post("/toxicity", description=ROUTE_DESCRIPTIONS["toxicity"])
 async def toxicity_post(request: Request):
     try:

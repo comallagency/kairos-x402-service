@@ -49,6 +49,18 @@ async def sentiment_sample():
     }
 
 
+@router.get("/sentiment", description=ROUTE_DESCRIPTIONS["sentiment"])
+async def sentiment_get(request: Request):
+    # GET-twin delivery fix (2026-10-09): query params become the body,
+    # or SAMPLE_REQUEST if none were sent (same "listing default" shape
+    # used across every GET-twin fix this day).
+    body = dict(request.query_params) or dict(SAMPLE_REQUEST)
+    return await respond_http(
+        request, body, route="sentiment", price_str=config.PRICE_SENTIMENT,
+        lookup=lambda: _lookup(body),
+    )
+
+
 @router.post("/sentiment", description=ROUTE_DESCRIPTIONS["sentiment"])
 async def sentiment_post(request: Request):
     try:

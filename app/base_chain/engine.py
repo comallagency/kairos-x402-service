@@ -59,10 +59,10 @@ def build_rpc_router(spec: BaseRpcSpec) -> APIRouter:
     async def sample():
         return {**spec.sample_output, "x402_receipt": make_receipt(None, UPSTREAM_KIND, 1, 0.0)}
 
-    @router.post(path, description=spec.description, name=spec.slug)
-    async def handler(request: Request):
+    async def _handle(request: Request, body: dict):
         from app.mpp_middleware import current_mpp_verified_payer
 
+        method = request.method
         user_agent = request.headers.get("user-agent")
         payment_payload = getattr(request.state, "payment_payload", None)
         if payment_payload is not None:
@@ -73,24 +73,20 @@ def build_rpc_router(spec: BaseRpcSpec) -> APIRouter:
             payer = current_mpp_verified_payer()
         if not payer:
             db.log_request(
-                route=spec.slug, method="POST", status="payment_failed",
+                route=spec.slug, method=method, status="payment_failed",
                 user_agent=user_agent, error_reason="no_verified_payment",
             )
             return JSONResponse(
                 {"error": {"reason": "payment_required", "detail": "no verified payment for this request"}},
                 status_code=402,
             )
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
         body_excerpt = json.dumps(body)[:2000]
 
         try:
             parsed = spec.input_model(**body)
         except ValidationError as exc:
             db.log_request(
-                route=spec.slug, method="POST", status="error", payer=payer,
+                route=spec.slug, method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt, error_reason="invalid_input",
             )
             return JSONResponse(
@@ -103,7 +99,7 @@ def build_rpc_router(spec: BaseRpcSpec) -> APIRouter:
                 result = await spec.compute(parsed)
         except RpcTimeout as exc:
             db.log_request(
-                route=spec.slug, method="POST", status="error", payer=payer,
+                route=spec.slug, method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt, error_reason=str(exc),
             )
             return JSONResponse(
@@ -112,7 +108,7 @@ def build_rpc_router(spec: BaseRpcSpec) -> APIRouter:
             )
         except RpcComputeError as exc:
             db.log_request(
-                route=spec.slug, method="POST", status="error", payer=payer,
+                route=spec.slug, method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt, error_reason=exc.reason,
             )
             return JSONResponse(
@@ -120,7 +116,7 @@ def build_rpc_router(spec: BaseRpcSpec) -> APIRouter:
             )
         except Exception as exc:
             db.log_request(
-                route=spec.slug, method="POST", status="error", payer=payer,
+                route=spec.slug, method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt, error_reason=str(exc)[:200],
             )
             return JSONResponse(
@@ -129,11 +125,29 @@ def build_rpc_router(spec: BaseRpcSpec) -> APIRouter:
 
         price = effective_price(payer, price_float(spec.price))
         db.log_request(
-            route=spec.slug, method="POST", status="paid", latency_ms=t.elapsed_ms,
+            route=spec.slug, method=method, status="paid", latency_ms=t.elapsed_ms,
             amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
         )
         receipt = make_receipt(None, UPSTREAM_KIND, t.elapsed_ms, price)
         return {**result.model_dump(by_alias=True), "x402_receipt": receipt}
+
+    @router.get(path, description=spec.description, name=f"{spec.slug}_get")
+    async def handler_get(request: Request):
+        # GET-twin delivery fix (2026-10-09, generic across every base_chain
+        # RPC route) - same shape as purecalc/engine.py's own fix the same
+        # day: query params become the body, or the route's own documented
+        # sample_input if none were sent.
+        params = dict(request.query_params)
+        body = params if params else dict(spec.sample_input)
+        return await _handle(request, body)
+
+    @router.post(path, description=spec.description, name=spec.slug)
+    async def handler(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        return await _handle(request, body)
 
     return router
 

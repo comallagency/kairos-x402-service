@@ -122,14 +122,10 @@ async def pdf_sample():
     return {**parsed, "token_count": token_count, "x402_receipt": receipt}
 
 
-@router.post("/pdf", description=ROUTE_DESCRIPTIONS["pdf"])
-async def pdf_extract(request: Request):
+async def _handle_pdf(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000]
 
     try:
@@ -138,7 +134,7 @@ async def pdf_extract(request: Request):
             parsed = parse_pdf(data)
     except PdfError as exc:
         db.log_request(
-            route="pdf", method="POST", status="error", payer=payer,
+            route="pdf", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=exc.reason,
         )
         status_code = 400 if exc.reason in _CALLER_ERROR_REASONS else 502
@@ -147,8 +143,24 @@ async def pdf_extract(request: Request):
     token_count = count_tokens(parsed["markdown"])
     price = effective_price(payer, price_float(config.PRICE_PDF))
     db.log_request(
-        route="pdf", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="pdf", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
     receipt = make_receipt(None, "pdf_parse", t.elapsed_ms, price)
     return {**parsed, "token_count": token_count, "x402_receipt": receipt}
+
+
+@router.get("/pdf", description=ROUTE_DESCRIPTIONS["pdf"])
+async def pdf_extract_get(request: Request):
+    params = dict(request.query_params)
+    body = params if params else {"url": SAMPLE_PDF_URL}
+    return await _handle_pdf(request, body)
+
+
+@router.post("/pdf", description=ROUTE_DESCRIPTIONS["pdf"])
+async def pdf_extract(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_pdf(request, body)

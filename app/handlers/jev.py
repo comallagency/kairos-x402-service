@@ -21,6 +21,25 @@ def _state_text(state) -> str:
     return state if isinstance(state, str) else json.dumps(state)
 
 
+def _query_or_sample(request: Request, sample: dict, json_fields: set) -> dict:
+    # GET-twin delivery fix (2026-10-09): flat query params become the body
+    # (JSON-decoding the fields that are normally nested objects/lists),
+    # or the route's own documented sample input if none were sent.
+    params = dict(request.query_params)
+    if not params:
+        return dict(sample)
+    body = {}
+    for key, value in params.items():
+        if key in json_fields:
+            try:
+                body[key] = json.loads(value)
+            except Exception:
+                body[key] = value
+        else:
+            body[key] = value
+    return body
+
+
 # --- /decide -----------------------------------------------------------------
 
 SAMPLE_DECIDE_STATE = (
@@ -105,21 +124,17 @@ async def decide_sample():
     return SAMPLE_DECIDE_OUTPUT
 
 
-@router.post("/decide", description=ROUTE_DESCRIPTIONS["decide"])
-async def decide(request: Request):
+async def _handle_decide(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000]
 
     state, questions, error = _validate_decide_body(body)
     if error:
         reason, detail = error
         db.log_request(
-            route="decide", method="POST", status="error", payer=payer,
+            route="decide", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=reason,
         )
         return JSONResponse({"error": {"reason": reason, "detail": detail}}, status_code=400)
@@ -129,18 +144,35 @@ async def decide(request: Request):
             data = await ask_jev(state, questions)
     except JevError as exc:
         db.log_request(
-            route="decide", method="POST", status="error", payer=payer,
+            route="decide", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=str(exc)[:200],
         )
         return JSONResponse({"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, status_code=502)
 
     price = effective_price(payer, price_float(config.PRICE_DECIDE))
     db.log_request(
-        route="decide", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="decide", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
     receipt = make_receipt("jev","decision", t.elapsed_ms, price)
     return {"answers": data["answers"], "x402_receipt": receipt}
+
+
+@router.get("/decide", description=ROUTE_DESCRIPTIONS["decide"])
+async def decide_get(request: Request):
+    body = _query_or_sample(
+        request, {"state": SAMPLE_DECIDE_STATE, "questions": SAMPLE_DECIDE_QUESTIONS}, {"questions"}
+    )
+    return await _handle_decide(request, body)
+
+
+@router.post("/decide", description=ROUTE_DESCRIPTIONS["decide"])
+async def decide(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_decide(request, body)
 
 
 # --- /guard --------------------------------------------------------------------
@@ -175,27 +207,23 @@ async def guard_sample():
     return SAMPLE_GUARD_OUTPUT
 
 
-@router.post("/guard", description=ROUTE_DESCRIPTIONS["guard"])
-async def guard(request: Request):
+async def _handle_guard(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000]
 
     user_request = body.get("user_request")
     tool_call = body.get("tool_call")
     if not user_request or not isinstance(user_request, str):
         db.log_request(
-            route="guard", method="POST", status="error", payer=payer,
+            route="guard", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="missing_user_request",
         )
         return JSONResponse({"error": {"reason": "missing_user_request"}}, status_code=400)
     if not tool_call or not isinstance(tool_call, dict):
         db.log_request(
-            route="guard", method="POST", status="error", payer=payer,
+            route="guard", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="missing_tool_call",
         )
         return JSONResponse({"error": {"reason": "missing_tool_call"}}, status_code=400)
@@ -208,7 +236,7 @@ async def guard(request: Request):
             data = await ask_jev(state, questions)
     except JevError as exc:
         db.log_request(
-            route="guard", method="POST", status="error", payer=payer,
+            route="guard", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=str(exc)[:200],
         )
         return JSONResponse({"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, status_code=502)
@@ -216,7 +244,7 @@ async def guard(request: Request):
     answer = data["answers"]["decision"]
     price = effective_price(payer, price_float(config.PRICE_GUARD))
     db.log_request(
-        route="guard", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="guard", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
     receipt = make_receipt("jev","guardrail", t.elapsed_ms, price)
@@ -227,6 +255,21 @@ async def guard(request: Request):
         "confidence": answer.get("confidence"),
         "x402_receipt": receipt,
     }
+
+
+@router.get("/guard", description=ROUTE_DESCRIPTIONS["guard"])
+async def guard_get(request: Request):
+    body = _query_or_sample(request, SAMPLE_GUARD_INPUT, {"tool_call"})
+    return await _handle_guard(request, body)
+
+
+@router.post("/guard", description=ROUTE_DESCRIPTIONS["guard"])
+async def guard(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_guard(request, body)
 
 
 # --- /verify -------------------------------------------------------------------
@@ -260,27 +303,23 @@ async def verify_sample():
     return SAMPLE_VERIFY_OUTPUT
 
 
-@router.post("/verify", description=ROUTE_DESCRIPTIONS["verify"])
-async def verify(request: Request):
+async def _handle_verify(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000]
 
     claim = body.get("claim")
     source = body.get("source")
     if not claim or not isinstance(claim, str):
         db.log_request(
-            route="verify", method="POST", status="error", payer=payer,
+            route="verify", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="missing_claim",
         )
         return JSONResponse({"error": {"reason": "missing_claim"}}, status_code=400)
     if not source or not isinstance(source, str):
         db.log_request(
-            route="verify", method="POST", status="error", payer=payer,
+            route="verify", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="missing_source",
         )
         return JSONResponse({"error": {"reason": "missing_source"}}, status_code=400)
@@ -293,7 +332,7 @@ async def verify(request: Request):
             data = await ask_jev(state, questions)
     except JevError as exc:
         db.log_request(
-            route="verify", method="POST", status="error", payer=payer,
+            route="verify", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=str(exc)[:200],
         )
         return JSONResponse({"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, status_code=502)
@@ -301,7 +340,7 @@ async def verify(request: Request):
     answer = data["answers"]["verdict"]
     price = effective_price(payer, price_float(config.PRICE_VERIFY))
     db.log_request(
-        route="verify", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="verify", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
     receipt = make_receipt("jev","verification", t.elapsed_ms, price)
@@ -312,6 +351,21 @@ async def verify(request: Request):
         "confidence": answer.get("confidence"),
         "x402_receipt": receipt,
     }
+
+
+@router.get("/verify", description=ROUTE_DESCRIPTIONS["verify"])
+async def verify_get(request: Request):
+    body = _query_or_sample(request, SAMPLE_VERIFY_INPUT, set())
+    return await _handle_verify(request, body)
+
+
+@router.post("/verify", description=ROUTE_DESCRIPTIONS["verify"])
+async def verify(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_verify(request, body)
 
 
 # --- /rank ---------------------------------------------------------------------
@@ -343,21 +397,17 @@ async def rank_sample():
     return SAMPLE_RANK_OUTPUT
 
 
-@router.post("/rank", description=ROUTE_DESCRIPTIONS["rank"])
-async def rank(request: Request):
+async def _handle_rank(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000]
 
     query = body.get("query")
     documents = body.get("documents")
     if not query or not isinstance(query, str):
         db.log_request(
-            route="rank", method="POST", status="error", payer=payer,
+            route="rank", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="missing_query",
         )
         return JSONResponse({"error": {"reason": "missing_query"}}, status_code=400)
@@ -368,7 +418,7 @@ async def rank(request: Request):
         or not all(isinstance(d, str) and d for d in documents)
     ):
         db.log_request(
-            route="rank", method="POST", status="error", payer=payer,
+            route="rank", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="invalid_documents",
         )
         return JSONResponse(
@@ -384,7 +434,7 @@ async def rank(request: Request):
             data = await ask_jev(query, questions)
     except JevError as exc:
         db.log_request(
-            route="rank", method="POST", status="error", payer=payer,
+            route="rank", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=str(exc)[:200],
         )
         return JSONResponse({"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, status_code=502)
@@ -401,8 +451,23 @@ async def rank(request: Request):
 
     price = effective_price(payer, price_float(config.PRICE_RANK))
     db.log_request(
-        route="rank", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="rank", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
     receipt = make_receipt("jev","rerank", t.elapsed_ms, price)
     return {"documents": ranked, "x402_receipt": receipt}
+
+
+@router.get("/rank", description=ROUTE_DESCRIPTIONS["rank"])
+async def rank_get(request: Request):
+    body = _query_or_sample(request, SAMPLE_RANK_INPUT, {"documents"})
+    return await _handle_rank(request, body)
+
+
+@router.post("/rank", description=ROUTE_DESCRIPTIONS["rank"])
+async def rank(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_rank(request, body)

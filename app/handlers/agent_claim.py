@@ -85,12 +85,8 @@ async def agent_claim_sample():
     }
 
 
-@router.post("/agent-claim", description=ROUTE_DESCRIPTIONS["agent-claim"])
-async def agent_claim(request: Request):
-    try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
+async def _handle_agent_claim(request: Request, payload: dict):
+    method = request.method
     url = str(payload.get("url") or "").strip()
     name = str(payload.get("name") or url)[:120]
     if not url:
@@ -129,7 +125,7 @@ async def agent_claim(request: Request):
     price = price_float(config.PRICE_AGENT_CLAIM)
     db.log_request(
         route="agent-claim",
-        method="POST",
+        method=method,
         status="paid",
         latency_ms=timer.elapsed_ms,
         amount_usdc=price,
@@ -143,3 +139,19 @@ async def agent_claim(request: Request):
         "badge": f"{config.BASE_URL}/verified-agents/{claim_id}.svg",
         "x402_receipt": make_receipt(None, "agent-claim", timer.elapsed_ms, price),
     }
+
+
+@router.get("/agent-claim", description=ROUTE_DESCRIPTIONS["agent-claim"])
+async def agent_claim_get(request: Request):
+    params = dict(request.query_params)
+    payload = params if params else {"url": config.BASE_URL}
+    return await _handle_agent_claim(request, payload)
+
+
+@router.post("/agent-claim", description=ROUTE_DESCRIPTIONS["agent-claim"])
+async def agent_claim(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    return await _handle_agent_claim(request, payload)

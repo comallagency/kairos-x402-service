@@ -235,21 +235,13 @@ async def discover_sample():
     }
 
 
-@router.post("/discover", tags=KIT_TAGS + ["discovery", "mcp", "semantic"])
-async def discover_paid(request: Request):
+async def _handle_discover(request: Request, body):
+    method = request.method
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        db.log_request(
-            route="discover", method="POST", status="error",
-            user_agent=user_agent, error_reason="invalid_json",
-        )
-        return _body_error("invalid_json", "body must be a JSON object")
 
     if not isinstance(body, dict):
         db.log_request(
-            route="discover", method="POST", status="error",
+            route="discover", method=method, status="error",
             user_agent=user_agent, error_reason="invalid_body",
         )
         return _body_error("invalid_body", "body must be a JSON object")
@@ -261,7 +253,7 @@ async def discover_paid(request: Request):
             q = alt
     if not isinstance(q, str) or not q.strip():
         db.log_request(
-            route="discover", method="POST", status="error",
+            route="discover", method=method, status="error",
             user_agent=user_agent, error_reason="missing_q",
         )
         return _body_error("missing_q", "q is required and must be a non-empty string")
@@ -277,7 +269,7 @@ async def discover_paid(request: Request):
         result = await _run_discover(q.strip()[:500], max_results, float(threshold))
     except OllamaError as exc:
         db.log_request(
-            route="discover", method="POST", status="error",
+            route="discover", method=method, status="error",
             user_agent=user_agent, error_reason=str(exc)[:200],
         )
         return JSONResponse(
@@ -285,7 +277,38 @@ async def discover_paid(request: Request):
         )
 
     db.log_request(
-        route="discover", method="POST", status="paid",
+        route="discover", method=method, status="paid",
         user_agent=user_agent, body_excerpt=q[:2048],
     )
     return result
+
+
+@router.get("/discover", tags=KIT_TAGS + ["discovery", "mcp", "semantic"])
+async def discover_get(request: Request):
+    params = dict(request.query_params)
+    body = params if params else {"q": _SAMPLE_QUERY}
+    if "max_results" in body:
+        try:
+            body["max_results"] = int(body["max_results"])
+        except (TypeError, ValueError):
+            pass
+    if "min_similarity" in body:
+        try:
+            body["min_similarity"] = float(body["min_similarity"])
+        except (TypeError, ValueError):
+            pass
+    return await _handle_discover(request, body)
+
+
+@router.post("/discover", tags=KIT_TAGS + ["discovery", "mcp", "semantic"])
+async def discover_paid(request: Request):
+    user_agent = request.headers.get("user-agent")
+    try:
+        body = await request.json()
+    except Exception:
+        db.log_request(
+            route="discover", method="POST", status="error",
+            user_agent=user_agent, error_reason="invalid_json",
+        )
+        return _body_error("invalid_json", "body must be a JSON object")
+    return await _handle_discover(request, body)

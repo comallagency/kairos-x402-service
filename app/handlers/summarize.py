@@ -120,14 +120,10 @@ async def summarize_sample():
     }
 
 
-@router.post("/summarize", description=ROUTE_DESCRIPTIONS["summarize"])
-async def summarize(request: Request):
+async def _handle_summarize(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000]
     length = body.get("length", "medium")
     if length not in _LENGTH_TARGETS:
@@ -139,7 +135,7 @@ async def summarize(request: Request):
             summary, model_served, fallback_used = await _summarize_content(content, length)
     except SummarizeError as exc:
         db.log_request(
-            route="summarize", method="POST", status="error", payer=payer,
+            route="summarize", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=exc.reason,
         )
         status_code = 400 if exc.reason in _CALLER_ERROR_REASONS else 502
@@ -147,8 +143,24 @@ async def summarize(request: Request):
 
     price = effective_price(payer, price_float(config.PRICE_SUMMARIZE))
     db.log_request(
-        route="summarize", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="summarize", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
     receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price, fallback_used=fallback_used)
     return {"summary": summary, "length": length, "sources": sources, "x402_receipt": receipt}
+
+
+@router.get("/summarize", description=ROUTE_DESCRIPTIONS["summarize"])
+async def summarize_get(request: Request):
+    params = dict(request.query_params)
+    body = params if params else {"text": SAMPLE_TEXT, "length": "short"}
+    return await _handle_summarize(request, body)
+
+
+@router.post("/summarize", description=ROUTE_DESCRIPTIONS["summarize"])
+async def summarize(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_summarize(request, body)

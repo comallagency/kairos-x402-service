@@ -61,14 +61,14 @@ def build_compute_router(spec: ComputeSpec) -> APIRouter:
     async def sample():
         return {**spec.sample_output, "x402_receipt": make_receipt(None, UPSTREAM_KIND, 1, 0.0)}
 
-    @router.post(path, description=spec.description, name=spec.slug)
-    async def handler(request: Request):
+    async def _handle(request: Request, body: dict):
         # Lazy import: app.mpp_middleware -> app.capacity -> app.x402_setup's
         # _build_route_configs_uncached() lazily imports app.purecalc.engine
         # (this module) to call build_compute_route_configs() - a top-level
         # import here would be circular during this module's own import.
         from app.mpp_middleware import current_mpp_verified_payer
 
+        method = request.method
         user_agent = request.headers.get("user-agent")
         payment_payload = getattr(request.state, "payment_payload", None)
         if payment_payload is not None:
@@ -85,24 +85,20 @@ def build_compute_router(spec: ComputeSpec) -> APIRouter:
             # suspenders layer added after the 2026-10-02 incident, not the
             # primary gate.
             db.log_request(
-                route=spec.slug, method="POST", status="payment_failed",
+                route=spec.slug, method=method, status="payment_failed",
                 user_agent=user_agent, error_reason="no_verified_payment",
             )
             return JSONResponse(
                 {"error": {"reason": "payment_required", "detail": "no verified payment for this request"}},
                 status_code=402,
             )
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
         body_excerpt = json.dumps(body)[:2000]
 
         try:
             parsed = spec.input_model(**body)
         except ValidationError as exc:
             db.log_request(
-                route=spec.slug, method="POST", status="error", payer=payer,
+                route=spec.slug, method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt, error_reason="invalid_input",
             )
             return JSONResponse(
@@ -115,7 +111,7 @@ def build_compute_router(spec: ComputeSpec) -> APIRouter:
                 result = spec.compute(parsed)
         except ComputeError as exc:
             db.log_request(
-                route=spec.slug, method="POST", status="error", payer=payer,
+                route=spec.slug, method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt, error_reason=exc.reason,
             )
             return JSONResponse(
@@ -123,7 +119,7 @@ def build_compute_router(spec: ComputeSpec) -> APIRouter:
             )
         except Exception as exc:
             db.log_request(
-                route=spec.slug, method="POST", status="error", payer=payer,
+                route=spec.slug, method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt, error_reason=str(exc)[:200],
             )
             return JSONResponse(
@@ -132,11 +128,34 @@ def build_compute_router(spec: ComputeSpec) -> APIRouter:
 
         price = effective_price(payer, price_float(spec.price))
         db.log_request(
-            route=spec.slug, method="POST", status="paid", latency_ms=t.elapsed_ms,
+            route=spec.slug, method=method, status="paid", latency_ms=t.elapsed_ms,
             amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
         )
         receipt = make_receipt(None, UPSTREAM_KIND, t.elapsed_ms, price)
         return {**result.model_dump(by_alias=True), "x402_receipt": receipt}
+
+    @router.get(path, description=spec.description, name=f"{spec.slug}_get")
+    async def handler_get(request: Request):
+        # GET-twin delivery fix (2026-10-09, generic across every
+        # pure-compute route): query params become the body directly - if
+        # none were sent, fall back to the route's own documented
+        # sample_input (same "listing default" shape used by search.py/
+        # translate.py's GET twins the same day). Works as-is for every
+        # flat-field spec; a spec expecting a list/nested-object field via
+        # bare query params still 422s through the normal invalid_input
+        # path below rather than crashing - no worse than today, strictly
+        # better than the 404/405 this replaces.
+        params = dict(request.query_params)
+        body = params if params else dict(spec.sample_input)
+        return await _handle(request, body)
+
+    @router.post(path, description=spec.description, name=spec.slug)
+    async def handler(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        return await _handle(request, body)
 
     return router
 

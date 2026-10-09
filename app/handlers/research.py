@@ -460,6 +460,13 @@ async def _paid(request: Request, body: dict):
     }
 
 
+@router.get("/research", description=ROUTE_DESCRIPTIONS["research"])
+async def research_get(request: Request):
+    params = dict(request.query_params)
+    body = params if params else {"query": SAMPLE_RESPONSE["query"]}
+    return await _paid(request, body)
+
+
 @router.post("/research", description=ROUTE_DESCRIPTIONS["research"])
 async def research_post(request: Request):
     try:
