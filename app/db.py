@@ -867,6 +867,47 @@ def chain_buyer_stats(network: str) -> dict:
     return {"distinct": distinct, "returning": returning, "return_rate": return_rate}
 
 
+def chain_revenue_since_split(network: str, hours: int) -> dict:
+    """Same filter as chain_revenue_since() (is_mechanical=0), split into
+    client vs AUDITOR_WALLETS revenue (2026-10-09 arbitration) - an
+    auditor's payment is still real revenue, counted in full, just reported
+    separately rather than folded into the client number."""
+    auditors = _auditor_wallets()
+    with cursor() as cur:
+        cur.execute(
+            "SELECT from_address, amount_usdc FROM chain_payments "
+            "WHERE network=? AND block_time >= ? AND is_mechanical=0",
+            (network, _since(hours)),
+        )
+        rows = cur.fetchall()
+    clients = sum(r["amount_usdc"] for r in rows if (r["from_address"] or "").lower() not in auditors)
+    aud = sum(r["amount_usdc"] for r in rows if (r["from_address"] or "").lower() in auditors)
+    return {"clients": round(clients, 6), "auditors": round(aud, 6)}
+
+
+def chain_buyer_stats_split(network: str) -> dict:
+    """Same filter and shape as chain_buyer_stats(), split into clients vs
+    AUDITOR_WALLETS - auditors never count toward the buyer total
+    (2026-10-09 arbitration)."""
+    auditors = _auditor_wallets()
+    with cursor() as cur:
+        cur.execute(
+            "SELECT from_address, COUNT(*) AS n FROM chain_payments "
+            "WHERE network=? AND is_mechanical=0 GROUP BY from_address",
+            (network,),
+        )
+        rows = cur.fetchall()
+
+    def _stats(rs: list) -> dict:
+        distinct = len(rs)
+        returning = sum(1 for r in rs if r["n"] >= 2)
+        return {"distinct": distinct, "returning": returning, "return_rate": (returning / distinct) if distinct else 0.0}
+
+    client_rows = [r for r in rows if (r["from_address"] or "").lower() not in auditors]
+    auditor_rows = [r for r in rows if (r["from_address"] or "").lower() in auditors]
+    return {"clients": _stats(client_rows), "auditors": _stats(auditor_rows)}
+
+
 def chain_last_payment_at(network: str) -> str | None:
     """Excludes MECHANICAL_WALLETS - see chain_revenue_since()."""
     with cursor() as cur:
@@ -1496,6 +1537,40 @@ def _mechanical_wallets() -> set[str]:
     return {w.strip().lower() for w in raw.split(",") if w.strip()}
 
 
+def _auditor_wallets() -> set[str]:
+    """Known third-party x402 auditor/trust-score crawlers (2026-10-09
+    arbitration) - NOT mechanical (their payments are real revenue, never
+    excluded from totals), but reported separately from client revenue and
+    excluded from the buyer count. See config.AUDITOR_WALLETS."""
+    raw = getattr(config, "AUDITOR_WALLETS", "") or ""
+    return {w.strip().lower() for w in raw.split(",") if w.strip()}
+
+
+def auditor_wallets() -> set[str]:
+    """Public wrapper - see _auditor_wallets()."""
+    return _auditor_wallets()
+
+
+def _is_test_identity(payer: str | None, user_agent: str | None) -> bool:
+    """A row written by TestClient-based testing (pytest's own suite, or an
+    ad-hoc diagnostic script), never a real request: Starlette/httpx's
+    TestClient defaults to User-Agent "testclient" when none is set, and
+    this session's own diagnostics mocked the verified payer as
+    "0xTESTPAYER". Found 2026-10-09: 35 such rows had landed in production's
+    requests.db (tests/conftest.py now redirects DB_PATH before any test
+    runs, so this is a closed hole going forward) - excluded here so any
+    row that already exists, or any future one from a script that forgot to
+    mock DB_PATH, never counts as revenue or a buyer."""
+    if (payer or "").strip().lower() == "0xtestpayer":
+        return True
+    return (user_agent or "") == "testclient"
+
+
+def is_test_identity(payer: str | None, user_agent: str | None) -> bool:
+    """Public wrapper - see _is_test_identity()."""
+    return _is_test_identity(payer, user_agent)
+
+
 def mechanical_wallets() -> set[str]:
     """Public wrapper for app/admin.py's GET /admin/live aggregation
     (2026-09-30) - _compute_agg_24h()/_live_classify() were the one place
@@ -1545,6 +1620,7 @@ def history_7d() -> list[dict]:
         return cached
 
     mechanical = _mechanical_wallets()
+    auditors = _auditor_wallets()
     with cursor() as cur:
         cur.execute(
             "SELECT ts, client_ip, user_agent, status, payer FROM requests WHERE ts >= ?",
@@ -1554,21 +1630,29 @@ def history_7d() -> list[dict]:
 
     by_day: dict[str, dict] = {}
     for row in rows:
+        if _is_test_identity(row["payer"], row["user_agent"]):
+            continue
         day = row["ts"][:10]
-        bucket = by_day.setdefault(day, {"requests_total": 0, "identities": set(), "payments_real": 0})
+        bucket = by_day.setdefault(
+            day, {"requests_total": 0, "identities": set(), "payments_real": 0, "payments_auditors": 0}
+        )
         bucket["requests_total"] += 1
         ip = row["client_ip"]
         if ip and ip != config.VPS_PUBLIC_IP and not _is_scanner_ua(row["user_agent"]):
             bucket["identities"].add(ip)
         payer = (row["payer"] or "").strip().lower()
         if row["status"] == "paid" and payer and payer not in mechanical:
-            bucket["payments_real"] += 1
+            if payer in auditors:
+                bucket["payments_auditors"] += 1
+            else:
+                bucket["payments_real"] += 1
 
     result = [
         {
             "day": day,
             "requests_total": bucket["requests_total"],
             "distinct_identities": len(bucket["identities"]),
+            "payments_auditors": bucket["payments_auditors"],
             "payments_real": bucket["payments_real"],
         }
         for day, bucket in sorted(by_day.items())
@@ -1665,6 +1749,7 @@ def daily_overview(days: int = 30) -> list[dict]:
     full funnel, plus nginx-derived c_404/c_5xx (daily_route_stats - the
     genuine unmatched-path/backend-down cases requests can never see)."""
     mechanical = _mechanical_wallets()
+    auditors = _auditor_wallets()
     since = _since(24 * days)
     with cursor() as cur:
         cur.execute(
@@ -1675,10 +1760,13 @@ def daily_overview(days: int = 30) -> list[dict]:
 
     by_day: dict[str, dict] = {}
     for row in rows:
+        if _is_test_identity(row["payer"], row["user_agent"]):
+            continue
         day = row["ts"][:10]
         b = by_day.setdefault(day, {
             "requests_total": 0, "identities": set(), "c_402": 0,
-            "payment_attempts": 0, "payments_success": 0, "payment_failures": 0,
+            "payment_attempts": 0, "payments_success": 0, "payments_success_auditors": 0,
+            "payment_failures": 0,
         })
         b["requests_total"] += 1
         ip = row["client_ip"]
@@ -1691,7 +1779,10 @@ def daily_overview(days: int = 30) -> list[dict]:
             b["payment_attempts"] += 1
             payer = (row["payer"] or "").strip().lower()
             if payer and payer not in mechanical:
-                b["payments_success"] += 1
+                if payer in auditors:
+                    b["payments_success_auditors"] += 1
+                else:
+                    b["payments_success"] += 1
         elif status == "payment_failed":
             b["payment_attempts"] += 1
             b["payment_failures"] += 1
@@ -1704,13 +1795,20 @@ def daily_overview(days: int = 30) -> list[dict]:
         )
         chain_rows = cur.fetchall()
     revenue_by_day: dict[str, float] = {}
+    revenue_auditors_by_day: dict[str, float] = {}
     payers_by_day: dict[str, set] = {}
+    payers_auditors_by_day: dict[str, set] = {}
     for r in chain_rows:
         day = (r["block_time"] or "")[:10]
         if not day:
             continue
-        revenue_by_day[day] = revenue_by_day.get(day, 0.0) + r["amount_usdc"]
-        payers_by_day.setdefault(day, set()).add((r["from_address"] or "").lower())
+        addr = (r["from_address"] or "").lower()
+        if addr in auditors:
+            revenue_auditors_by_day[day] = revenue_auditors_by_day.get(day, 0.0) + r["amount_usdc"]
+            payers_auditors_by_day.setdefault(day, set()).add(addr)
+        else:
+            revenue_by_day[day] = revenue_by_day.get(day, 0.0) + r["amount_usdc"]
+            payers_by_day.setdefault(day, set()).add(addr)
 
     with cursor() as cur:
         cur.execute(
@@ -1732,10 +1830,14 @@ def daily_overview(days: int = 30) -> list[dict]:
     for day in sorted(all_days):
         b = by_day.get(day, {
             "requests_total": 0, "identities": set(), "c_402": 0,
-            "payment_attempts": 0, "payments_success": 0, "payment_failures": 0,
+            "payment_attempts": 0, "payments_success": 0, "payments_success_auditors": 0,
+            "payment_failures": 0,
         })
+        # "buyers" (total/new/returning) is clients only - auditors never
+        # count toward the buyer total (2026-10-09 arbitration).
         payers = payers_by_day.get(day, set())
         new_buyers = sum(1 for p in payers if first_seen.get(p) == day)
+        payers_auditors = payers_auditors_by_day.get(day, set())
         nginx = nginx_by_day.get(day, {})
         result.append({
             "day": day,
@@ -1745,11 +1847,14 @@ def daily_overview(days: int = 30) -> list[dict]:
             "c_402": b["c_402"],
             "payment_attempts": b["payment_attempts"],
             "payments_success": b["payments_success"],
+            "payments_success_auditors": b.get("payments_success_auditors", 0),
             "payment_failures": b["payment_failures"],
             "revenue_usdc": round(revenue_by_day.get(day, 0.0), 6),
+            "revenue_usdc_auditors": round(revenue_auditors_by_day.get(day, 0.0), 6),
             "buyers_total": len(payers),
             "buyers_new": new_buyers,
             "buyers_returning": len(payers) - new_buyers,
+            "buyers_auditors": len(payers_auditors),
             "c_404": nginx.get("c_404", 0),
             "c_5xx": nginx.get("c_5xx", 0),
         })
@@ -1772,14 +1877,15 @@ def day_detail(date: str) -> dict:
             (day_start, day_end),
         )
         paid_rows = cur.fetchall()
+    auditors = _auditor_wallets()
     buyers = []
     for r in paid_rows:
         payer = (r["payer"] or "").strip().lower()
-        if not payer or payer in mechanical:
+        if not payer or payer in mechanical or _is_test_identity(r["payer"], r["user_agent"]):
             continue
         buyers.append({
             "wallet": payer, "route": r["route"], "amount_usdc": r["amount_usdc"],
-            "user_agent": r["user_agent"], "ts": r["ts"],
+            "user_agent": r["user_agent"], "ts": r["ts"], "is_auditor": payer in auditors,
         })
 
     with cursor() as cur:
@@ -1836,7 +1942,11 @@ def daily_top_summary() -> dict:
     """The 4 headline numbers for the top of /admin/daily: today's revenue,
     today's buyers, 7-day revenue (all on-chain networks combined, excluding
     MECHANICAL_WALLETS - same rule as everywhere else on this page), and the
-    latest agenteconomy.report rating we've recorded."""
+    latest agenteconomy.report rating we've recorded. 2026-10-09 arbitration:
+    revenue_today_usdc/buyers_today/revenue_7d_usdc are clients only -
+    AUDITOR_WALLETS revenue/buyers are split into their own _auditors
+    fields, still counted, never folded into the client numbers."""
+    auditors = _auditor_wallets()
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     with cursor() as cur:
@@ -1846,16 +1956,22 @@ def daily_top_summary() -> dict:
             (f"{today}%",),
         )
         today_rows = cur.fetchall()
-    revenue_today = sum(r["amount_usdc"] for r in today_rows)
-    buyers_today = len({(r["from_address"] or "").lower() for r in today_rows})
+    client_today_rows = [r for r in today_rows if (r["from_address"] or "").lower() not in auditors]
+    auditor_today_rows = [r for r in today_rows if (r["from_address"] or "").lower() in auditors]
+    revenue_today = sum(r["amount_usdc"] for r in client_today_rows)
+    revenue_today_auditors = sum(r["amount_usdc"] for r in auditor_today_rows)
+    buyers_today = len({(r["from_address"] or "").lower() for r in client_today_rows})
+    buyers_today_auditors = len({(r["from_address"] or "").lower() for r in auditor_today_rows})
 
     with cursor() as cur:
         cur.execute(
-            "SELECT COALESCE(SUM(amount_usdc), 0) AS total FROM chain_payments "
+            "SELECT amount_usdc, from_address FROM chain_payments "
             "WHERE block_time >= ? AND is_mechanical=0",
             (_since(24 * 7),),
         )
-        revenue_7d = cur.fetchone()["total"]
+        week_rows = cur.fetchall()
+    revenue_7d = sum(r["amount_usdc"] for r in week_rows if (r["from_address"] or "").lower() not in auditors)
+    revenue_7d_auditors = sum(r["amount_usdc"] for r in week_rows if (r["from_address"] or "").lower() in auditors)
 
     with cursor() as cur:
         cur.execute(
@@ -1867,8 +1983,11 @@ def daily_top_summary() -> dict:
 
     return {
         "revenue_today_usdc": round(revenue_today, 6),
+        "revenue_today_usdc_auditors": round(revenue_today_auditors, 6),
         "buyers_today": buyers_today,
+        "buyers_today_auditors": buyers_today_auditors,
         "revenue_7d_usdc": round(revenue_7d, 6),
+        "revenue_7d_usdc_auditors": round(revenue_7d_auditors, 6),
         "agenteconomy_rating": rating,
     }
 
@@ -1903,8 +2022,12 @@ def suivi_snapshot() -> dict:
     Cheap GROUP BY on idx_requests_ts — never walks 24h rows in Python and
     never shares a cache with collect_dashboard_data / /admin/data.json, so
     polling this page cannot revive the 2026-10-02 CPU incident.
-    Paid totals exclude MECHANICAL_WALLETS the same way as history_7d()."""
+    Paid totals exclude MECHANICAL_WALLETS the same way as history_7d();
+    auditor payments (AUDITOR_WALLETS) and test rows (payer='0xTESTPAYER')
+    are split out of "paid"/"paid_usdc" into their own fields rather than
+    counted as client revenue - see _real_paid()."""
     mechanical = _mechanical_wallets()
+    auditors = _auditor_wallets()
     since_24 = _since(24)
     since_7d = _since(24 * 7)
     now = datetime.now(timezone.utc)
@@ -1971,11 +2094,17 @@ def suivi_snapshot() -> dict:
         out: dict[str, dict] = {}
         for row in rows:
             payer = (row["payer"] or "").strip().lower()
-            if not payer or payer in mechanical:
+            if not payer or payer in mechanical or payer == "0xtestpayer":
                 continue
-            b = out.setdefault(row["bucket"], {"paid": 0, "paid_usdc": 0.0})
-            b["paid"] += int(row["n"] or 0)
-            b["paid_usdc"] += float(row["usdc"] or 0)
+            b = out.setdefault(
+                row["bucket"], {"paid": 0, "paid_usdc": 0.0, "paid_auditors": 0, "paid_usdc_auditors": 0.0}
+            )
+            if payer in auditors:
+                b["paid_auditors"] += int(row["n"] or 0)
+                b["paid_usdc_auditors"] += float(row["usdc"] or 0)
+            else:
+                b["paid"] += int(row["n"] or 0)
+                b["paid_usdc"] += float(row["usdc"] or 0)
         return out
 
     hour_status = _status_buckets(hour_rows)
@@ -1996,6 +2125,8 @@ def suivi_snapshot() -> dict:
             "errors": st.get("errors", 0),
             "paid": pd.get("paid", 0),
             "paid_usdc": round(pd.get("paid_usdc", 0.0), 6),
+            "paid_auditors": pd.get("paid_auditors", 0),
+            "paid_usdc_auditors": round(pd.get("paid_usdc_auditors", 0.0), 6),
         })
 
     day_status = _status_buckets(day_rows)
@@ -2016,6 +2147,8 @@ def suivi_snapshot() -> dict:
             "errors": st.get("errors", 0),
             "paid": pd.get("paid", 0),
             "paid_usdc": round(pd.get("paid_usdc", 0.0), 6),
+            "paid_auditors": pd.get("paid_auditors", 0),
+            "paid_usdc_auditors": round(pd.get("paid_usdc_auditors", 0.0), 6),
         })
 
     totals = {
