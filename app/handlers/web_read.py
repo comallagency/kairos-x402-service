@@ -49,14 +49,10 @@ async def web_read_sample():
     return {**result, "token_count": token_count, "x402_receipt": receipt}
 
 
-@router.post("/web-read", description=ROUTE_DESCRIPTIONS["web-read"])
-async def web_read(request: Request):
+async def _handle_web_read(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000]
     url = body.get("url")
 
@@ -65,7 +61,7 @@ async def web_read(request: Request):
             result = await _read_url(url)
     except WebReadError as exc:
         db.log_request(
-            route="web-read", method="POST", status="error", payer=payer,
+            route="web-read", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=exc.reason,
         )
         status_code = 400 if exc.reason in ("missing_url", "invalid_url", "no_extractable_content") else 502
@@ -74,8 +70,24 @@ async def web_read(request: Request):
     token_count = count_tokens(result["markdown"])
     price = effective_price(payer, price_float(config.PRICE_WEB_READ))
     db.log_request(
-        route="web-read", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="web-read", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
     receipt = make_receipt(None, "web_fetch", t.elapsed_ms, price, sources_read=1)
     return {**result, "token_count": token_count, "x402_receipt": receipt}
+
+
+@router.get("/web-read", description=ROUTE_DESCRIPTIONS["web-read"])
+async def web_read_get(request: Request):
+    params = dict(request.query_params)
+    body = params if params else {"url": SAMPLE_URL}
+    return await _handle_web_read(request, body)
+
+
+@router.post("/web-read", description=ROUTE_DESCRIPTIONS["web-read"])
+async def web_read(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_web_read(request, body)

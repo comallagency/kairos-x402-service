@@ -50,20 +50,16 @@ async def jobs_sample_result():
     return _sample_job_result_body()
 
 
-@router.post("/jobs", description=ROUTE_DESCRIPTIONS["jobs"])
-async def create_job(request: Request):
+async def _handle_create_job(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)
     subject = body.get("subject")
 
     if not subject:
         db.log_request(
-            route="jobs", method="POST", status="error", payer=payer,
+            route="jobs", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt,
             error_reason="missing_subject",
         )
@@ -75,10 +71,26 @@ async def create_job(request: Request):
     eta_seconds = (position + 1) * JOB_POLL_SLOT_SECONDS
 
     db.log_request(
-        route="jobs", method="POST", status="paid", amount_usdc=price, payer=payer,
+        route="jobs", method=method, status="paid", amount_usdc=price, payer=payer,
         user_agent=user_agent, body_excerpt=body_excerpt,
     )
     return {"job_id": job_id, "eta_seconds": eta_seconds}
+
+
+@router.get("/jobs", description=ROUTE_DESCRIPTIONS["jobs"])
+async def create_job_get(request: Request):
+    params = dict(request.query_params)
+    body = params if params else {"subject": "Example Corp"}
+    return await _handle_create_job(request, body)
+
+
+@router.post("/jobs", description=ROUTE_DESCRIPTIONS["jobs"])
+async def create_job(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_create_job(request, body)
 
 
 @router.post("/jobs/{job_id}", openapi_extra={"security": []})

@@ -48,6 +48,18 @@ async def pii_check_sample():
     }
 
 
+@router.get("/pii-check", description=ROUTE_DESCRIPTIONS["pii-check"])
+async def pii_check_get(request: Request):
+    # GET-twin delivery fix (2026-10-09): query params become the body,
+    # or SAMPLE_REQUEST if none were sent (same "listing default" shape
+    # used across every GET-twin fix this day).
+    body = dict(request.query_params) or dict(SAMPLE_REQUEST)
+    return await respond_http(
+        request, body, route="pii-check", price_str=config.PRICE_PII_CHECK,
+        lookup=lambda: _lookup(body),
+    )
+
+
 @router.post("/pii-check", description=ROUTE_DESCRIPTIONS["pii-check"])
 async def pii_check_post(request: Request):
     try:

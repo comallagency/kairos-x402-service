@@ -300,19 +300,15 @@ def _validate_body(body: dict) -> tuple[str, list, int] | tuple[None, None, None
     return model, messages, _capped_max_tokens(body.get("max_tokens"))
 
 
-@router.post("/v1/chat/completions", description=ROUTE_DESCRIPTIONS["llm-gateway"])
-async def chat_completions(request: Request):
+async def _handle_chat_completions(request: Request, body):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000] if isinstance(body, dict) else ""
 
     if isinstance(body, dict) and body.get("stream"):
         db.log_request(
-            route="v1/chat/completions", method="POST", status="error", payer=payer,
+            route="v1/chat/completions", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="streaming_not_supported",
         )
         return JSONResponse(
@@ -324,7 +320,7 @@ async def chat_completions(request: Request):
     model, messages, capped_max_tokens = _validate_body(body)
     if model is None:
         db.log_request(
-            route="v1/chat/completions", method="POST", status="error", payer=payer,
+            route="v1/chat/completions", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="invalid_request",
         )
         return JSONResponse(
@@ -334,7 +330,7 @@ async def chat_completions(request: Request):
     if model not in priced:
         reason, detail = await _unpriced_model_error(model)
         db.log_request(
-            route="v1/chat/completions", method="POST", status="error", payer=payer,
+            route="v1/chat/completions", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=reason,
         )
         return JSONResponse({"error": {"reason": reason, "detail": detail}}, status_code=400)
@@ -346,7 +342,7 @@ async def chat_completions(request: Request):
             data = await asyncio.wait_for(chat_completion_raw(model, messages, capped_max_tokens), timeout=GLOBAL_TIMEOUT_S)
     except asyncio.TimeoutError:
         db.log_request(
-            route="v1/chat/completions", method="POST", status="error", payer=payer,
+            route="v1/chat/completions", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="upstream_timeout",
         )
         return JSONResponse(
@@ -355,7 +351,7 @@ async def chat_completions(request: Request):
         )
     except OpenRouterError as exc:
         db.log_request(
-            route="v1/chat/completions", method="POST", status="error", payer=payer,
+            route="v1/chat/completions", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=str(exc)[:200],
         )
         return JSONResponse({"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, status_code=502)
@@ -380,7 +376,7 @@ async def chat_completions(request: Request):
     billed = effective_price(payer, settle_amount)
 
     db.log_request(
-        route="v1/chat/completions", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="v1/chat/completions", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=billed, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
         upstream_cost_usd=real_cost, margin_usd=margin,
     )
@@ -393,3 +389,32 @@ async def chat_completions(request: Request):
     if scheme == "upto":
         set_settlement_overrides(fast_response, {"amount": f"${settle_amount:.6f}"})
     return fast_response
+
+
+@router.get("/v1/chat/completions", description=ROUTE_DESCRIPTIONS["llm-gateway"])
+async def chat_completions_get(request: Request):
+    # GET-twin delivery fix (2026-10-09): still OpenRouter-only, same models
+    # GET /v1/models already lists - no Anthropic key, no new upstream, just
+    # a delivering handler for a GET that already accepts payment. A bare
+    # GET with no params replays SAMPLE_REQUEST; model/prompt params build a
+    # single-user-message request.
+    params = dict(request.query_params)
+    if not params:
+        body = dict(SAMPLE_REQUEST)
+    else:
+        body = {
+            "model": params.get("model", SAMPLE_REQUEST["model"]),
+            "messages": [{"role": "user", "content": params.get("prompt") or params.get("q") or "Say OK."}],
+        }
+        if "max_tokens" in params:
+            body["max_tokens"] = params["max_tokens"]
+    return await _handle_chat_completions(request, body)
+
+
+@router.post("/v1/chat/completions", description=ROUTE_DESCRIPTIONS["llm-gateway"])
+async def chat_completions(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_chat_completions(request, body)

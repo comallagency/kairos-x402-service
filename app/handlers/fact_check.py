@@ -252,19 +252,15 @@ async def fact_check_sample():
     return FACT_CHECK_SAMPLE_RESPONSE
 
 
-@router.post("/fact-check", description=ROUTE_DESCRIPTIONS["fact-check"])
-async def fact_check(request: Request):
+async def _handle_fact_check(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000]
     claim = body.get("claim")
     if not claim or not isinstance(claim, str):
         db.log_request(
-            route="fact-check", method="POST", status="error", payer=payer,
+            route="fact-check", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="missing_claim",
         )
         return JSONResponse({"error": {"reason": "missing_claim"}}, status_code=400)
@@ -274,7 +270,7 @@ async def fact_check(request: Request):
             result, model_served, sources_read, queries_run = await _check_claim(claim)
     except FactCheckError as exc:
         db.log_request(
-            route="fact-check", method="POST", status="error", payer=payer,
+            route="fact-check", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=exc.reason,
         )
         status_code = 400 if exc.reason == "no_sources_found" else 502
@@ -282,7 +278,7 @@ async def fact_check(request: Request):
 
     price = effective_price(payer, price_float(config.PRICE_FACT_CHECK))
     db.log_request(
-        route="fact-check", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="fact-check", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
     receipt = make_receipt(
@@ -290,3 +286,19 @@ async def fact_check(request: Request):
         searches_run=queries_run, sources_read=sources_read,
     )
     return {"claim": claim, **result, "x402_receipt": receipt}
+
+
+@router.get("/fact-check", description=ROUTE_DESCRIPTIONS["fact-check"])
+async def fact_check_get(request: Request):
+    params = dict(request.query_params)
+    body = params if params else {"claim": SAMPLE_CLAIM}
+    return await _handle_fact_check(request, body)
+
+
+@router.post("/fact-check", description=ROUTE_DESCRIPTIONS["fact-check"])
+async def fact_check(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_fact_check(request, body)

@@ -132,19 +132,15 @@ async def extract_sample():
     }
 
 
-@router.post("/extract", description=ROUTE_DESCRIPTIONS["extract"])
-async def extract(request: Request):
+async def _handle_extract(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000]
     schema = body.get("schema")
     if not schema or not isinstance(schema, dict):
         db.log_request(
-            route="extract", method="POST", status="error", payer=payer,
+            route="extract", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="missing_schema",
         )
         return JSONResponse({"error": {"reason": "missing_schema"}}, status_code=400)
@@ -155,7 +151,7 @@ async def extract(request: Request):
             data, model_served, missing_fields, fallback_used = await _run_extract(content, schema)
     except ExtractError as exc:
         db.log_request(
-            route="extract", method="POST", status="error", payer=payer,
+            route="extract", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=exc.reason,
         )
         status_code = 400 if exc.reason in _CALLER_ERROR_REASONS else 502
@@ -163,8 +159,32 @@ async def extract(request: Request):
 
     price = effective_price(payer, price_float(config.PRICE_EXTRACT))
     db.log_request(
-        route="extract", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="extract", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
     receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price, fallback_used=fallback_used)
     return {"data": data, "missing_fields": missing_fields, "x402_receipt": receipt}
+
+
+@router.get("/extract", description=ROUTE_DESCRIPTIONS["extract"])
+async def extract_get(request: Request):
+    params = dict(request.query_params)
+    if not params:
+        body = {"text": SAMPLE_TEXT, "schema": SAMPLE_SCHEMA}
+    else:
+        body = dict(params)
+        if "schema" in body:
+            try:
+                body["schema"] = json.loads(body["schema"])
+            except Exception:
+                pass
+    return await _handle_extract(request, body)
+
+
+@router.post("/extract", description=ROUTE_DESCRIPTIONS["extract"])
+async def extract(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_extract(request, body)

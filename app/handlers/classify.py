@@ -63,6 +63,18 @@ async def classify_sample():
     }
 
 
+@router.get("/classify", description=ROUTE_DESCRIPTIONS["classify"])
+async def classify_get(request: Request):
+    # GET-twin delivery fix (2026-10-09): query params become the body,
+    # or SAMPLE_REQUEST if none were sent (same "listing default" shape
+    # used across every GET-twin fix this day).
+    body = dict(request.query_params) or dict(SAMPLE_REQUEST)
+    return await respond_http(
+        request, body, route="classify", price_str=config.PRICE_CLASSIFY,
+        lookup=lambda: _lookup(body),
+    )
+
+
 @router.post("/classify", description=ROUTE_DESCRIPTIONS["classify"])
 async def classify_post(request: Request):
     try:
