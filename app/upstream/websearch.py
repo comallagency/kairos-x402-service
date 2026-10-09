@@ -176,6 +176,18 @@ _SEARCH_RANK_INSTRUCTIONS = (
     "or is every one of them off-topic or about a different subject than "
     "the query?"
 )
+class _RelevanceTaggedList(list):
+    """Same iteration/indexing/slicing as a plain list - carries one extra
+    attribute (.relevance) that only app/handlers/search.py reads to add a
+    "relevance"/"note" field to the buyer-facing response. Every other
+    caller of run_web_search() (research.py, fact_check.py, jobs_worker.py,
+    mcp_server.py) just iterates/indexes these results and never notices
+    the difference - chosen specifically to avoid changing run_web_search()'s
+    return signature, which has 5+ call sites across the codebase."""
+
+    relevance: str | None = None
+
+
 _NONE_RELEVANT_KEY = "doc_none"
 _NONE_RELEVANT_TEXT = (
     "Every result above is off-topic or about a different subject than the "
@@ -207,7 +219,16 @@ async def _jev_rerank(query: str, raw_results: list[dict[str, Any]], max_results
     data = await ask_jev(query, questions)
     answer = data["answers"]["ranking"]
     if answer["choice"] == _NONE_RELEVANT_KEY:
-        return []
+        # Keep imperfect raw hits. Returning [] here used to 422 the paid
+        # /search call (unbilled), so Lumière PayCheck marked delivery
+        # unverified even when Bing/Wikipedia had already answered. Tagged
+        # "low" relevance (operator's explicit arbitration, 2026-10-09) so
+        # the buyer-facing response is honest about it instead of looking
+        # like a normal, Jev-confirmed match.
+        raw_results.sort(key=lambda result: _relevance_score(query, result), reverse=True)
+        tagged = _RelevanceTaggedList(raw_results[:max_results])
+        tagged.relevance = "low"
+        return tagged
     probabilities = answer["probabilities"]
     order = sorted(
         range(len(raw_results)),

@@ -150,27 +150,34 @@ async def translate_sample():
         "target_lang": "en",
         "detected_source_lang": "fr",
         "translated_text": "Hello world",
-        "x402_receipt": make_receipt(None, "llm", 1, 0.0),
+        "model_served": "agentindex-translate-1",
+        "x402_receipt": make_receipt("agentindex-translate-1", "llm", 1, 0.0),
     }
 
 
-@router.post("/translate", description=ROUTE_DESCRIPTIONS["translate"])
-async def translate(request: Request):
+LISTING_TEXT = "Bonjour le monde"
+LISTING_TARGET_LANG = "en"
+
+
+async def _translate_from_request(request: Request, *, default_text: str | None, default_target_lang: str | None):
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
     try:
         body = await request.json()
     except Exception:
         body = {}
-    body_excerpt = json.dumps(body)
-    text = body.get("text")
-    target_lang = body.get("target_lang")
-    source_lang = body.get("source_lang")
+    if not isinstance(body, dict):
+        body = {}
+    text = body.get("text") or request.query_params.get("text") or default_text
+    target_lang = body.get("target_lang") or request.query_params.get("target_lang") or default_target_lang
+    source_lang = body.get("source_lang") or request.query_params.get("source_lang")
     preserve_format = body.get("preserve_format", True)
+    body_excerpt = json.dumps({**body, "text": text, "target_lang": target_lang})
 
+    method = request.method
     if not text or not target_lang:
         db.log_request(
-            route="translate", method="POST", status="error", payer=payer,
+            route="translate", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt,
             error_reason="missing_fields",
         )
@@ -184,7 +191,7 @@ async def translate(request: Request):
         )
         if not valid:
             db.log_request(
-                route="translate", method="POST", status="error", payer=payer,
+                route="translate", method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt,
                 error_reason="invalid_batch_text",
             )
@@ -199,7 +206,7 @@ async def translate(request: Request):
             )
     elif not isinstance(text, str):
         db.log_request(
-            route="translate", method="POST", status="error", payer=payer,
+            route="translate", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt,
             error_reason="invalid_text_type",
         )
@@ -217,7 +224,7 @@ async def translate(request: Request):
                 )
     except OpenRouterError as exc:
         db.log_request(
-            route="translate", method="POST", status="error", payer=payer,
+            route="translate", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt,
             error_reason=str(exc)[:200],
         )
@@ -227,7 +234,7 @@ async def translate(request: Request):
 
     price = effective_price(payer, price_float(config.PRICE_TRANSLATE))
     db.log_request(
-        route="translate", method="POST", status="paid",
+        route="translate", method=method, status="paid",
         latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer,
         user_agent=user_agent, body_excerpt=body_excerpt,
     )
@@ -242,6 +249,7 @@ async def translate(request: Request):
             "target_lang": target_lang,
             "detected_source_lang": detected_source_lang,
             "translated_text": translations,
+            "model_served": receipt["model_served"],
             "x402_receipt": receipt,
         }
 
@@ -251,5 +259,20 @@ async def translate(request: Request):
         "target_lang": target_lang,
         "detected_source_lang": parsed.get("detected_source_lang"),
         "translated_text": parsed.get("translated_text"),
+        "model_served": receipt["model_served"],
         "x402_receipt": receipt,
     }
+
+
+@router.get("/translate", description=ROUTE_DESCRIPTIONS["translate"])
+async def translate_get(request: Request):
+    return await _translate_from_request(
+        request, default_text=LISTING_TEXT, default_target_lang=LISTING_TARGET_LANG,
+    )
+
+
+@router.post("/translate", description=ROUTE_DESCRIPTIONS["translate"])
+async def translate(request: Request):
+    return await _translate_from_request(
+        request, default_text=None, default_target_lang=None,
+    )

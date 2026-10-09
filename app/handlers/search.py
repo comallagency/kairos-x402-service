@@ -191,7 +191,7 @@ async def _enrich_results(
 
 async def _run_batch_search(
     queries: list[str], max_results: int, timeout_s: float
-) -> tuple[list[dict], str | None, int]:
+) -> tuple[list[dict], str | None, int, str | None]:
     """Run each query as its own upstream call, all CONCURRENTLY, under a
     shared time budget (2026-09-28: was a sequential for-loop up to
     MAX_BATCH_QUERIES=5 calls back-to-back - fixed first; then wrapped in a
@@ -208,6 +208,7 @@ async def _run_batch_search(
         task.cancel()
 
     model_served = None
+    relevance = None
     per_query_results: list[list[dict]] = []
     dropped = 0
     for task in tasks:
@@ -215,6 +216,7 @@ async def _run_batch_search(
             results, model = task.result()
             per_query_results.append(results)
             model_served = model_served or model
+            relevance = relevance or getattr(results, "relevance", None)
         else:
             dropped += 1
 
@@ -227,8 +229,8 @@ async def _run_batch_search(
             seen_urls.add(r["url"])
             merged.append(r)
             if len(merged) >= max_results:
-                return merged, model_served, dropped
-    return merged, model_served, dropped
+                return merged, model_served, dropped, relevance
+    return merged, model_served, dropped, relevance
 
 
 @router.get("/search/sample", openapi_extra={"security": []})
@@ -293,15 +295,16 @@ async def _handle_search(
     dropped_queries = 0
     if is_batch:
         try:
-            results, model_served, dropped_queries = await _run_batch_search(query, max_results, SEARCH_PHASE_TIMEOUT_S)
+            results, model_served, dropped_queries, relevance = await _run_batch_search(query, max_results, SEARCH_PHASE_TIMEOUT_S)
         except SearchError:
-            results, model_served = [], None
+            results, model_served, relevance = [], None, None
         summary_label = "; ".join(query)
     else:
         try:
             results, model_served = await asyncio.wait_for(run_web_search(query, max_results), timeout=SEARCH_PHASE_TIMEOUT_S)
         except (asyncio.TimeoutError, SearchError):
             results, model_served = [], None
+        relevance = getattr(results, "relevance", None)
         summary_label = query
 
     if not results:
@@ -370,6 +373,9 @@ async def _handle_search(
         searches_run=(len(query) if is_batch else 1), sources_read=len(results),
     )
     response = {"query": query, "results": _shape_results(results, extract), "x402_receipt": receipt}
+    if relevance:
+        response["relevance"] = relevance
+        response["note"] = "No result judged relevant by Jev; returning best raw matches."
     if is_batch and dropped_queries:
         response["dropped_queries"] = dropped_queries
     if summarize:
@@ -377,26 +383,52 @@ async def _handle_search(
     return response
 
 
-@router.post("/search", description=ROUTE_DESCRIPTIONS["search"])
-async def search(request: Request):
+LISTING_QUERY = SAMPLE_SEARCH_OUTPUT["query"]
+
+
+async def _search_from_request(request: Request, *, default_query: str | None, include_content_default: bool):
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
     try:
         body = await request.json()
     except Exception:
         body = {}
-    body_excerpt = json.dumps(body)
-
+    if not isinstance(body, dict):
+        body = {}
+    query = body.get("query") or request.query_params.get("query") or request.query_params.get("q")
+    if not query:
+        query = default_query
+    body_excerpt = json.dumps({**body, "query": query})
+    include_content = body.get("include_content")
+    if include_content is None:
+        include_content = include_content_default
     return await _handle_search(
-        method="POST",
+        method=request.method,
         payer=payer,
         user_agent=user_agent,
-        query=body.get("query"),
+        query=query,
         max_results=body.get("max_results", 5),
         extract=bool(body.get("extract", True)),
-        include_content=bool(body.get("include_content", True)),
+        include_content=bool(include_content),
         content_results=body.get("content_results", 3),
         content_chars=body.get("content_chars", DEFAULT_CONTENT_CHARS),
         summarize=bool(body.get("summarize", False)),
         body_excerpt=body_excerpt,
+    )
+
+
+@router.get("/search", description=ROUTE_DESCRIPTIONS["search"])
+async def search_get(request: Request):
+    # GET twin is advertised in the 402, but there was no handler: Lumière
+    # and other GET-autopay agents paid, then hit 405, so settlement skipped
+    # and delivery stayed unverified. Listing query is the default.
+    return await _search_from_request(
+        request, default_query=LISTING_QUERY, include_content_default=False,
+    )
+
+
+@router.post("/search", description=ROUTE_DESCRIPTIONS["search"])
+async def search(request: Request):
+    return await _search_from_request(
+        request, default_query=None, include_content_default=True,
     )
