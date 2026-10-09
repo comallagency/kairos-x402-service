@@ -181,6 +181,7 @@ async def sync() -> None:
 
         if from_block > latest_block:
             print("nothing new to sync")
+            db.set_chain_sync_state(f"last_sync_completed_at:{network}", datetime.now(timezone.utc).isoformat())
             return
 
         block_time_cache: dict[int, str] = {}
@@ -252,6 +253,15 @@ async def sync() -> None:
             f"synced {synced} new USDC transfer(s) to {config.X402_PAY_TO} "
             f"on {network}, up to block {latest_block} via {prefer[0]}"
         )
+
+    # Read by app/admin.py's collect_dashboard_data() to show "data as of
+    # HH:MM" instead of ever calling sync() itself at render time (2026-10-09
+    # incident: that blocked /admin/live's render on a cold/degraded Base RPC
+    # - this cron, already running every 30 minutes independently via
+    # scripts/run_in_live_container.sh, is now the ONLY thing that calls
+    # sync() at all). Written even on a "nothing new to sync" early return
+    # (see the no-op branch above) - no new rows is still a successful sync.
+    db.set_chain_sync_state(f"last_sync_completed_at:{network}", datetime.now(timezone.utc).isoformat())
 
 
 if __name__ == "__main__":
