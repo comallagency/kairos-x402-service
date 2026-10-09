@@ -37,6 +37,9 @@ def _missions_html() -> str:
 def _daily_html() -> str:
     return (_TEMPLATES / "daily.html").read_text(encoding="utf-8")
 
+def _suivi_html() -> str:
+    return (_TEMPLATES / "suivi.html").read_text(encoding="utf-8")
+
 # The only other network this deployment has ever run on. Payments settled
 # there must never be counted as mainnet revenue - see BRIEF-CORRECTIONS.md
 # (2026-09-05 dashboard network-mixing bug).
@@ -168,8 +171,7 @@ def _activity_stats(events: list[dict]) -> dict:
     }
 
 
-_last_chain_sync_at: float = 0.0
-_CHAIN_SYNC_MIN_INTERVAL_S = 300.0  # live page polls every 3s — don't hammer RPC
+
 
 
 MAX_LIVE_EVENTS = 500  # /admin/live's raw feed cap - see events_payload below
@@ -408,22 +410,15 @@ def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> 
 
 
 async def collect_dashboard_data() -> dict:
-    global _last_chain_sync_at
-    now = time.monotonic()
-    if now - _last_chain_sync_at >= _CHAIN_SYNC_MIN_INTERVAL_S:
-        try:
-            from chain_payments import sync as chain_sync
-
-            await chain_sync()
-            _last_chain_sync_at = time.monotonic()
-        except Exception:
-            # Keep serving last known chain rows; avoid traceback spam every poll.
-            logger.warning(
-                "live chain_payments sync failed, serving last known chain data",
-                exc_info=True,
-            )
-            _last_chain_sync_at = time.monotonic()  # back off even on failure
-
+    # Never calls chain_payments.sync() itself (2026-10-09 incident: that
+    # blocked /admin/live's render on a cold/degraded Base RPC - eth_getLogs
+    # alone measured >30s that day, well past any request's budget). Chain
+    # data is read-only here, already kept fresh by the independent cron
+    # (crontab: */30 * * * * ... chain_payments.py) - this function only
+    # ever reads already-synced rows from requests.db, never triggers or
+    # awaits a sync. chain_sync_last_completed_at below lets the dashboard
+    # show "data as of HH:MM" instead of silently hiding staleness if that
+    # cron itself falls behind.
     try:
         key_info = (await get_key_info())["data"]
         openrouter = {
@@ -439,6 +434,20 @@ async def collect_dashboard_data() -> dict:
             "is_free_tier": None, "error": str(exc)[:200],
         }
 
+    # Everything from here down is synchronous (DB reads + in-memory
+    # aggregation, no further await) - confirmed by direct timing to take
+    # ~18s under blue-green overlap (two containers sharing one sqlite
+    # file during a deploy's own healthcheck window). Run off the event
+    # loop via to_thread so a slow aggregation here never blocks GET
+    # /health or any other request for that long (2026-10-09 incident: it
+    # did, twice, failing the deploy's own healthcheck before this fix -
+    # removing chain_sync()'s RPC phase removed its await-yield points
+    # too, so the already-synchronous work below started blocking
+    # immediately instead of being interleaved with network waits).
+    return await asyncio.to_thread(_collect_dashboard_data_sync, openrouter)
+
+
+def _collect_dashboard_data_sync(openrouter: dict) -> dict:
     network = config.X402_NETWORK
     main = _network_block(network)
     generated_at = db.now_iso()
@@ -494,6 +503,7 @@ async def collect_dashboard_data() -> dict:
         "generated_at": generated_at,
         "updated_at": generated_at,
         "network": network,
+        "chain_sync_last_completed_at": db.get_chain_sync_state(f"last_sync_completed_at:{network}"),
         "revenue_usdc": main["revenue_usdc"],
         "buyers": main["buyers"],
         "last_payment_at": main["last_payment_at"],
@@ -609,6 +619,35 @@ async def admin_daily_json(_: None = Depends(check_auth)):
         "days": db.daily_overview(days=30),
         "reputation": db.reputation_history(days=30),
     }
+
+
+# Isolated from /admin/data.json (incident 2026-10-02). The suivi page polls
+# every 8s; the snapshot is a few GROUP BY queries, cached 10s so two open
+# tabs cannot stampede SQLite.
+_SUIVI_CACHE: dict = {}
+_SUIVI_CACHE_TTL_S = 10.0
+
+
+def _suivi_payload() -> dict:
+    now = time.monotonic()
+    cached = _SUIVI_CACHE.get("value")
+    cached_at = _SUIVI_CACHE.get("at")
+    if cached is not None and cached_at is not None and now - cached_at < _SUIVI_CACHE_TTL_S:
+        return cached
+    data = db.suivi_snapshot()
+    _SUIVI_CACHE["value"] = data
+    _SUIVI_CACHE["at"] = now
+    return data
+
+
+@router.get("/admin/suivi", response_class=HTMLResponse, include_in_schema=False)
+async def admin_suivi_page(_: None = Depends(check_auth)):
+    return _suivi_html()
+
+
+@router.get("/admin/suivi.json", include_in_schema=False)
+async def admin_suivi_json(_: None = Depends(check_auth)):
+    return JSONResponse(_suivi_payload())
 
 
 @router.get("/admin/daily/detail.json", include_in_schema=False)
@@ -817,6 +856,7 @@ async def collect_usine_data() -> dict:
         "pc_request": db.latest_pc_request(),
         "loop": db.get_loop_state(),
         "openrouter_budget": await _openrouter_budget_status(),
+        "anthropic_budget": _anthropic_budget_status(),
         "journal": db.recent_journal(100),
         "index_visibility": db.latest_index_checks(20),
         "billing_without_delivery": billing_without_delivery,
@@ -867,6 +907,25 @@ async def _openrouter_budget_status() -> dict:
         "usage_daily": usage_daily, "daily_budget_usd": budget, "pct_remaining": pct_remaining,
         "real_balance_usd": real_balance_usd, "real_balance_warning": real_balance_warning,
         "error": None,
+    }
+
+
+def _anthropic_budget_status() -> dict:
+    """POST /token-card's budget guardrail (app.capacity.TokenCardCircuitBreakerMiddleware
+    reads the same two functions before ever offering a 402). Monthly spend
+    is real, summed from requests.db (app.upstream.anthropic.monthly_spend_usd,
+    backed by db.anthropic_monthly_spend_usd) - Anthropic's API has no
+    usage-readback endpoint, unlike OpenRouter's /api/v1/key."""
+    from app.upstream.anthropic import breaker_status, monthly_spend_usd
+
+    spend = monthly_spend_usd()
+    budget = config.ANTHROPIC_MONTHLY_BUDGET_USD
+    pct_remaining = max(0.0, 1.0 - (spend / budget)) if budget > 0 else None
+    return {
+        "monthly_spend_usd": spend,
+        "monthly_budget_usd": budget,
+        "pct_remaining": pct_remaining,
+        "breaker": breaker_status(),
     }
 
 
