@@ -173,8 +173,8 @@ function renderDaysTable() {
       <td>${fmtNum(d.payment_attempts)}</td>
       <td class="num-good">${fmtNum(d.payments_success)}</td>
       <td class="${d.payment_failures ? 'num-warn' : ''}">${fmtNum(d.payment_failures)}</td>
-      <td class="mono">${fmtUsd(d.revenue_usdc)}</td>
-      <td>${fmtNum(d.buyers_total)} <span class="faint">(${fmtNum(d.buyers_new)} new)</span></td>
+      <td class="mono">${fmtUsd(d.revenue_usdc)} <span class="faint">(+${fmtUsd(d.revenue_usdc_auditors)} aud.)</span></td>
+      <td>${fmtNum(d.buyers_total)} <span class="faint">(${fmtNum(d.buyers_new)} new, ${fmtNum(d.buyers_auditors)} aud. hors total)</span></td>
       <td class="${cls404}">${fmtNum(d.c_404)}</td>
       <td class="${cls5xx}">${fmtNum(d.c_5xx)}</td>
     </tr>`;
@@ -291,9 +291,12 @@ async function load() {
     const data = await r.json();
     DAYS = data.days || [];
     const s = data.summary || {};
-    document.getElementById('k-revenue-today').textContent = fmtUsd(s.revenue_today_usdc);
-    document.getElementById('k-buyers-today').textContent = fmtNum(s.buyers_today);
-    document.getElementById('k-revenue-7d').textContent = fmtUsd(s.revenue_7d_usdc);
+    document.getElementById('k-revenue-today').textContent = fmtUsd(s.revenue_today_usdc) +
+      (s.revenue_today_usdc_auditors ? ` (+${fmtUsd(s.revenue_today_usdc_auditors)} aud.)` : '');
+    document.getElementById('k-buyers-today').textContent = fmtNum(s.buyers_today) +
+      (s.buyers_today_auditors ? ` (${fmtNum(s.buyers_today_auditors)} aud. hors total)` : '');
+    document.getElementById('k-revenue-7d').textContent = fmtUsd(s.revenue_7d_usdc) +
+      (s.revenue_7d_usdc_auditors ? ` (+${fmtUsd(s.revenue_7d_usdc_auditors)} aud.)` : '');
     if (s.agenteconomy_rating) {
       document.getElementById('k-rating').textContent = s.agenteconomy_rating.tier || '—';
       document.getElementById('k-rating').className = 'n mono tier-' + (s.agenteconomy_rating.tier || '');

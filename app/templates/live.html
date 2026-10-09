@@ -349,8 +349,12 @@ function classify(e){
 function normalise(j){
   const revenues = (j.revenue_usdc && typeof j.revenue_usdc === 'object')
     ? j.revenue_usdc : {'24h': Number(j.revenue_usdc)||0, '7d':0, '30d':Number(j.revenue_usdc)||0};
+  const revenuesAud = (j.revenue_usdc_auditors && typeof j.revenue_usdc_auditors === 'object')
+    ? j.revenue_usdc_auditors : {'24h':0, '7d':0, '30d':0};
   const buyerData = (j.buyers && typeof j.buyers === 'object')
     ? j.buyers : {distinct:Number(j.buyers)||0,returning:0,return_rate:0};
+  const buyerDataAud = (j.buyers_auditors && typeof j.buyers_auditors === 'object')
+    ? j.buyers_auditors : {distinct:0,returning:0,return_rate:0};
   const out = {
     network: j.network || 'eip155:8453',
     updated: j.updated_at || j.generated_at || null,
@@ -361,9 +365,15 @@ function normalise(j){
       d7:Number(revenues['7d'])||0,
       d30:Number(revenues['30d'])||0
     },
+    revenuesAuditors: {
+      d1:Number(revenuesAud['24h'])||0,
+      d7:Number(revenuesAud['7d'])||0,
+      d30:Number(revenuesAud['30d'])||0
+    },
     buyers: Number(buyerData.distinct)||0,
     returning: Number(buyerData.returning)||0,
     returnRate: Number(buyerData.return_rate)||0,
+    buyersAuditors: Number(buyerDataAud.distinct)||0,
     availability: j.availability_7d_pct,
     commercial: j.commercial || {},
     chain: j.chain || {},
@@ -374,7 +384,9 @@ function normalise(j){
     eventsTotal24h: j.events_total_24h ?? null,
     lastPaymentDetail: j.last_payment || null,
     revenueToday: Number(j.revenue_today_usdc) || 0,
-    buyersToday: Number(j.buyers_today) || 0
+    revenueTodayAuditors: Number(j.revenue_today_usdc_auditors) || 0,
+    buyersToday: Number(j.buyers_today) || 0,
+    buyersTodayAuditors: Number(j.buyers_today_auditors) || 0
   };
   const rt = j.routes || j.calls_by_route || {};
   if (Array.isArray(rt)) rt.forEach(r => out.routes[r.route||r.name] = {price:r.price,methods:r.methods||[]});
@@ -480,19 +492,22 @@ function renderInner(d, demo){
         : `${interestN} intention${interestN===1?'':'s'} non-scanner ont vu un 402. L’offre d’entrée commence à $${money(d.commercial.minimum_price_usdc||.0001)}.`}</div>
     </div>
     <div>
-      <div class="lbl">Aujourd'hui</div>
+      <div class="lbl">Aujourd'hui (clients)</div>
       <div class="num ${d.revenueToday>0?'':'zero'} mono">$${money(d.revenueToday)}</div>
       <div class="hint" style="margin-top:8px">${d.buyersToday} acheteur${d.buyersToday===1?'':'s'} · dernier ${esc(lastPaymentLine)}</div>
+      <div class="hint" style="margin-top:2px">auditeurs $${money(d.revenueTodayAuditors)} · ${d.buyersTodayAuditors} auditeur${d.buyersTodayAuditors===1?'':'s'}</div>
     </div>
     <div>
-      <div class="lbl">Revenu 30 jours</div>
+      <div class="lbl">Revenu 30 jours (clients)</div>
       <div class="num ${d.revenues.d30>0?'':'zero'} mono">$${money(d.revenues.d30)}</div>
       <div class="hint" style="margin-top:8px">24 h $${money(d.revenues.d1)} · 7 j $${money(d.revenues.d7)}</div>
+      <div class="hint" style="margin-top:2px">revenu auditeurs 30 j $${money(d.revenuesAuditors.d30)} (24 h $${money(d.revenuesAuditors.d1)} · 7 j $${money(d.revenuesAuditors.d7)})</div>
     </div>
     <div>
-      <div class="lbl">Acheteurs on-chain</div>
+      <div class="lbl">Acheteurs on-chain (clients)</div>
       <div class="num ${d.buyers>0?'':'zero'} mono">${d.buyers}</div>
       <div class="hint" style="margin-top:8px">${d.returning} récurrent${d.returning===1?'':'s'}</div>
+      <div class="hint" style="margin-top:2px">${d.buyersAuditors} auditeur${d.buyersAuditors===1?'':'s'} (hors total acheteurs)</div>
     </div>`;
 
   document.getElementById('kpis').innerHTML = `

@@ -49,6 +49,19 @@ SEARXNG_URL = os.getenv("SEARXNG_URL", "http://searxng-kairos:8080")
 
 MECHANICAL_WALLETS = os.getenv("MECHANICAL_WALLETS", "")
 
+# Known third-party x402 auditor/trust-score crawlers (Lumiere, cog.xyz,
+# vet402, SatoHub) - 2026-10-09 arbitration: their payments ARE real
+# revenue (never added to MECHANICAL_WALLETS, never excluded from totals),
+# but the dashboard reports them separately from client revenue, and they
+# don't count toward the buyer total.
+AUDITOR_WALLETS = os.getenv(
+    "AUDITOR_WALLETS",
+    "0xec2abd3eda89bed90124736e317e847d5fb6d034,"
+    "0x6a0b784cf4e3f79e0bca889e35a1b3aa1dc24518,"
+    "0xc9c7b38c0942914fc8ea12063bc92dcd3b581670,"
+    "0x0ffab3cea2221070abfb6deb76206946d5e0daaf",
+)
+
 ADMIN_BASIC_AUTH_USER = os.getenv("ADMIN_BASIC_AUTH_USER", "admin")
 ADMIN_BASIC_AUTH_PASS = os.getenv("ADMIN_BASIC_AUTH_PASS", "changeme")
 
@@ -82,7 +95,10 @@ MPP_SETTLEMENT_ACCOUNT_NAME = os.getenv("MPP_SETTLEMENT_ACCOUNT_NAME", "mpp-sett
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "./data")).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DATA_DIR / "requests.db"
+# Independent of DATA_DIR so tests can redirect just the request log (see
+# tests/conftest.py) without losing access to the other real data/ fixtures
+# (snapshots, verified_agents.json, ...) some tests still read.
+DB_PATH = Path(os.getenv("DB_PATH", str(DATA_DIR / "requests.db")))
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 

@@ -130,14 +130,22 @@ async def admin_save_cursor_key(
 
 
 def _network_block(network: str) -> dict:
+    # 2026-10-09 arbitration: revenue_usdc/buyers are CLIENTS only from here
+    # on (auditor payments are still real revenue, just reported in their
+    # own revenue_usdc_auditors/buyers_auditors fields - never excluded
+    # from totals, never counted as a buyer). chain_revenue_since()/
+    # chain_buyer_stats() (unfiltered by auditor) are kept for any other
+    # caller that still wants the combined number.
+    rev_24h = db.chain_revenue_since_split(network, 24)
+    rev_7d = db.chain_revenue_since_split(network, 24 * 7)
+    rev_30d = db.chain_revenue_since_split(network, 24 * 30)
+    buyers_split = db.chain_buyer_stats_split(network)
     return {
         "network": network,
-        "revenue_usdc": {
-            "24h": db.chain_revenue_since(network, 24),
-            "7d": db.chain_revenue_since(network, 24 * 7),
-            "30d": db.chain_revenue_since(network, 24 * 30),
-        },
-        "buyers": db.chain_buyer_stats(network),
+        "revenue_usdc": {"24h": rev_24h["clients"], "7d": rev_7d["clients"], "30d": rev_30d["clients"]},
+        "revenue_usdc_auditors": {"24h": rev_24h["auditors"], "7d": rev_7d["auditors"], "30d": rev_30d["auditors"]},
+        "buyers": buyers_split["clients"],
+        "buyers_auditors": buyers_split["auditors"],
         "last_payment_at": db.chain_last_payment_at(network),
         "chain": db.chain_summary(network),
         "calls_by_route": db.calls_by_route_since(24, network=network),
@@ -148,26 +156,39 @@ def _activity_stats(events: list[dict]) -> dict:
     """paid_usdc excludes mechanical-wallet/bootstrap-script rows (2026-09-30,
     same fix and same reasoning as _live_classify/_compute_agg_24h) - by_status/
     by_route counts are left as raw totals (they already describe the whole
-    24h event stream, not a "real buyers" metric)."""
+    24h event stream, not a "real buyers" metric). 2026-10-09 arbitration:
+    AUDITOR_WALLETS revenue is split into paid_usdc_auditors rather than
+    folded into paid_usdc (still real, just reported separately), and
+    TestClient rows (payer='0xTESTPAYER' or user_agent='testclient') never
+    count as revenue at all."""
     mechanical = db.mechanical_wallets()
+    auditors = db.auditor_wallets()
     by_status: dict[str, int] = {}
     by_route: dict[str, int] = {}
     paid_usdc = 0.0
+    paid_usdc_auditors = 0.0
     for row in events:
+        if db.is_test_identity(row.get("payer"), row.get("user_agent")):
+            continue
         st = row.get("status") or "unknown"
         by_status[st] = by_status.get(st, 0) + 1
         rt = row.get("route") or "?"
         by_route[rt] = by_route.get(rt, 0) + 1
         if st == "paid" and row.get("amount_usdc") is not None and not _is_mechanical_traffic(row.get("user_agent") or "", row.get("payer"), mechanical):
             try:
-                paid_usdc += float(row["amount_usdc"])
+                amount = float(row["amount_usdc"])
             except (TypeError, ValueError):
-                pass
+                continue
+            if (row.get("payer") or "").strip().lower() in auditors:
+                paid_usdc_auditors += amount
+            else:
+                paid_usdc += amount
     return {
         "total": len(events),
         "by_status": by_status,
         "by_route": by_route,
         "paid_usdc": round(paid_usdc, 6),
+        "paid_usdc_auditors": round(paid_usdc_auditors, 6),
     }
 
 
