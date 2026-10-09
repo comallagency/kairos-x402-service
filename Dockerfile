@@ -28,7 +28,8 @@ RUN pip install --no-cache-dir \
     jsonschema \
     jsonpath-ng \
     py3langid \
-    tiktoken
+    tiktoken \
+    anthropic
 
 COPY app ./app
 COPY scripts ./scripts

@@ -25,6 +25,13 @@ CDP_WALLET_SECRET = os.getenv("CDP_WALLET_SECRET") or None
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
+# Claude as a hidden writing engine behind specific routes (POST /token-card)
+# - never a raw pass-through gateway like /v1/chat/completions or /llm/*.
+# Operator adds this directly to .env on the VPS - never logged, never
+# printed, never committed (see app/upstream/anthropic.py).
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
+
 # Read-only, GitHub-only scope expected - used only for POST /search v2's
 # "code" category (app/upstream/search_sources.py). Never the WSL admin
 # account's token: this one lives in a public-facing search path.
@@ -144,6 +151,7 @@ PRICE_GUARD = "$0.001"
 PRICE_VERIFY = "$0.001"
 PRICE_RANK = "$0.001"
 PRICE_TOKEN_RISK = "$0.005"
+PRICE_TOKEN_CARD = "$0.01"
 PRICE_RESEARCH = "$0.005"
 
 # Pack 1 (2026-09-30): Jev-engine text classification, $0.002-$0.005 band.
@@ -243,3 +251,14 @@ OPENROUTER_MAX_SEARCHES_PER_JOB = 5
 # par-modèle d'OpenRouter, qui n'est pas exposé par cette clé. $2 reprend
 # l'objectif de départ du projet ("2$, puis 1000$/mois").
 OPENROUTER_DAILY_BUDGET_USD = float(os.getenv("OPENROUTER_DAILY_BUDGET_USD", "2.00"))
+
+# Anthropic budget guardrail for POST /token-card (app/handlers/token_card.py).
+# Real cost tracked ourselves per call (input/output tokens x these rates),
+# summed from requests.db for the current calendar month - Anthropic's API
+# has no "get my usage" endpoint to read back, unlike OpenRouter's
+# /api/v1/key. Resetting "on the 1st of the month" falls out of the SQL
+# query's date filter (WHERE ts >= start of current month) rather than a
+# stateful counter that needs an explicit reset job.
+ANTHROPIC_INPUT_PRICE_PER_MTOK = float(os.getenv("ANTHROPIC_INPUT_PRICE_PER_MTOK", "0.10"))
+ANTHROPIC_OUTPUT_PRICE_PER_MTOK = float(os.getenv("ANTHROPIC_OUTPUT_PRICE_PER_MTOK", "0.50"))
+ANTHROPIC_MONTHLY_BUDGET_USD = float(os.getenv("ANTHROPIC_MONTHLY_BUDGET_USD", "90.00"))
