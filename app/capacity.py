@@ -264,3 +264,68 @@ class PinnedModelCircuitBreakerMiddleware:
             }
         )
         await send({"type": "http.response.body", "body": body})
+
+
+
+class TokenCardCircuitBreakerMiddleware:
+    """Pure-ASGI middleware, wrapped OUTSIDE the x402 payment middleware -
+    same placement and reasoning as the other circuit breakers in this
+    file. POST /token-card calls Claude (app/upstream/anthropic.py) as a
+    hidden writing engine on top of /token-risk's on-chain analysis - two
+    independent gates, either one failing is enough to refuse BEFORE the
+    402 challenge is ever shown (never quote a price for a call already
+    known to be degraded, same reasoning as every other breaker here):
+
+    1. Monthly budget (app.upstream.anthropic.monthly_budget_ok(), backed
+       by db.anthropic_monthly_spend_usd() - real spend summed from
+       requests.db, Anthropic has no usage-readback endpoint to cross-
+       check against).
+    2. The breaker itself (app.upstream.anthropic.breaker_tripped()) -
+       tripped by a real credit/billing-shaped error from Anthropic,
+       independent of the budget figure (a revoked key or an exhausted
+       account can trip this well before $90/month is ever reached).
+
+    Note: even when both gates pass, app/handlers/token_card.py still
+    degrades to the deterministic fallback card on a per-call Claude
+    failure (timeout, transient error) WITHOUT tripping this breaker or
+    refusing the sale - the card still gets delivered, just not written by
+    Claude. This breaker is specifically for the "every call would clearly
+    fail/overspend" case, not "this one call might struggle"."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] != "POST" or scope["path"] != "/token-card":
+            await self.app(scope, receive, send)
+            return
+
+        from app.upstream.anthropic import breaker_tripped, monthly_budget_ok
+
+        if monthly_budget_ok() and not breaker_tripped():
+            await self.app(scope, receive, send)
+            return
+
+        reason = "anthropic_breaker_open" if breaker_tripped() else "anthropic_monthly_budget_exceeded"
+        db.log_request(
+            route="token-card",
+            method="POST",
+            status="circuit_breaker_open",
+            error_reason=reason,
+        )
+        body = json.dumps(
+            {
+                "error": {
+                    "reason": "temporarily_unavailable",
+                    "detail": "Token Card is temporarily disabled (Claude budget cap or billing issue). Other routes are unaffected.",
+                }
+            }
+        ).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 503,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})

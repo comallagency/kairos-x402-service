@@ -44,7 +44,7 @@ SEARCH_SAMPLE_OUTPUT = {
             "url": "http://www.usgs.gov/newsroom/article.asp?ID=2439",
             "date": "2010-04-15T00:49:30Z",
             "source": "hackernews",
-            "extract": None,
+            "extract": "Is Recent Earthquake Activity Unusual? Scientists Say No.",
         },
         {
             "title": "2026 Venezuela earthquakes",
@@ -614,6 +614,16 @@ ROUTE_DESCRIPTIONS = {
         "the response, raw signals follow. Holder concentration included "
         "only when history fits 1-2 log queries. Try GET /token-risk/sample."
     ),
+    "token-card": (
+        "Shareable AI token verdict card for Base: Claude writes a "
+        "SAFE/CAUTION/RISKY/DANGER note, a one-line tagline and a "
+        "3-sentence explanation from real on-chain base token analysis - "
+        "reusing /token-risk's own bytecode, liquidity and holder signals, "
+        "never an invented fact. Claude is capped at 2s; a deterministic "
+        "fallback built from the same on-chain data takes over if it's "
+        "slow, so you always get a real, honestly-labeled verdict. Try "
+        "GET /token-card/sample."
+    ),
     "research": (
         "Jev-powered research: routed search, cited answer, claims "
         "verified against sources. Ask a question, get a 5-8 sentence "
@@ -1116,6 +1126,9 @@ TRANSLATE_OUTPUT_SCHEMA = {
         "detected_source_lang": {"description": "Auto-detected source language, when not supplied."},
         "translated_text": {
             "description": "Translated text - a string, or an array aligned with the input segments for batch requests."
+        },
+        "model_served": {
+            "description": "Neutral model tag for this call (also present on x402_receipt.model_served).",
         },
         "x402_receipt": {
             "type": "object",
@@ -1919,6 +1932,73 @@ RANK_SAMPLE_OUTPUT = {
         {"document": RANK_SAMPLE_INPUT["documents"][1], "score": 0},
     ],
     "x402_receipt": {"model_served": "jev", "upstream": "rerank", "latency_ms": 405, "price_paid_usdc": 0.0},
+}
+
+
+TOKEN_CARD_SAMPLE_INPUT = {"address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"}
+
+TOKEN_CARD_INPUT_SCHEMA = {
+    "properties": {
+        "address": {
+            "type": "string",
+            "description": "ERC-20 contract address on Base to analyze (0x + 40 hex chars).",
+        },
+    },
+    "required": ["address"],
+}
+
+TOKEN_CARD_SAMPLE_OUTPUT = {
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "network": {"key": "base", "name": "Base", "caip2": "eip155:8453"},
+    "card": {
+        "note": "CAUTION",
+        "tagline": "CAUTION: dangerous power present, but renounced.",
+        "explanation": (
+            "This contract exposes a dangerous owner-only function (set_max_tx_amount). "
+            "Ownership has been renounced. Real on-chain liquidity was found on at least one DEX."
+        ),
+        "disclaimer": "Not financial advice.",
+        "source": "deterministic_fallback",
+    },
+    "token_risk_verdict": {
+        "verdict": "caution", "probability": 0.62,
+        "probabilities": {"acceptable": 0.31, "avoid": 0.07, "caution": 0.62},
+        "confidence": 0.55, "verdict_source": "jev",
+    },
+}
+
+TOKEN_CARD_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "address": {"type": "string"},
+        "network": {"type": "object"},
+        "card": {
+            "type": "object",
+            "description": (
+                "note is SAFE/CAUTION/RISKY/DANGER. source is 'claude' "
+                "(written by Claude from the on-chain facts, <=2s) or "
+                "'deterministic_fallback' (same facts, mapped by fixed "
+                "rules, used whenever Claude is slow, unconfigured, or "
+                "errors) - either way, every claim is grounded in "
+                "token_risk_verdict/bytecode_analysis/liquidity_analysis, "
+                "never invented."
+            ),
+            "properties": {
+                "note": {"type": "string", "enum": ["SAFE", "CAUTION", "RISKY", "DANGER"]},
+                "tagline": {"type": "string", "description": "Shareable one-liner, 60 characters maximum."},
+                "explanation": {"type": "string", "description": "At most 3 sentences."},
+                "disclaimer": {"type": "string"},
+                "source": {"type": "string", "enum": ["claude", "deterministic_fallback"]},
+            },
+            "required": ["note", "tagline", "explanation", "disclaimer", "source"],
+        },
+        "token_risk_verdict": {
+            "type": "object",
+            "description": "The same avoid/caution/acceptable verdict POST /token-risk itself returns, for the same address.",
+        },
+        "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
+    },
+    "required": ["address", "card", "token_risk_verdict"],
 }
 
 
@@ -2956,6 +3036,21 @@ def _core_route_configs() -> dict[str, RouteConfig]:
                 output=OutputConfig(example=TOKEN_RISK_SAMPLE_OUTPUT, schema=TOKEN_RISK_OUTPUT_SCHEMA),
             ),
         ),
+        "POST /token-card": RouteConfig(
+            accepts=_payment_option(config.PRICE_TOKEN_CARD),
+            resource=f"{config.BASE_URL}/token-card",
+            description=ROUTE_DESCRIPTIONS["token-card"],
+            mime_type="application/json",
+            service_name="token-verdict-card",
+            icon_url=ICON_URL,
+            tags=["ai token verdict", "token verdict card", "base token analysis", "shareable token verdict"],
+            extensions=declare_discovery_extension(
+                input=TOKEN_CARD_SAMPLE_INPUT,
+                input_schema=TOKEN_CARD_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=TOKEN_CARD_SAMPLE_OUTPUT, schema=TOKEN_CARD_OUTPUT_SCHEMA),
+            ),
+        ),
         "POST /research": RouteConfig(
             accepts=_payment_option(config.PRICE_RESEARCH),
             resource=f"{config.BASE_URL}/research",
@@ -3223,7 +3318,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
     # call_next()), so no regression for real buyers, who already use POST.
     for _get_twin_path in (
         "/search", "/translate", "/pdf", "/web-read", "/extract", "/summarize",
-        "/discover", "/decide", "/guard", "/verify", "/rank", "/token-risk",
+        "/discover", "/decide", "/guard", "/verify", "/rank", "/token-risk", "/token-card",
         "/v1/chat/completions",
         # Same gap, found by auditing every Bazaar-listed resource rather than
         # just the 2 days of probe logs that caught the first 13 (2026-10-01).

@@ -22,6 +22,7 @@ dependencies = [
     "jsonpath-ng",
     "py3langid",
     "tiktoken",
+    "anthropic>=1.12.1",
 ]
 
 [dependency-groups]
