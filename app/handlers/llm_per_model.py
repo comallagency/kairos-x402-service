@@ -110,20 +110,16 @@ def make_router(*, route_path: str, route_key: str, model: str, provider: dict, 
     async def _sample():
         return {"request": sample_request, "response": sample_response}
 
-    @router.post(route_path, description=ROUTE_DESCRIPTIONS[description_key])
-    async def _post(request: Request):
+    async def _paid(request: Request, body: dict):
         payer = extract_payer_address(request)
         user_agent = request.headers.get("user-agent")
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
         body = body if isinstance(body, dict) else {}
         body_excerpt = json.dumps(body)[:2000]
+        method = request.method
 
         if body.get("stream"):
             db.log_request(
-                route=route_key, method="POST", status="error", payer=payer,
+                route=route_key, method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt, error_reason="streaming_not_supported",
             )
             return JSONResponse(
@@ -134,7 +130,7 @@ def make_router(*, route_path: str, route_key: str, model: str, provider: dict, 
         messages = _validate_messages(body)
         if messages is None:
             db.log_request(
-                route=route_key, method="POST", status="error", payer=payer,
+                route=route_key, method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt, error_reason="invalid_request",
             )
             return JSONResponse(
@@ -147,7 +143,7 @@ def make_router(*, route_path: str, route_key: str, model: str, provider: dict, 
                 data, ceiling, real_cost = await lookup(model, provider, messages, body.get("max_tokens"), fallback_provider=fallback_provider)
         except asyncio.TimeoutError:
             db.log_request(
-                route=route_key, method="POST", status="error", payer=payer,
+                route=route_key, method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt, error_reason="upstream_timeout",
             )
             return JSONResponse(
@@ -156,18 +152,48 @@ def make_router(*, route_path: str, route_key: str, model: str, provider: dict, 
             )
         except OpenRouterError as exc:
             db.log_request(
-                route=route_key, method="POST", status="error", payer=payer,
+                route=route_key, method=method, status="error", payer=payer,
                 user_agent=user_agent, body_excerpt=body_excerpt, error_reason=str(exc)[:200],
             )
             return JSONResponse({"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, status_code=502)
 
         billed = effective_price(payer, ceiling)
         db.log_request(
-            route=route_key, method="POST", status="paid", latency_ms=t.elapsed_ms,
+            route=route_key, method=method, status="paid", latency_ms=t.elapsed_ms,
             amount_usdc=billed, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
             upstream_cost_usd=real_cost, margin_usd=billed - real_cost,
         )
         receipt = make_receipt(model, route_key, t.elapsed_ms, billed)
         return Response(content=json.dumps({**data, "x402_receipt": receipt}), media_type="application/json")
+
+    async def _body_from_request(request: Request, *, use_listing_default: bool) -> dict:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        if _validate_messages(body):
+            return body
+        prompt = request.query_params.get("q") or request.query_params.get("prompt")
+        if prompt:
+            max_tokens = request.query_params.get("max_tokens")
+            out = {"messages": [{"role": "user", "content": prompt}]}
+            if max_tokens:
+                out["max_tokens"] = max_tokens
+            return out
+        if use_listing_default:
+            return dict(sample_request)
+        return body
+
+    @router.get(route_path, description=ROUTE_DESCRIPTIONS[description_key])
+    async def _get(request: Request):
+        body = await _body_from_request(request, use_listing_default=True)
+        return await _paid(request, body)
+
+    @router.post(route_path, description=ROUTE_DESCRIPTIONS[description_key])
+    async def _post(request: Request):
+        body = await _body_from_request(request, use_listing_default=False)
+        return await _paid(request, body)
 
     return router

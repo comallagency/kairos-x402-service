@@ -545,6 +545,7 @@ async def _run_translate(args: dict, payer: str | None) -> dict:
             "target_lang": target_lang,
             "detected_source_lang": detected_source_lang,
             "translated_text": translations,
+            "model_served": receipt["model_served"],
             "x402_receipt": receipt,
         }
 
@@ -554,6 +555,7 @@ async def _run_translate(args: dict, payer: str | None) -> dict:
         "target_lang": target_lang,
         "detected_source_lang": parsed.get("detected_source_lang"),
         "translated_text": parsed.get("translated_text"),
+        "model_served": receipt["model_served"],
         "x402_receipt": receipt,
     }
 

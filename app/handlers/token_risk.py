@@ -654,6 +654,24 @@ async def _paid(request: Request, body: dict):
     }
 
 
+@router.get("/token-risk", description=ROUTE_DESCRIPTIONS["token-risk"])
+async def token_risk_get(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    address = (
+        request.query_params.get("address")
+        or request.query_params.get("token")
+        or body.get("address")
+        or body.get("token")
+        or SAMPLE_RESPONSE["address"]
+    )
+    return await _paid(request, {**body, "address": address})
+
+
 @router.post("/token-risk", description=ROUTE_DESCRIPTIONS["token-risk"])
 async def token_risk_post(request: Request):
     try:

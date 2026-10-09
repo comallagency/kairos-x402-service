@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suivi · visites et paiements</title>
+<style>
+:root{
+  --bg:#0b0d10;--card:#14181e;--card2:#1a2028;--line:#252c36;
+  --text:#e8edf4;--muted:#8b97a8;--faint:#5c6778;
+  --green:#2ee59d;--blue:#6ea8ff;--amber:#f0c14b;--red:#ff6b7a;
+  --green-dim:rgba(46,229,157,.18);--blue-dim:rgba(110,168,255,.18);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.45 ui-sans-serif,system-ui,-apple-system,sans-serif}
+.wrap{max-width:1120px;margin:0 auto;padding:18px 16px 48px}
+.nav{font-size:13px;color:var(--faint);margin-bottom:18px}
+.nav a{color:var(--muted);text-decoration:none}
+.nav a:hover{color:var(--text)}
+.nav .here{color:var(--text);font-weight:650}
+.head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+h1{margin:0;font-size:22px;font-weight:700}
+.pill{display:inline-flex;align-items:center;gap:7px;margin-left:10px;
+  font-size:11px;letter-spacing:.06em;color:var(--green);font-weight:700;vertical-align:middle}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px var(--green-dim);animation:pulse 1.6s ease-out infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 7px transparent}}
+.meta{color:var(--muted);font-size:13px}
+.meta b{color:var(--text);font-weight:650}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px}
+@media(max-width:860px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.kpi .n{font-size:22px;font-weight:750;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:11.5px;color:var(--muted);margin-top:2px}
+.kpi.g .n{color:var(--green)}
+.kpi.b .n{color:var(--blue)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+@media(max-width:860px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.ph{display:flex;justify-content:space-between;align-items:baseline;padding:12px 14px 0}
+.ph h2{margin:0;font-size:14px;font-weight:650}
+.ph .sub{font-size:12px;color:var(--faint)}
+.chart{padding:8px 10px 12px;height:220px}
+svg{display:block;width:100%;height:100%}
+.legend{display:flex;gap:14px;padding:0 14px 12px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.wide{margin-bottom:10px}
+.feed{max-height:380px;overflow-y:auto}
+.row{display:grid;grid-template-columns:64px 72px minmax(0,1fr) auto;gap:10px;
+  align-items:center;padding:9px 14px;border-bottom:1px solid var(--line);font-size:13px}
+.row:last-child{border-bottom:0}
+.t{color:var(--faint);font-variant-numeric:tabular-nums}
+.st{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.st.paid{color:var(--green)} .st.unpaid{color:var(--amber)} .st.error{color:var(--red)}
+.st.other{color:var(--muted)}
+.who{min-width:0}
+.who .ua{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.who .sub{font-size:12px;color:var(--faint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.amt{color:var(--green);font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+.empty{padding:28px 14px;color:var(--faint);text-align:center}
+.err{background:rgba(255,107,122,.12);border:1px solid var(--red);color:var(--red);
+  border-radius:10px;padding:10px 14px;margin-bottom:12px;display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="nav">
+  <a href="/admin">Admin</a> · <a href="/admin/live">Live</a> ·
+  <span class="here">Suivi</span> ·
+  <a href="/admin/missions">Missions</a> · <a href="/admin/usine">Usine</a> ·
+  <a href="/admin/daily">Daily</a>
+</nav>
+
+<div class="head">
+  <h1>Visites et paiements
+    <span class="pill"><span class="dot"></span><span id="pillTxt">EN DIRECT</span></span>
+  </h1>
+  <div class="meta">Base · rafraîchi toutes les 8 s · <span id="stamp">—</span></div>
+</div>
+<div class="err" id="err"></div>
+
+<div class="kpis">
+  <div class="kpi b"><div class="n" id="k-visites">—</div><div class="l">Visites 24 h</div></div>
+  <div class="kpi"><div class="n" id="k-unpaid">—</div><div class="l">402 non convertis 24 h</div></div>
+  <div class="kpi g"><div class="n" id="k-paid">—</div><div class="l">Paiements 24 h</div></div>
+  <div class="kpi g"><div class="n" id="k-usdc">—</div><div class="l">USDC 24 h</div></div>
+  <div class="kpi"><div class="n" id="k-usdc7">—</div><div class="l">USDC 7 j</div></div>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <div class="ph"><h2>Visites par heure</h2><span class="sub">24 h</span></div>
+    <div class="chart" id="c-visites"></div>
+    <div class="legend">
+      <span><i style="background:var(--blue)"></i>visites</span>
+      <span><i style="background:var(--amber)"></i>402</span>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="ph"><h2>Paiements par heure</h2><span class="sub">24 h · hors wallets mécaniques</span></div>
+    <div class="chart" id="c-paid"></div>
+    <div class="legend">
+      <span><i style="background:var(--green)"></i>paiements</span>
+      <span><i style="background:#8dffc9"></i>USDC</span>
+    </div>
+  </div>
+</div>
+
+<div class="panel wide">
+  <div class="ph"><h2>7 derniers jours</h2><span class="sub">visites et paiements</span></div>
+  <div class="chart" id="c-days"></div>
+  <div class="legend">
+    <span><i style="background:var(--blue)"></i>visites</span>
+    <span><i style="background:var(--green)"></i>paiements</span>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="ph"><h2>Derniers événements</h2><span class="sub">20 plus récents</span></div>
+  <div class="feed" id="feed"><div class="empty">En attente…</div></div>
+</div>
+</div>
+
+<script>
+const POLL_MS = 8000;
+let timer = null;
+
+function fmtN(n){ return Number(n||0).toLocaleString("fr-FR"); }
+function fmtUsdc(n){ return Number(n||0).toFixed(4); }
+function esc(s){
+  return String(s||"").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function whoLabel(ua, payer){
+  const u = (ua||"").toLowerCase();
+  const p = (payer||"").toLowerCase();
+  if (u.includes("lumiere") || u.includes("paycheck")) return "Lumière PayCheck";
+  if (u.includes("cog-x402") || p.startsWith("0x6a0b784")) return "cog-x402-audit";
+  if (u.includes("vet402")) return "vet402";
+  if (u.includes("x402scan") || u.includes("bazaar")) return "indexeur";
+  if (payer) return payer.slice(0,10)+"…";
+  if (ua) return ua.split(/[ /]/)[0];
+  return "inconnu";
+}
+
+function maxOf(arr){ return Math.max(1, ...arr); }
+
+function linePath(vals, w, h, pad){
+  const n = vals.length;
+  if (!n) return "";
+  const max = maxOf(vals);
+  const innerW = w - pad.l - pad.r;
+  const innerH = h - pad.t - pad.b;
+  return vals.map((v,i) => {
+    const x = pad.l + (n===1 ? innerW/2 : i * innerW / (n-1));
+    const y = pad.t + innerH - (v/max)*innerH;
+    return (i?"L":"M")+x.toFixed(1)+","+y.toFixed(1);
+  }).join(" ");
+}
+
+function areaPath(vals, w, h, pad){
+  const line = linePath(vals, w, h, pad);
+  if (!line) return "";
+  const n = vals.length;
+  const innerW = w - pad.l - pad.r;
+  const y0 = h - pad.b;
+  const x0 = pad.l;
+  const x1 = pad.l + (n===1 ? innerW/2 : innerW);
+  return line+" L"+x1.toFixed(1)+","+y0+" L"+x0.toFixed(1)+","+y0+" Z";
+}
+
+function bars(vals, w, h, pad, color, group, gi, gn){
+  const n = vals.length;
+  if (!n) return "";
+  const max = maxOf(group);
+  const innerW = w - pad.l - pad.r;
+  const innerH = h - pad.t - pad.b;
+  const slot = innerW / n;
+  const bw = Math.max(2, slot * 0.36);
+  const offset = (gi - (gn-1)/2) * (bw + 2);
+  return vals.map((v,i) => {
+    const bh = (v/max)*innerH;
+    const x = pad.l + i*slot + slot/2 - bw/2 + offset;
+    const y = pad.t + innerH - bh;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0,bh).toFixed(1)}" rx="2" fill="${color}"></rect>`;
+  }).join("");
+}
+
+function axisLabels(labels, w, h, pad, every){
+  const n = labels.length;
+  const innerW = w - pad.l - pad.r;
+  return labels.map((lb,i) => {
+    if (i % every !== 0 && i !== n-1) return "";
+    const x = pad.l + (n===1 ? innerW/2 : i * innerW / (n-1));
+    return `<text x="${x.toFixed(1)}" y="${h-4}" text-anchor="middle" fill="#5c6778" font-size="10">${esc(lb)}</text>`;
+  }).join("");
+}
+
+function renderDualLine(el, a, b, labels, c1, c2, c1fill){
+  const w = el.clientWidth || 520, h = 220;
+  const pad = {t:12,r:8,b:22,l:8};
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <path d="${areaPath(a,w,h,pad)}" fill="${c1fill}"></path>
+    <path d="${linePath(a,w,h,pad)}" fill="none" stroke="${c1}" stroke-width="2"></path>
+    <path d="${linePath(b,w,h,pad)}" fill="none" stroke="${c2}" stroke-width="2" stroke-dasharray="4 3"></path>
+    ${axisLabels(labels,w,h,pad,3)}
+  </svg>`;
+}
+
+function renderBarsLine(el, barsV, lineV, labels, barColor, lineColor){
+  const w = el.clientWidth || 520, h = 220;
+  const pad = {t:12,r:8,b:22,l:8};
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    ${bars(barsV,w,h,pad,barColor,barsV,0,1)}
+    <path d="${linePath(lineV,w,h,pad)}" fill="none" stroke="${lineColor}" stroke-width="2"></path>
+    ${axisLabels(labels,w,h,pad,3)}
+  </svg>`;
+}
+
+function renderDayBars(el, visits, paid, labels){
+  const w = el.clientWidth || 1040, h = 220;
+  const pad = {t:12,r:8,b:22,l:8};
+  const group = visits.map((v,i) => Math.max(v, paid[i]*40));
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    ${bars(visits,w,h,pad,"#6ea8ff",group,0,2)}
+    ${bars(paid,w,h,pad,"#2ee59d",group,1,2)}
+    ${axisLabels(labels,w,h,pad,1)}
+  </svg>`;
+}
+
+function statusClass(s){
+  if (s==="paid") return "paid";
+  if (s==="unpaid") return "unpaid";
+  if (s==="error"||s==="payment_failed"||s==="capacity_reached") return "error";
+  return "other";
+}
+
+function render(data){
+  const t = data.totals || {};
+  document.getElementById("k-visites").textContent = fmtN(t.visits);
+  document.getElementById("k-unpaid").textContent = fmtN(t.unpaid);
+  document.getElementById("k-paid").textContent = fmtN(t.paid);
+  document.getElementById("k-usdc").textContent = fmtUsdc(t.paid_usdc);
+  document.getElementById("k-usdc7").textContent = fmtUsdc(t.paid_usdc_7d);
+  document.getElementById("stamp").textContent = (data.generated_at||"").replace("T"," ").slice(0,19)+" UTC";
+
+  const hours = data.hours_24 || [];
+  renderDualLine(
+    document.getElementById("c-visites"),
+    hours.map(h=>h.visits), hours.map(h=>h.unpaid), hours.map(h=>h.label),
+    "#6ea8ff", "#f0c14b", "rgba(110,168,255,.18)"
+  );
+  renderBarsLine(
+    document.getElementById("c-paid"),
+    hours.map(h=>h.paid), hours.map(h=>h.paid_usdc), hours.map(h=>h.label),
+    "#2ee59d", "#8dffc9"
+  );
+  const days = data.days_7 || [];
+  renderDayBars(
+    document.getElementById("c-days"),
+    days.map(d=>d.visits), days.map(d=>d.paid), days.map(d=>d.label)
+  );
+
+  const feed = data.feed || [];
+  const box = document.getElementById("feed");
+  if (!feed.length){
+    box.innerHTML = '<div class="empty">Aucun événement</div>';
+    return;
+  }
+  box.innerHTML = feed.map(e => {
+    const amt = e.status==="paid" && e.amount_usdc != null
+      ? `<span class="amt">$${Number(e.amount_usdc).toFixed(4)}</span>` : "";
+    return `<div class="row">
+      <span class="t">${esc(e.when)}</span>
+      <span class="st ${statusClass(e.status)}">${esc(e.status)}</span>
+      <div class="who">
+        <div class="ua">${esc(e.method)} ${esc(e.route)}</div>
+        <div class="sub">${esc(whoLabel(e.user_agent, e.payer))}</div>
+      </div>
+      ${amt}
+    </div>`;
+  }).join("");
+}
+
+async function tick(){
+  const err = document.getElementById("err");
+  try{
+    const r = await fetch("/admin/suivi.json", {credentials:"same-origin", cache:"no-store"});
+    if (!r.ok) throw new Error("HTTP "+r.status);
+    const data = await r.json();
+    err.style.display = "none";
+    render(data);
+    document.getElementById("pillTxt").textContent = "EN DIRECT";
+  }catch(e){
+    err.style.display = "block";
+    err.textContent = "Mise à jour interrompue — "+e.message;
+    document.getElementById("pillTxt").textContent = "HORS LIGNE";
+  }
+}
+
+tick();
+timer = setInterval(tick, POLL_MS);
+window.addEventListener("resize", () => { /* next poll redraws */ });
+</script>
+</body>
+</html>
