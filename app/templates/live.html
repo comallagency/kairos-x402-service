@@ -206,7 +206,7 @@ button.ghost:hover{color:var(--text)}
 <div class="wrap">
 
 <nav class="nav">
-  <a href="/admin">Admin</a> · <span class="here">Live</span> · <a href="/admin/missions">Missions</a> · <a href="/admin/usine">Usine</a> · <a href="/admin/daily">Daily</a>
+  <a href="/admin">Admin</a> · <span class="here">Live</span> · <a href="/admin/suivi">Suivi</a> · <a href="/admin/missions">Missions</a> · <a href="/admin/usine">Usine</a> · <a href="/admin/daily">Daily</a>
 </nav>
 
 <div class="head">
@@ -760,7 +760,23 @@ async function load(){
   try {
     const r = await fetch('/admin/data.json', {credentials:'same-origin', cache:'no-store'});
     if (!r.ok) throw 0;
-    const next = normalise(await r.json());
+    const raw = await r.json();
+    // 2026-10-09: GET /admin/data.json returns {"status":"computing"} with
+    // no events/stats at all in the first seconds after a deploy (the
+    // background aggregation loop hasn't finished its first pass yet) -
+    // handled explicitly, before normalise(), rather than letting it
+    // render as an indistinguishable "0 events" state (which looks
+    // identical to a genuinely broken render() to anyone, including
+    // scripts/live_render_check/check.js's own pre-cutover probe).
+    if (raw && raw.status === 'computing') {
+      LAST_FETCH = Date.now(); tickClock(); OK = true;
+      const tk = document.getElementById('ticker');
+      if (tk) tk.textContent = 'Calcul en cours (premier chargement après déploiement)…';
+      const feed = document.getElementById('feed');
+      if (feed) feed.textContent = 'Les données seront disponibles dans quelques secondes.';
+      return;
+    }
+    const next = normalise(raw);
     DATA = next; OK = true;
     render(DATA, false);
   } catch (_) {

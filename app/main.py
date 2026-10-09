@@ -21,8 +21,8 @@ from fastapi.responses import FileResponse
 from fastmcp.utilities.lifespan import combine_lifespans
 
 from app import db
-from app.admin import dashboard_cache_loop, router as admin_router
-from app.capacity import CapacityGateMiddleware, JobsCircuitBreakerMiddleware, LLMGatewayCircuitBreakerMiddleware, PinnedModelCircuitBreakerMiddleware
+from app.admin import dashboard_cache_loop, refresh_dashboard_cache, router as admin_router
+from app.capacity import CapacityGateMiddleware, JobsCircuitBreakerMiddleware, LLMGatewayCircuitBreakerMiddleware, PinnedModelCircuitBreakerMiddleware, TokenCardCircuitBreakerMiddleware
 from app.client_ip import ClientIpMiddleware
 from app.retired_routes import RetiredRouteMiddleware
 from app.db import init_db
@@ -51,6 +51,7 @@ from app.handlers.probe import router as probe_router
 from app.handlers.search import router as search_router
 from app.handlers.summarize import router as summarize_router
 from app.handlers.token_risk import router as token_risk_router
+from app.handlers.token_card import router as token_card_router
 from app.handlers.research import router as research_router
 from app.handlers.sentiment import router as sentiment_router
 from app.handlers.classify import router as classify_router
@@ -120,19 +121,21 @@ async def app_lifespan(app: FastAPI):
     invalidate_route_configs_cache()
     from app.capacity import refresh_route_keys
     refresh_route_keys()
-    # Best-effort only (precomputes an embedding cache so the first paying
-    # /discover caller doesn't eat Ollama's cold-start cost) - must never be
-    # able to block startup itself. Discovered 2026-10-02 blocking a deploy:
-    # Ollama was unreachable in a way that hangs rather than fails fast
-    # (not a quick connection-refused), and warm_discover_cache() had no
-    # overall bound, only a per-HTTP-call one - multiplied across every
-    # route's embedding call, the wait was long enough for Docker's
-    # healthcheck to kill the container before startup ever finished.
-    try:
-        await asyncio.wait_for(warm_discover_cache(), timeout=20.0)
-    except asyncio.TimeoutError:
-        logger.warning("warm_discover_cache() timed out after 20s - continuing startup without it")
+    # Startup waits for NOTHING (2026-10-09, revised after two earlier
+    # attempts that each bounded a warm-up with its own timeout but still
+    # awaited it before startup could complete - sequential 20s+25s bounds
+    # stacked past Docker's healthcheck patience even though neither one
+    # alone was unbounded). Both warm-ups are now ordinary background
+    # tasks, exactly like worker_loop/heartbeat_loop/marketplace_loop below
+    # - GET /health and every other route are servable the instant this
+    # function returns, regardless of how long either warm-up takes.
+    # warm_discover_cache() being best-effort for /discover's embedding
+    # cache, and GET /admin/data.json returning an explicit
+    # {"status": "computing"} placeholder (see admin.py) instead of ever
+    # blocking on a cold dashboard cache, both tolerate running fully
+    # unawaited from t=0.
     tasks = [
+        asyncio.create_task(warm_discover_cache()),
         asyncio.create_task(worker_loop()),
         asyncio.create_task(heartbeat_loop()),
         asyncio.create_task(marketplace_loop()),
@@ -181,6 +184,7 @@ inner_app.include_router(web_read_router)
 inner_app.include_router(extract_router)
 inner_app.include_router(summarize_router)
 inner_app.include_router(token_risk_router)
+inner_app.include_router(token_card_router)
 inner_app.include_router(research_router)
 inner_app.include_router(sentiment_router)
 inner_app.include_router(classify_router)
@@ -267,7 +271,8 @@ capacity_gated = CapacityGateMiddleware(mpp_wrapped)
 jobs_breaker = JobsCircuitBreakerMiddleware(capacity_gated)
 llm_gateway_breaker = LLMGatewayCircuitBreakerMiddleware(jobs_breaker)
 pinned_model_breaker = PinnedModelCircuitBreakerMiddleware(llm_gateway_breaker)
-body_compat = PaymentBodyCompatMiddleware(pinned_model_breaker)
+token_card_breaker = TokenCardCircuitBreakerMiddleware(pinned_model_breaker)
+body_compat = PaymentBodyCompatMiddleware(token_card_breaker)
 # A retired path (app/retired_routes.py) is gated before everything else -
 # it must never reach payment/capacity/circuit-breaker logic or the real
 # handler (2026-10-01: that gap let /llm/gemini-flash and /llm/deepseek run

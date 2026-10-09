@@ -591,13 +591,16 @@ async def dashboard_cache_loop() -> None:
 
 @router.get("/admin/data.json", include_in_schema=False)
 async def admin_data(_: None = Depends(check_auth)):
+    # Never computes anything itself (2026-10-09 incident: three straight
+    # attempts to bound a synchronous/eager compute-on-cold-cache path here
+    # all broke some part of the deploy - RPC call blocking the render
+    # check, then event-loop starvation blocking /health, then a bounded
+    # startup await stacking past the healthcheck's own patience).
+    # dashboard_cache_loop() is the ONLY thing that ever calls
+    # refresh_dashboard_cache() - this always returns immediately, cache or not.
     data = _DASHBOARD_CACHE.get("data")
     if data is None:
-        # Nothing computed yet (background loop hasn't run its first pass -
-        # only possible in the few seconds right after startup). Compute
-        # once, synchronously, rather than serve an empty dashboard.
-        await refresh_dashboard_cache()
-        data = _DASHBOARD_CACHE.get("data", {})
+        return {"status": "computing", "network": config.X402_NETWORK}
     return data
 
 
