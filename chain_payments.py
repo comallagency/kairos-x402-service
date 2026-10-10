@@ -172,6 +172,24 @@ async def sync() -> None:
         # Prefer the URL that answered eth_blockNumber for the rest of the run.
         prefer = [active_url] + [u for u in urls if u != active_url]
 
+        # Wallet A's own USDC balance (2026-10-10: /admin/live shows this,
+        # read-only from here - the one eth_call this cron already has the
+        # RPC/client/asset context for, never repeated at render time).
+        try:
+            balance_call_data = "0x70a08231" + _pad_address_topic(config.X402_PAY_TO)[2:]
+            balance_raw, used = await _rpc_call_failover(
+                client, prefer, "eth_call", [{"to": usdc_address, "data": balance_call_data}, "latest"]
+            )
+            wallet_a_balance = int(balance_raw, 16) / (10**decimals)
+            db.set_chain_sync_state(f"wallet_a_balance_usdc:{network}", str(wallet_a_balance))
+            db.set_chain_sync_state(
+                f"wallet_a_balance_checked_at:{network}", datetime.now(timezone.utc).isoformat()
+            )
+        except (RpcHttpError, httpx.HTTPError, RuntimeError, ValueError) as exc:
+            # Never let a balance-check hiccup abort the transfer sync below -
+            # the dashboard just keeps showing the last known value/timestamp.
+            print(f"wallet A balance check failed (non-fatal): {exc}", file=sys.stderr)
+
         last_synced = db.get_chain_sync_state(f"last_block:{network}")
         from_block = (
             int(last_synced) + 1
