@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -23,10 +24,17 @@ NETWORKS = {
         caip2="eip155:8453",
         name="Base",
         native_symbol="ETH",
+        # Reordered 2026-10-10 to match app.base_chain.rpc_client's own
+        # measured order (same 3 providers) - 1rpc.io/base specifically
+        # returns a bare 410 Gone for eth_getCode (the exact method
+        # token_risk.py's bytecode lookup needs) and ranged 300ms-1.7s
+        # even on methods it does serve, so trying it first wasted the
+        # now-short first slice on the worst performer for this network's
+        # most latency-sensitive caller.
         rpc_urls=(
-            "https://1rpc.io/base",
             "https://base.drpc.org",
             "https://mainnet.base.org",
+            "https://1rpc.io/base",
         ),
         usdc="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     ),
@@ -110,10 +118,36 @@ def resolve_network(value: object) -> EvmNetwork:
     return network
 
 
+# 2026-10-10: was `httpx.AsyncClient(timeout=12.0)` applied PER PROVIDER -
+# a single slow/hanging first URL could burn up to 12s before the loop
+# ever tried the next one, which is longer than every real caller's own
+# outer deadline (token_risk.py's _BYTECODE_LIQUIDITY_TIMEOUT_S=2.5s among
+# them) - so a slow (not even down) first provider meant the fallback list
+# never got a turn at all, regardless of how healthy providers #2/#3 were.
+# Measured live (2026-10-10): 4/6 real /token-card calls failed at exactly
+# ~2.5s (the CALLER's wait_for firing, not an RPC error) while this
+# function's own providers never finished one pass. Same adaptive
+# short-timeout, fail-fast pattern already proven in
+# app.base_chain.rpc_client.call() (RPC_TIMEOUT_S=3.0, same provider set,
+# reordered by measured latency) - reused here, not reinvented, so every
+# caller of this function (wallet-balance, gas-price, wallet-intelligence,
+# token-risk, token-card) gets a real multi-provider fallback within its
+# own existing outer budget instead of exhausting it on provider #1 alone.
+RPC_TIMEOUT_S = 3.0
+_MIN_PER_PROVIDER_S = 1.0
+
+
 async def rpc(network: EvmNetwork, method: str, params: list):
+    deadline = time.monotonic() + RPC_TIMEOUT_S
     last_error: Exception | None = None
-    async with httpx.AsyncClient(timeout=12.0) as client:
-        for url in network.rpc_urls:
+    async with httpx.AsyncClient() as client:
+        urls = network.rpc_urls
+        for i, url in enumerate(urls):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            providers_left = len(urls) - i
+            per_call_timeout = min(remaining, max(_MIN_PER_PROVIDER_S, remaining / providers_left))
             try:
                 response = await client.post(
                     url,
@@ -123,6 +157,7 @@ async def rpc(network: EvmNetwork, method: str, params: list):
                         "method": method,
                         "params": params,
                     },
+                    timeout=per_call_timeout,
                 )
                 response.raise_for_status()
                 payload = response.json()
