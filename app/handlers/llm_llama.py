@@ -1,6 +1,22 @@
 """POST /llm/llama - pay-per-call meta-llama/llama-4-maverick, OpenAI-compatible passthrough.
 
-Pinned to DeepInfra - measured 2026-09-30: 99.95% uptime_last_30m, a real test call succeeded in 0.86s. Novita measured equally well that day (100% uptime, 0.50s) but has a documented history of volatility for this account on a different model (see research.py's own module docstring, 37.9% uptime on a bad day) - DeepInfra preferred as the more conservative pick when the two are this close.
+Re-pinned to Parasail 2026-10-10: DeepInfra (the original 2026-09-30 pin)
+had silently dropped out of OpenRouter's provider list for this model
+entirely - confirmed via GET /api/v1/models/{model}/endpoints, which no
+longer lists DeepInfra at all (only DigitalOcean, Novita, Parasail,
+Google). With PROVIDER's hard `only`/`allow_fallbacks: False`, every real
+paid call since whenever that happened failed deterministically with
+OpenRouter 404 "no allowed providers available" - caught via a real
+buyer's (lumiere-paycheck-prober) two failed paid attempts today
+(03:06 and 09:11 UTC), both verified-but-unsettled (x402 never settles a
+>=400 response), which is exactly why their own catalog rates this route
+C ("no confirmed paid test"). Measured today, 2 real calls each, 100%
+uptime_last_30m on all three live candidates: DigitalOcean 0.87-1.22s,
+Novita 0.48-1.31s, Parasail 0.55-0.58s (tightest, most consistent) -
+Parasail picked on that basis, same single-pinned-provider, no-fallback
+shape as before (see research.py's own docstring for why a hard pin
+beats open fallback here: OpenRouter's load-balancing can silently route
+to a slow/unreliable provider serving the same model id).
 
 Same engine as POST /v1/chat/completions (app/handlers/llm_gateway.py):
 "exact" scheme only, ceiling computed from max_tokens via that same
@@ -12,7 +28,7 @@ from app.handlers.llm_per_model import make_price_fn, make_router
 from app.receipts import make_receipt
 
 MODEL = 'meta-llama/llama-4-maverick'
-PROVIDER = {'only': ['DeepInfra'], 'allow_fallbacks': False}
+PROVIDER = {'only': ['Parasail'], 'allow_fallbacks': False}
 ROUTE_PATH = '/llm/llama'
 ROUTE_KEY = 'llm/llama'
 
@@ -24,7 +40,7 @@ SAMPLE_RESPONSE = {
     "object": "chat.completion",
     "created": 1790781075,
     "model": "meta-llama/llama-4-maverick",
-    "provider": "DeepInfra",
+    "provider": "Parasail",
     "choices": [
         {
             "index": 0,

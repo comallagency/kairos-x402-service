@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -57,6 +58,15 @@ router = APIRouter()
 
 GLOBAL_DEADLINE_S = 4.3
 CLAUDE_TIMEOUT_S = 2.0
+# 2026-10-10: the on-chain lookup phase alone has been measured eating up
+# to ~2.4s of GLOBAL_DEADLINE_S (right at _lookup()'s own internal budget),
+# leaving the fixed CLAUDE_TIMEOUT_S=2.0 to occasionally push the total
+# past 4.3s (measured live: one real call at 4.463s). Claude's own timeout
+# is now dynamic - whatever's actually left, capped at 2.0s and with a
+# fixed safety margin - rather than always asking for the full 2.0s
+# regardless of how much the lookup phase already spent.
+CLAUDE_SAFETY_MARGIN_S = 0.2
+MIN_CLAUDE_TIMEOUT_S = 0.5  # below this, skip Claude entirely - not enough time left for a real answer
 
 _NOTES = ("SAFE", "CAUTION", "RISKY", "DANGER")
 
@@ -127,7 +137,19 @@ def _deterministic_card(result: dict) -> dict:
 
 
 async def _compute_card(body: dict) -> tuple[dict, dict, float]:
+    t0 = time.monotonic()
     onchain_result = await _lookup(body)
+    elapsed = time.monotonic() - t0
+    claude_timeout = min(CLAUDE_TIMEOUT_S, GLOBAL_DEADLINE_S - elapsed - CLAUDE_SAFETY_MARGIN_S)
+
+    if claude_timeout < MIN_CLAUDE_TIMEOUT_S:
+        # Lookup alone already ate most of the budget - not enough left for
+        # a real Claude round trip, so skip straight to the deterministic
+        # card rather than attempt a call almost certain to be cancelled by
+        # the outer GLOBAL_DEADLINE_S wait_for anyway (never settles either
+        # way, but this avoids paying for a doomed upstream call at all).
+        return onchain_result, _deterministic_card(onchain_result), 0.0
+
     onchain_facts = {
         "address": onchain_result["address"],
         "network": onchain_result["network"],
@@ -137,7 +159,7 @@ async def _compute_card(body: dict) -> tuple[dict, dict, float]:
         "token_risk_verdict": onchain_result["verdict"],
     }
     try:
-        claude_card, cost = await generate_token_card(onchain_facts, timeout_s=CLAUDE_TIMEOUT_S)
+        claude_card, cost = await generate_token_card(onchain_facts, timeout_s=claude_timeout)
         card = {**claude_card, "source": "claude"}
     except AnthropicCardError as exc:
         card = _deterministic_card(onchain_result)
