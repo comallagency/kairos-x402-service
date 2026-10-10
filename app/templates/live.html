@@ -310,7 +310,8 @@ const ago = ms => {
   const s = Math.max(0, Math.round(ms/1000));
   if (s < 4) return 'à l’instant';
   if (s < 60) return 'il y a '+s+' s';
-  return 'il y a '+Math.round(s/60)+' min';
+  if (s < 3600) return 'il y a '+Math.round(s/60)+' min';
+  return 'il y a '+Math.round(s/3600)+' h';
 };
 const pretty = b => { if(!b) return ''; try{return JSON.stringify(JSON.parse(b),null,2)}catch(_){return String(b)} };
 
@@ -511,7 +512,7 @@ function renderInner(d, demo){
       <div class="lbl">Dernier paiement</div>
       <div class="num mono">${lp ? '$'+money(lp.amount_usdc) : '—'}</div>
       <div class="hint" style="margin-top:8px">${lp ? '/'+esc(lp.route) : 'jamais'}</div>
-      <div class="hint" style="margin-top:2px">${lp ? short(lp.payer) + ' · il y a ' + ago(Date.now()-new Date(lp.ts)) : ''}</div>
+      <div class="hint" style="margin-top:2px">${lp ? short(lp.payer) + ' · ' + ago(Date.now()-new Date(lp.ts)) : ''}</div>
     </div>`;
 
   document.getElementById('kpis').innerHTML = `
