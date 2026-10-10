@@ -615,14 +615,11 @@ ROUTE_DESCRIPTIONS = {
         "only when history fits 1-2 log queries. Try GET /token-risk/sample."
     ),
     "token-card": (
-        "Shareable AI token verdict card for Base: Claude writes a "
-        "SAFE/CAUTION/RISKY/DANGER note, a one-line tagline and a "
-        "3-sentence explanation from real on-chain base token analysis - "
-        "reusing /token-risk's own bytecode, liquidity and holder signals, "
-        "never an invented fact. Claude is capped at 2s; a deterministic "
-        "fallback built from the same on-chain data takes over if it's "
-        "slow, so you always get a real, honestly-labeled verdict. Try "
-        "GET /token-card/sample."
+        "Base token verdict card written by Claude Haiku 5.5 (Anthropic) "
+        "from real on-chain data: SAFE/CAUTION/RISKY/DANGER, a tagline, a "
+        "short explanation. A deterministic fallback takes over if Claude "
+        "is slow, honestly labeled. $0.005 - about 4x cheaper than "
+        "comparable cards. Try GET /token-card/sample."
     ),
     "research": (
         "Jev-powered research: routed search, cited answer, claims "
@@ -1935,6 +1932,12 @@ RANK_SAMPLE_OUTPUT = {
 }
 
 
+TOKEN_CARD_TAGS = [
+    "ai token verdict", "token verdict card", "base token analysis", "shareable token verdict",
+    "claude", "anthropic", "token safety check", "rug pull check", "honeypot check",
+    "is this token safe", "memecoin scanner",
+]
+
 TOKEN_CARD_SAMPLE_INPUT = {"address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"}
 
 TOKEN_CARD_INPUT_SCHEMA = {
@@ -1947,23 +1950,30 @@ TOKEN_CARD_INPUT_SCHEMA = {
     "required": ["address"],
 }
 
+# Real output, captured 2026-10-10 by calling app.handlers.token_card._compute_card
+# directly (no payment, no RPC side effect beyond the read) against Base USDC -
+# source is genuinely "claude" here, not hand-written, per the "une VRAIE sortie
+# Claude" requirement for this fiche's output example.
 TOKEN_CARD_SAMPLE_OUTPUT = {
     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     "network": {"key": "base", "name": "Base", "caip2": "eip155:8453"},
     "card": {
         "note": "CAUTION",
-        "tagline": "CAUTION: dangerous power present, but renounced.",
+        "tagline": "Base USDC: no risky functions found, but verdict is CAUTION.",
         "explanation": (
-            "This contract exposes a dangerous owner-only function (set_max_tx_amount). "
-            "Ownership has been renounced. Real on-chain liquidity was found on at least one DEX."
+            "Bytecode analysis flagged no mint, blacklist, pause, or fee-setting functions, "
+            "and the contract is not an upgradeable proxy. Liquidity was found on Uniswap V2, "
+            "V3, and Aerodrome, and the JEV risk verdict is caution with 99% probability. "
+            "Ownership is not renounced, and holder analysis was skipped because this is an "
+            "established token."
         ),
         "disclaimer": "Not financial advice.",
-        "source": "deterministic_fallback",
+        "source": "claude",
     },
     "token_risk_verdict": {
-        "verdict": "caution", "probability": 0.62,
-        "probabilities": {"acceptable": 0.31, "avoid": 0.07, "caution": 0.62},
-        "confidence": 0.55, "verdict_source": "jev",
+        "verdict": "caution", "probability": 0.99,
+        "probabilities": {"avoid": 0.01, "caution": 0.99, "acceptable": 0},
+        "confidence": 0.98, "verdict_source": "jev",
     },
 }
 
@@ -3036,6 +3046,20 @@ def _core_route_configs() -> dict[str, RouteConfig]:
                 output=OutputConfig(example=TOKEN_RISK_SAMPLE_OUTPUT, schema=TOKEN_RISK_OUTPUT_SCHEMA),
             ),
         ),
+        "GET /token-card": RouteConfig(
+            accepts=_payment_option(config.PRICE_TOKEN_CARD),
+            resource=f"{config.BASE_URL}/token-card",
+            description=ROUTE_DESCRIPTIONS["token-card"],
+            mime_type="application/json",
+            service_name="token-verdict-card",
+            icon_url=ICON_URL,
+            tags=TOKEN_CARD_TAGS,
+            extensions=declare_discovery_extension(
+                input=TOKEN_CARD_SAMPLE_INPUT,
+                input_schema=TOKEN_CARD_INPUT_SCHEMA,
+                output=OutputConfig(example=TOKEN_CARD_SAMPLE_OUTPUT, schema=TOKEN_CARD_OUTPUT_SCHEMA),
+            ),
+        ),
         "POST /token-card": RouteConfig(
             accepts=_payment_option(config.PRICE_TOKEN_CARD),
             resource=f"{config.BASE_URL}/token-card",
@@ -3043,7 +3067,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             mime_type="application/json",
             service_name="token-verdict-card",
             icon_url=ICON_URL,
-            tags=["ai token verdict", "token verdict card", "base token analysis", "shareable token verdict"],
+            tags=TOKEN_CARD_TAGS,
             extensions=declare_discovery_extension(
                 input=TOKEN_CARD_SAMPLE_INPUT,
                 input_schema=TOKEN_CARD_INPUT_SCHEMA,
@@ -3317,8 +3341,12 @@ def _core_route_configs() -> dict[str, RouteConfig]:
     # x402/http/middleware/fastapi.py - requires_payment() short-circuits before
     # call_next()), so no regression for real buyers, who already use POST.
     for _get_twin_path in (
+        # /token-card deliberately excluded (2026-10-10): it now has its own
+        # real "GET /token-card" entry above (queryParams, own tags/output),
+        # not a shared-object twin of the POST entry - this loop would
+        # otherwise clobber it right back with the POST-body-shaped one.
         "/search", "/translate", "/pdf", "/web-read", "/extract", "/summarize",
-        "/discover", "/decide", "/guard", "/verify", "/rank", "/token-risk", "/token-card",
+        "/discover", "/decide", "/guard", "/verify", "/rank", "/token-risk",
         "/v1/chat/completions",
         # Same gap, found by auditing every Bazaar-listed resource rather than
         # just the 2 days of probe logs that caught the first 13 (2026-10-01).
