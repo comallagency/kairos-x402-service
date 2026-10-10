@@ -374,6 +374,14 @@ function normalise(j){
     returning: Number(buyerData.returning)||0,
     returnRate: Number(buyerData.return_rate)||0,
     buyersAuditors: Number(buyerDataAud.distinct)||0,
+    revenuesTotal: {
+      d1: Number((j.revenue_total_usdc||{})['24h']) || 0,
+      d7: Number((j.revenue_total_usdc||{})['7d']) || 0,
+      d30: Number((j.revenue_total_usdc||{})['30d']) || 0
+    },
+    revenueTotalToday: Number(j.revenue_total_today_usdc) || 0,
+    walletABalance: j.wallet_a_balance_usdc,
+    walletAMinutesAgo: j.wallet_a_balance_minutes_ago,
     availability: j.availability_7d_pct,
     commercial: j.commercial || {},
     chain: j.chain || {},
@@ -492,7 +500,14 @@ function renderInner(d, demo){
         : `${interestN} intention${interestN===1?'':'s'} non-scanner ont vu un 402. L’offre d’entrée commence à $${money(d.commercial.minimum_price_usdc||.0001)}.`}</div>
     </div>
     <div>
-      <div class="lbl">Aujourd'hui (clients)</div>
+      <div class="lbl">Encaissé total</div>
+      <div class="num ${d.revenueTotalToday>0?'':'zero'} mono">$${money(d.revenueTotalToday)}</div>
+      <div class="hint" style="margin-top:8px">24 h $${money(d.revenuesTotal.d1)} · 7 j $${money(d.revenuesTotal.d7)} · 30 j $${money(d.revenuesTotal.d30)}</div>
+      <div class="hint" style="margin-top:2px">clients $${money(d.revenueToday)} · auditeurs $${money(d.revenueTodayAuditors)}</div>
+      ${d.walletABalance != null ? `<div class="hint" style="margin-top:8px">Solde wallet A : $${money(d.walletABalance)}${d.walletAMinutesAgo != null ? ` (mis à jour il y a ${d.walletAMinutesAgo} min)` : ''}</div>` : ''}
+    </div>
+    <div>
+      <div class="lbl">Aujourd'hui depuis 00:00 UTC (clients)</div>
       <div class="num ${d.revenueToday>0?'':'zero'} mono">$${money(d.revenueToday)}</div>
       <div class="hint" style="margin-top:8px">${d.buyersToday} acheteur${d.buyersToday===1?'':'s'} · dernier ${esc(lastPaymentLine)}</div>
       <div class="hint" style="margin-top:2px">auditeurs $${money(d.revenueTodayAuditors)} · ${d.buyersTodayAuditors} auditeur${d.buyersTodayAuditors===1?'':'s'}</div>

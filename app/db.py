@@ -722,14 +722,23 @@ def recent_events(hours: int = 24) -> list[dict]:
 
 
 def recent_unconverted(limit: int = 20) -> list[dict]:
+    """"Qui frappe" (/admin/live, 24h unconverted list) - testclient rows
+    excluded (2026-10-10) the same way as every revenue/buyer stat, so a
+    stray TestClient-based run never shows up as a real visitor. Overfetches
+    by 4x before filtering so a burst of test rows can't silently shrink
+    the real result below `limit`."""
     with cursor() as cur:
         cur.execute(
-            """SELECT ts, route, user_agent, body_excerpt, error_reason FROM requests
+            """SELECT ts, route, user_agent, body_excerpt, error_reason, payer FROM requests
                WHERE status IN ('unpaid', 'capacity_reached')
                ORDER BY ts DESC LIMIT ?""",
-            (limit,),
+            (limit * 4,),
         )
-        return [dict(row) for row in cur.fetchall()]
+        rows = [dict(row) for row in cur.fetchall()]
+    filtered = [r for r in rows if not _is_test_identity(r.get("payer"), r.get("user_agent"))]
+    for r in filtered:
+        r.pop("payer", None)
+    return filtered[:limit]
 
 
 def count_mpp_attempts_since(hours: int) -> int:
@@ -796,6 +805,22 @@ def set_chain_sync_state(key: str, value: str) -> None:
                ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
             (key, value),
         )
+
+
+def wallet_a_balance_usdc(network: str) -> dict:
+    """Read-only (2026-10-10) - chain_payments.py's own cron (*/30 via
+    scripts/run_in_live_container.sh) is the only thing that ever calls the
+    RPC for this; /admin/live just reads what it already wrote. Returns
+    {"balance_usdc": float|None, "checked_at": iso-str|None} - both None if
+    the cron has never run or the one balance eth_call in it failed every
+    time so far (never blocks the rest of the dashboard on that)."""
+    raw = get_chain_sync_state(f"wallet_a_balance_usdc:{network}")
+    checked_at = get_chain_sync_state(f"wallet_a_balance_checked_at:{network}")
+    try:
+        balance = float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        balance = None
+    return {"balance_usdc": balance, "checked_at": checked_at}
 
 
 def upsert_chain_payment(

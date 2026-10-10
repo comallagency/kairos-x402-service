@@ -1,10 +1,16 @@
-"""Real-network tests for POST /token-card, no mocks. ANTHROPIC_API_KEY is
-not configured yet in this environment (confirmed: config.ANTHROPIC_API_KEY
-== "") - every test here exercises the deterministic fallback path
-(source="deterministic_fallback"), which is also exactly what a buyer gets
-today, before the operator adds the real key. The Claude path itself
-(app.upstream.anthropic.generate_token_card against the real API) is not
-covered here - there is no key to call it with.
+"""Tests for POST /token-card. 2026-10-10: no longer depends on .env -
+every test is isolated from whatever ANTHROPIC_API_KEY actually holds via
+the autouse fixture below (monkeypatch, not a module-level assert), so this
+file's pass/fail never changes just because the operator added a real key.
+
+Fallback-path tests (the original 5) force ANTHROPIC_API_KEY="" themselves
+and exercise app/handlers/token_card.py's deterministic_fallback path - the
+on-chain lookup is real (Base RPC), nothing about Claude is.
+
+test_token_card_claude_path_mocked exercises generate_token_card()'s
+SUCCESS path without ever touching the real Anthropic API: a fake key
+(never a real one, never read from .env, never logged/printed) plus a
+mocked client standing in for `anthropic.AsyncAnthropic`.
 
 KNOWN, SEPARATE, PRE-EXISTING ISSUE (found while writing these tests,
 2026-10-09, confirmed independent of anything in this file or in
@@ -24,8 +30,11 @@ app/handlers/token_card.py's own logic, not a dependency outside its
 control - see the final report for the escalation of the underlying
 issue."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
+import app.upstream.anthropic as anthropic_module
 from app import config
 from app.handlers.token_card import _compute_card, _deterministic_card
 from app.upstream.evm_rpc import EvmRpcError
@@ -34,7 +43,20 @@ USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 DEGEN = "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed"
 BALD = "0x27D2DECb4bFC9C76F0309b8E88dec3a601Fe25a8"  # real, historically documented 2023 Base rug pull
 
-assert config.ANTHROPIC_API_KEY == "", "these tests assume no key configured - re-check if that changes"
+
+@pytest.fixture(autouse=True)
+def _isolated_anthropic_state(monkeypatch):
+    """Runs before every test in this file: defaults to no key configured
+    (the deterministic-fallback path) regardless of what .env actually
+    holds, and resets the module-level client/breaker so one test's mock
+    or a tripped breaker can never leak into the next. A test that wants
+    the Claude path overrides ANTHROPIC_API_KEY and _client itself, after
+    this fixture has already run - same monkeypatch instance, so its
+    reverts still apply at teardown."""
+    monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "")
+    monkeypatch.setattr(anthropic_module, "_client", None)
+    monkeypatch.setattr(anthropic_module, "_breaker_tripped_until", 0.0)
+    monkeypatch.setattr(anthropic_module, "_breaker_last_reason", None)
 
 
 async def _compute_card_tolerant(address: str):
@@ -47,9 +69,9 @@ async def _compute_card_tolerant(address: str):
         raise
 
 
-def _assert_valid_card(card: dict):
+def _assert_valid_card(card: dict, *, source: str = "deterministic_fallback"):
     assert card["note"] in ("SAFE", "CAUTION", "RISKY", "DANGER")
-    assert card["source"] == "deterministic_fallback"
+    assert card["source"] == source
     assert len(card["tagline"]) <= 60
     assert card["explanation"]
     assert card["disclaimer"] == "Not financial advice."
@@ -59,7 +81,7 @@ def _assert_valid_card(card: dict):
 async def test_token_card_usdc_real():
     onchain, card, cost = await _compute_card_tolerant(USDC)
     assert onchain["address"].lower() == USDC.lower()
-    assert cost == 0.0  # no Claude call was made - no key configured
+    assert cost == 0.0  # no Claude call was made - forced by the fixture above, not an environment accident
     _assert_valid_card(card)
 
 
@@ -124,3 +146,45 @@ async def test_token_card_invalid_address_rejected():
     with pytest.raises(EvmRpcError) as exc_info:
         await _compute_card({"address": "not-an-address"})
     assert str(exc_info.value) == "invalid_address"
+
+
+@pytest.mark.asyncio
+async def test_token_card_claude_path_mocked(monkeypatch):
+    """generate_token_card()'s success path, Claude call mocked - never
+    touches the real Anthropic API, never reads or logs a real key (the
+    key set below is obviously fake and never printed). The on-chain
+    lookup (USDC on Base) is real; only the Claude call is faked."""
+    fake_card = {
+        "note": "SAFE",
+        "tagline": "Looks SAFE per mocked Claude response.",
+        "explanation": "Mocked explanation - this call never reached the real Anthropic API.",
+        "disclaimer": "Not financial advice.",
+    }
+    tool_block = MagicMock()
+    tool_block.type = "tool_use"
+    tool_block.name = "emit_token_card"
+    tool_block.input = fake_card
+
+    fake_message = MagicMock()
+    fake_message.content = [tool_block]
+    fake_message.usage = MagicMock(input_tokens=500, output_tokens=80)
+
+    fake_client = MagicMock()
+    fake_client.messages.create = AsyncMock(return_value=fake_message)
+
+    monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "sk-ant-test-fake-key-never-real")
+    monkeypatch.setattr(anthropic_module, "_client", fake_client)
+
+    onchain, card, cost = await _compute_card_tolerant(USDC)
+
+    assert onchain["address"].lower() == USDC.lower()
+    assert card == {**fake_card, "source": "claude"}
+    expected_cost = (
+        (500 / 1_000_000) * config.ANTHROPIC_INPUT_PRICE_PER_MTOK
+        + (80 / 1_000_000) * config.ANTHROPIC_OUTPUT_PRICE_PER_MTOK
+    )
+    assert cost == pytest.approx(expected_cost)
+    fake_client.messages.create.assert_awaited_once()
+    call_kwargs = fake_client.messages.create.await_args.kwargs
+    assert call_kwargs["model"] == config.ANTHROPIC_MODEL
+    assert call_kwargs["tool_choice"] == {"type": "tool", "name": "emit_token_card"}

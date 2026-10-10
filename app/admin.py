@@ -342,6 +342,10 @@ def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> 
     by_route: dict[str, dict] = {}
 
     for row in recent:
+        if db.is_test_identity(row.get("payer"), row.get("user_agent")):
+            # "Qui frappe" (2026-10-10) - a TestClient-based run should
+            # never show up as an agent/visitor on this page.
+            continue
         status = row.get("status") or ""
         ua = (row.get("user_agent") or "").strip()
         payer = row.get("payer")
@@ -520,13 +524,31 @@ def _collect_dashboard_data_sync(openrouter: dict) -> dict:
         for row in recent
     ]
 
+    wallet_a = db.wallet_a_balance_usdc(network)
+    wallet_a_minutes_ago = None
+    if wallet_a["checked_at"]:
+        try:
+            checked_dt = datetime.fromisoformat(wallet_a["checked_at"])
+            wallet_a_minutes_ago = max(0, round((datetime.now(timezone.utc) - checked_dt).total_seconds() / 60))
+        except ValueError:
+            pass
+
     data = {
         "generated_at": generated_at,
         "updated_at": generated_at,
         "network": network,
         "chain_sync_last_completed_at": db.get_chain_sync_state(f"last_sync_completed_at:{network}"),
+        "wallet_a_balance_usdc": wallet_a["balance_usdc"],
+        "wallet_a_balance_checked_at": wallet_a["checked_at"],
+        "wallet_a_balance_minutes_ago": wallet_a_minutes_ago,
         "revenue_usdc": main["revenue_usdc"],
         "revenue_usdc_auditors": main["revenue_usdc_auditors"],
+        # 2026-10-10: "Encaisse total" card - clients + auditors, pure
+        # arithmetic on numbers already fetched above, no new query.
+        "revenue_total_usdc": {
+            k: round(main["revenue_usdc"][k] + main["revenue_usdc_auditors"][k], 6)
+            for k in main["revenue_usdc"]
+        },
         "buyers": main["buyers"],
         "buyers_auditors": main["buyers_auditors"],
         "last_payment_at": main["last_payment_at"],
@@ -546,6 +568,9 @@ def _collect_dashboard_data_sync(openrouter: dict) -> dict:
         "last_payment": last_payment,
         "revenue_today_usdc": today_summary["revenue_today_usdc"],
         "revenue_today_usdc_auditors": today_summary["revenue_today_usdc_auditors"],
+        "revenue_total_today_usdc": round(
+            today_summary["revenue_today_usdc"] + today_summary["revenue_today_usdc_auditors"], 6
+        ),
         "buyers_today": today_summary["buyers_today"],
         "buyers_today_auditors": today_summary["buyers_today_auditors"],
         "history_7d": db.history_7d(),
