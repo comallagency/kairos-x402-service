@@ -1258,10 +1258,10 @@ from app.handlers.language import LANGUAGE_ENABLED, _lookup as _language_lookup,
 from app.handlers.pii_check import PII_CHECK_ENABLED, _lookup as _pii_check_lookup, SAMPLE_REQUEST as PII_CHECK_SAMPLE_INPUT, SAMPLE_RESPONSE as PII_CHECK_SAMPLE_OUTPUT
 from app.handlers.llm_per_model import lookup as _llm_per_model_lookup
 from app.handlers.llm_claude_sonnet import MODEL as _CLAUDE_SONNET_MODEL, PROVIDER as _CLAUDE_SONNET_PROVIDER, SAMPLE_REQUEST as _CLAUDE_SONNET_SAMPLE_REQUEST, SAMPLE_RESPONSE as _CLAUDE_SONNET_SAMPLE_RESPONSE
-from app.handlers.llm_gpt_mini import MODEL as _GPT_MINI_MODEL, PROVIDER as _GPT_MINI_PROVIDER, FALLBACK_PROVIDER as _GPT_MINI_FALLBACK_PROVIDER, SAMPLE_REQUEST as _GPT_MINI_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GPT_MINI_SAMPLE_RESPONSE
-from app.handlers.llm_gemini_flash import GEMINI_FLASH_ENABLED, MODEL as _GEMINI_FLASH_MODEL, PROVIDER as _GEMINI_FLASH_PROVIDER, FALLBACK_PROVIDER as _GEMINI_FLASH_FALLBACK_PROVIDER, SAMPLE_REQUEST as _GEMINI_FLASH_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GEMINI_FLASH_SAMPLE_RESPONSE
+from app.handlers.llm_gpt_mini import MODEL as _GPT_MINI_MODEL, PROVIDER as _GPT_MINI_PROVIDER, SAMPLE_REQUEST as _GPT_MINI_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GPT_MINI_SAMPLE_RESPONSE
+from app.handlers.llm_gemini_flash import GEMINI_FLASH_ENABLED, MODEL as _GEMINI_FLASH_MODEL, PROVIDER as _GEMINI_FLASH_PROVIDER, SAMPLE_REQUEST as _GEMINI_FLASH_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GEMINI_FLASH_SAMPLE_RESPONSE
 from app.handlers.llm_llama import MODEL as _LLAMA_MODEL, PROVIDER as _LLAMA_PROVIDER, SAMPLE_REQUEST as _LLAMA_SAMPLE_REQUEST, SAMPLE_RESPONSE as _LLAMA_SAMPLE_RESPONSE
-from app.handlers.llm_deepseek import DEEPSEEK_ENABLED, MODEL as _DEEPSEEK_MODEL, PROVIDER as _DEEPSEEK_PROVIDER, FALLBACK_PROVIDER as _DEEPSEEK_FALLBACK_PROVIDER, SAMPLE_REQUEST as _DEEPSEEK_SAMPLE_REQUEST, SAMPLE_RESPONSE as _DEEPSEEK_SAMPLE_RESPONSE
+from app.handlers.llm_deepseek import DEEPSEEK_ENABLED, MODEL as _DEEPSEEK_MODEL, PROVIDER as _DEEPSEEK_PROVIDER, SAMPLE_REQUEST as _DEEPSEEK_SAMPLE_REQUEST, SAMPLE_RESPONSE as _DEEPSEEK_SAMPLE_RESPONSE
 
 _CLAUDE_SONNET_EXTENSIONS = declare_mcp_discovery_extension(
     DeclareMcpDiscoveryConfig(
@@ -1312,7 +1312,7 @@ _DEEPSEEK_EXTENSIONS = declare_mcp_discovery_extension(
 
 async def _run_pinned_model_mcp(
     *, ctx, model: str, provider: dict, route_key: str, tool_name: str, extensions: dict,
-    messages: list, max_tokens, fallback_provider: dict | None = None,
+    messages: list, max_tokens,
 ):
     """Shared MCP flow for Pack 2's 5 pinned per-model routes (2026-09-30) -
     the same manual ResourceConfig-building ask_model_tool already needs:
@@ -1364,7 +1364,7 @@ async def _run_pinned_model_mcp(
 
     try:
         with Timer() as t:
-            data, _, real_cost = await _llm_per_model_lookup(model, provider, messages, max_tokens, fallback_provider=fallback_provider)
+            data, _, real_cost = await _llm_per_model_lookup(model, provider, messages, max_tokens)
     except asyncio.TimeoutError:
         db.log_request(
             route=route_key, method="MCP", status="error", payer=payer,
@@ -1933,7 +1933,6 @@ async def llm_gpt_mini_tool(
         ctx=ctx, model=_GPT_MINI_MODEL, provider=_GPT_MINI_PROVIDER,
         route_key="POST /llm/gpt-mini", tool_name="llm_gpt_mini",
         extensions=_GPT_MINI_EXTENSIONS, messages=messages, max_tokens=max_tokens,
-        fallback_provider=_GPT_MINI_FALLBACK_PROVIDER,
     )
 
 
@@ -1954,7 +1953,6 @@ if GEMINI_FLASH_ENABLED:
             ctx=ctx, model=_GEMINI_FLASH_MODEL, provider=_GEMINI_FLASH_PROVIDER,
             route_key="POST /llm/gemini-flash", tool_name="llm_gemini_flash",
             extensions=_GEMINI_FLASH_EXTENSIONS, messages=messages, max_tokens=max_tokens,
-            fallback_provider=_GEMINI_FLASH_FALLBACK_PROVIDER,
         )
 
 
@@ -1994,7 +1992,6 @@ if DEEPSEEK_ENABLED:
             ctx=ctx, model=_DEEPSEEK_MODEL, provider=_DEEPSEEK_PROVIDER,
             route_key="POST /llm/deepseek", tool_name="llm_deepseek",
             extensions=_DEEPSEEK_EXTENSIONS, messages=messages, max_tokens=max_tokens,
-            fallback_provider=_DEEPSEEK_FALLBACK_PROVIDER,
         )
 
 

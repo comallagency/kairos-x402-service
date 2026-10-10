@@ -1,22 +1,25 @@
 """POST /llm/llama - pay-per-call meta-llama/llama-4-maverick, OpenAI-compatible passthrough.
 
-Re-pinned to Parasail 2026-10-10: DeepInfra (the original 2026-09-30 pin)
-had silently dropped out of OpenRouter's provider list for this model
-entirely - confirmed via GET /api/v1/models/{model}/endpoints, which no
-longer lists DeepInfra at all (only DigitalOcean, Novita, Parasail,
-Google). With PROVIDER's hard `only`/`allow_fallbacks: False`, every real
-paid call since whenever that happened failed deterministically with
-OpenRouter 404 "no allowed providers available" - caught via a real
-buyer's (lumiere-paycheck-prober) two failed paid attempts today
-(03:06 and 09:11 UTC), both verified-but-unsettled (x402 never settles a
->=400 response), which is exactly why their own catalog rates this route
-C ("no confirmed paid test"). Measured today, 2 real calls each, 100%
-uptime_last_30m on all three live candidates: DigitalOcean 0.87-1.22s,
-Novita 0.48-1.31s, Parasail 0.55-0.58s (tightest, most consistent) -
-Parasail picked on that basis, same single-pinned-provider, no-fallback
-shape as before (see research.py's own docstring for why a hard pin
-beats open fallback here: OpenRouter's load-balancing can silently route
-to a slow/unreliable provider serving the same model id).
+2026-10-10, corrected twice today: DeepInfra (the original 2026-09-30
+pin) had silently dropped out of OpenRouter's provider list for this
+model entirely - confirmed via GET /api/v1/models/{model}/endpoints,
+which no longer lists DeepInfra at all. First fix re-pinned to Parasail
+on LATENCY alone (0.55-0.58s, tightest of 3 live candidates) without
+checking it against _price_ceiling_usd's own reference price for this
+model - a full provider/margin audit done right after caught that
+mistake: the reference price is $0.1875/$0.6525 per MTok (DigitalOcean's
+price), while Parasail charges $0.35/$1.00 - paying Parasail while
+charging the ceiling (reference x 1.10 MARKUP) would LOSE money on every
+completion token (margin = 0.6525*1.10 - 1.00 = -0.282 USD/MTok). Same
+problem on Novita ($0.27/$0.85 - margin = 0.6525*1.10-0.85 = -0.132
+USD/MTok). DigitalOcean is the ONLY one of the 3 live candidates that is
+margin-positive (by construction: it IS the reference price, so margin
+= reference x 0.10 > 0 exactly) - a single-entry `order` list, not 3,
+because the other two fail the margin check, not reliability (all 3
+measured 100% uptime_last_30m). If broader redundancy is wanted here
+later, it has to come with either a provider priced at or below
+DigitalOcean's rate, or a change to how the ceiling itself is computed -
+neither is in scope for this fix.
 
 Same engine as POST /v1/chat/completions (app/handlers/llm_gateway.py):
 "exact" scheme only, ceiling computed from max_tokens via that same
@@ -28,7 +31,7 @@ from app.handlers.llm_per_model import make_price_fn, make_router
 from app.receipts import make_receipt
 
 MODEL = 'meta-llama/llama-4-maverick'
-PROVIDER = {'only': ['Parasail'], 'allow_fallbacks': False}
+PROVIDER = {'order': ['DigitalOcean'], 'allow_fallbacks': False}
 ROUTE_PATH = '/llm/llama'
 ROUTE_KEY = 'llm/llama'
 
@@ -40,7 +43,7 @@ SAMPLE_RESPONSE = {
     "object": "chat.completion",
     "created": 1790781075,
     "model": "meta-llama/llama-4-maverick",
-    "provider": "Parasail",
+    "provider": "DigitalOcean",
     "choices": [
         {
             "index": 0,

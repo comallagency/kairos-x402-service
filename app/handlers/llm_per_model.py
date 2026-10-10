@@ -4,10 +4,20 @@
 /v1/chat/completions (app/handlers/llm_gateway.py) - same pricing formula
 (ceiling from max_tokens x the model's real OpenRouter rate x MARKUP),
 "exact" scheme only. The only difference from the general gateway: model
-AND provider are fixed per route (not read from the request body), each
-pinned to whichever OpenRouter provider measured most reliable for that
-model on 2026-09-30 - see each route file's own docstring for the real
-uptime/latency numbers behind the pin.
+AND provider are fixed per route (not read from the request body).
+
+2026-10-10: each route's `provider` is now an ORDERED LIST of 2-3 live
+providers (OpenRouter's own native {"order": [...], "allow_fallbacks":
+False} provider-routing field - tried in sequence, server-side, inside
+ONE API call) instead of a single hard pin. This replaces the homemade
+two-stage primary/FALLBACK_PROVIDER retry that used to live here (and the
+PRIMARY_TIMEOUT_S split that came with it) - OpenRouter already does this
+natively, nothing to build. Every provider in every route's list was
+checked against GET /api/v1/models/{model}/endpoints for live status AND
+against _price_ceiling_usd's own reference price for that model, so
+margin (ceiling x MARKUP vs that provider's real per-token cost) stays
+positive no matter which listed provider actually serves a given call -
+see each route file's own docstring for the real numbers behind its list.
 """
 
 from __future__ import annotations
@@ -26,15 +36,11 @@ from app.upstream.openrouter import OpenRouterError, chat_completion_raw
 from app.x402_setup import ROUTE_DESCRIPTIONS
 
 # 20s hard server-side deadline (2026-09-30, correction avant indexation):
-# never settle without a delivered response. PRIMARY_TIMEOUT_S bounds only
-# the primary provider attempt on routes with a fallback_provider (Gemini
-# Flash and DeepSeek, both measured with real 32-34s p95 tail latency on a
-# single provider) - the fallback then gets whatever remains of the 20s
-# total. Routes with no fallback_provider get the full 20s on their one
-# attempt. Either way, the OUTER wait_for in lookup() is the actual
-# ceiling - it fires even if the inner primary-then-fallback sequence
-# itself has a bug, so "20s max, always" holds by construction.
-PRIMARY_TIMEOUT_S = 8.0
+# never settle without a delivered response. The OUTER wait_for in
+# lookup() is the real ceiling here - fires even if OpenRouter's own
+# provider-order routing takes longer than expected internally, so "20s
+# max, always" holds by construction regardless of how many providers in
+# the order list get tried server-side.
 GLOBAL_TIMEOUT_S = 20.0
 
 
@@ -70,32 +76,18 @@ async def _attempt(model: str, provider: dict, messages: list, capped_max_tokens
     return await chat_completion_raw(model, messages, capped_max_tokens, provider=provider)
 
 
-async def _lookup_inner(model: str, provider: dict, fallback_provider: dict | None, messages: list, capped_max_tokens: int) -> dict:
-    if fallback_provider is None:
-        return await _attempt(model, provider, messages, capped_max_tokens)
-    try:
-        return await asyncio.wait_for(_attempt(model, provider, messages, capped_max_tokens), timeout=PRIMARY_TIMEOUT_S)
-    except (asyncio.TimeoutError, OpenRouterError):
-        # Primary was slow (>8s) or errored outright - one bounded retry on
-        # a second, independently-pinned provider, never a third attempt.
-        # The outer wait_for in lookup() still caps the whole thing at 20s
-        # total, so this fallback gets whatever's left of that budget, not
-        # a fresh 8-20s window of its own.
-        return await _attempt(model, fallback_provider, messages, capped_max_tokens)
-
-
-async def lookup(model: str, provider: dict, messages: list, max_tokens_raw: Any, fallback_provider: dict | None = None) -> tuple[dict, float, float]:
+async def lookup(model: str, provider: dict, messages: list, max_tokens_raw: Any) -> tuple[dict, float, float]:
     """Returns (data, ceiling_usd, real_cost_usd). Raises OpenRouterError on
     a genuine upstream failure (mapped to 502 by the caller), or
     asyncio.TimeoutError if nothing came back within GLOBAL_TIMEOUT_S
-    (mapped to 504, never settled - see make_router's _post()).
-    fallback_provider: if given, the primary attempt is capped at
-    PRIMARY_TIMEOUT_S and a slow/failed primary retries once on this
-    second provider - see module docstring."""
+    (mapped to 504, never settled - see make_router's _post()). `provider`
+    carries the route's ordered {"order": [...], "allow_fallbacks": False}
+    list - OpenRouter tries each entry in sequence server-side, inside
+    this one call; no client-side retry loop needed here."""
     capped_max_tokens = _capped_max_tokens(max_tokens_raw)
     ceiling = await _price_ceiling_usd(model, capped_max_tokens, messages)
     data = await asyncio.wait_for(
-        _lookup_inner(model, provider, fallback_provider, messages, capped_max_tokens),
+        _attempt(model, provider, messages, capped_max_tokens),
         timeout=GLOBAL_TIMEOUT_S,
     )
     usage = data.get("usage") or {}
@@ -103,7 +95,7 @@ async def lookup(model: str, provider: dict, messages: list, max_tokens_raw: Any
     return data, ceiling, real_cost
 
 
-def make_router(*, route_path: str, route_key: str, model: str, provider: dict, description_key: str, sample_request: dict, sample_response: dict, fallback_provider: dict | None = None):
+def make_router(*, route_path: str, route_key: str, model: str, provider: dict, description_key: str, sample_request: dict, sample_response: dict):
     router = APIRouter()
 
     @router.get(f"{route_path}/sample", openapi_extra={"security": []})
@@ -140,7 +132,7 @@ def make_router(*, route_path: str, route_key: str, model: str, provider: dict, 
 
         try:
             with Timer() as t:
-                data, ceiling, real_cost = await lookup(model, provider, messages, body.get("max_tokens"), fallback_provider=fallback_provider)
+                data, ceiling, real_cost = await lookup(model, provider, messages, body.get("max_tokens"))
         except asyncio.TimeoutError:
             db.log_request(
                 route=route_key, method=method, status="error", payer=payer,

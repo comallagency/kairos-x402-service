@@ -1,6 +1,16 @@
 """POST /llm/gemini-flash - pay-per-call google/gemini-3.8-flash, OpenAI-compatible passthrough.
 
-Pinned to Google AI Studio - measured 2026-09-30: 100% uptime_last_30m on its best endpoint. Real test calls found this model spends hidden reasoning tokens even on trivial prompts (72 reasoning tokens to answer \"Say OK\" at max_tokens=200) - a small max_tokens (e.g. 10) can come back with empty content, not a route bug. A clean sample capture needed max_tokens=800 (385 reasoning tokens consumed) - pass at least max_tokens=500 for a real answer.
+Real test calls found this model spends hidden reasoning tokens even on trivial prompts (72 reasoning tokens to answer \"Say OK\" at max_tokens=200) - a small max_tokens (e.g. 10) can come back with empty content, not a route bug. A clean sample capture needed max_tokens=800 (385 reasoning tokens consumed) - pass at least max_tokens=500 for a real answer.
+
+Ordered provider list (2026-10-10, GET /api/v1/models/{model}/endpoints):
+Google AI Studio and Google (Vertex resale) both live (100%
+uptime_last_30m), same price tier ($0.75/$3.75 per MTok in/out) matching
+_price_ceiling_usd's own reference for this model exactly - margin stays
+positive regardless of which of the two serves. allow_fallbacks=False.
+Caveat carried over unchanged: this model's per-token price itself rises
+across 3 context-length tiers on BOTH providers identically (the
+cheapest tier is half this reference price, the priciest is 1.8x) -
+provider choice doesn't change that, it's inherent to the model.
 
 Same engine as POST /v1/chat/completions (app/handlers/llm_gateway.py):
 "exact" scheme only, ceiling computed from max_tokens via that same
@@ -20,13 +30,7 @@ from app.receipts import make_receipt
 GEMINI_FLASH_ENABLED = False
 
 MODEL = 'google/gemini-3.8-flash'
-PROVIDER = {'only': ['Google AI Studio'], 'allow_fallbacks': False}
-# 2nd-provider fallback (2026-09-30): a real 10-call test measured a 34.1s
-# p95 on Google AI Studio alone - "Google" (Vertex resale) measured
-# 94.2-98.1% uptime_last_30m the same day, the only other real endpoint for
-# this model, used if the primary exceeds PRIMARY_TIMEOUT_S (8s) - see
-# app/handlers/llm_per_model.py.
-FALLBACK_PROVIDER = {'only': ['Google'], 'allow_fallbacks': False}
+PROVIDER = {'order': ['Google AI Studio', 'Google'], 'allow_fallbacks': False}
 ROUTE_PATH = '/llm/gemini-flash'
 ROUTE_KEY = 'llm/gemini-flash'
 
@@ -53,5 +57,4 @@ SAMPLE_RESPONSE = {
 router = make_router(
     route_path=ROUTE_PATH, route_key=ROUTE_KEY, model=MODEL, provider=PROVIDER,
     description_key='llm-gemini-flash', sample_request=SAMPLE_REQUEST, sample_response=SAMPLE_RESPONSE,
-    fallback_provider=FALLBACK_PROVIDER,
 )

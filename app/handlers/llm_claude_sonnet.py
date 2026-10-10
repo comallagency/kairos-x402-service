@@ -1,6 +1,12 @@
 """POST /llm/claude-sonnet - pay-per-call anthropic/claude-sonnet-5.5, OpenAI-compatible passthrough.
 
-Pinned to Anthropic's own OpenRouter endpoint - measured 2026-09-30: 99.98% uptime_last_30m, a real test call succeeded in 1.33s (Google's Vertex-hosted resell measured 100%/0.82s the same day - Anthropic direct preferred as the first-party source when the two are this close).
+Ordered provider list (2026-10-10, GET /api/v1/models/{model}/endpoints):
+Anthropic, Google, Amazon Bedrock all live (100% uptime_last_30m) at the
+IDENTICAL price ($2/$10 per MTok in/out) - matches _price_ceiling_usd's
+own reference exactly, so margin (ceiling x MARKUP vs real cost) is
+positive by construction no matter which of the 3 actually serves a
+given call. allow_fallbacks=False so a request never spills onto some
+other, unchecked provider.
 
 Same engine as POST /v1/chat/completions (app/handlers/llm_gateway.py):
 "exact" scheme only, ceiling computed from max_tokens via that same
@@ -12,7 +18,7 @@ from app.handlers.llm_per_model import make_price_fn, make_router
 from app.receipts import make_receipt
 
 MODEL = 'anthropic/claude-sonnet-5.5'
-PROVIDER = {'only': ['Anthropic'], 'allow_fallbacks': False}
+PROVIDER = {'order': ['Anthropic', 'Google', 'Amazon Bedrock'], 'allow_fallbacks': False}
 ROUTE_PATH = '/llm/claude-sonnet'
 ROUTE_KEY = 'llm/claude-sonnet'
 

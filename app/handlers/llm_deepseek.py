@@ -1,6 +1,19 @@
 """POST /llm/deepseek - pay-per-call deepseek/deepseek-v4-pro, OpenAI-compatible passthrough.
 
-Pinned to Reka - measured 2026-09-30: 99.96% uptime_last_30m, by far the fastest of 3 real candidates tested (0.51s vs GMICloud's 2.60s and Novita's 4.56s for the same prompt, no hidden reasoning-token overhead observed).
+Re-pinned 2026-10-10 (still DEEPSEEK_ENABLED=False, not live either way -
+see below): the previous pin (Reka) was a real margin leak, found during
+a full LLM-provider audit, not a latency incident - GET /api/v1/models/
+{model}/endpoints prices Reka at $1.05/$10.50 per MTok in/out, while
+_price_ceiling_usd's reference for this model is $0.9483/$1.8966 per
+MTok (StreamLake's price) - charging the ceiling (reference x 1.10
+MARKUP) while actually paying Reka would have LOST money on every real
+completion token (margin = ref*1.10 - real = -8.32e-6/token). Ordered
+list now: StreamLake (exact reference match, 100% uptime_last_30m),
+GMICloud (slightly above reference but still margin-positive once the
+1.10 markup is applied: +8.6e-8/prompt-token, +1.72e-7/completion-token).
+Reka and every other live candidate (DigitalOcean, Cloudflare, DeepInfra,
+...) priced above what the 10% markup can cover were excluded on that
+basis alone, not reliability.
 
 Same engine as POST /v1/chat/completions (app/handlers/llm_gateway.py):
 "exact" scheme only, ceiling computed from max_tokens via that same
@@ -20,15 +33,7 @@ from app.receipts import make_receipt
 DEEPSEEK_ENABLED = False
 
 MODEL = 'deepseek/deepseek-v4-pro'
-PROVIDER = {'only': ['Reka'], 'allow_fallbacks': False}
-# 2nd-provider fallback (2026-09-30): a real 10-call test measured a 32.2s
-# p95 on Reka alone - DigitalOcean measured 99.87% uptime_last_30m the same
-# day (the closest to Reka's own volatile 99.02-99.66% without picking
-# Novita, whose uptime is real but has a documented history of volatility
-# for this account on a different model - see research.py's own module
-# docstring), used if the primary exceeds PRIMARY_TIMEOUT_S (8s) - see
-# app/handlers/llm_per_model.py.
-FALLBACK_PROVIDER = {'only': ['DigitalOcean'], 'allow_fallbacks': False}
+PROVIDER = {'order': ['StreamLake', 'GMICloud'], 'allow_fallbacks': False}
 ROUTE_PATH = '/llm/deepseek'
 ROUTE_KEY = 'llm/deepseek'
 
@@ -40,7 +45,7 @@ SAMPLE_RESPONSE = {
     "object": "chat.completion",
     "created": 1790781087,
     "model": "deepseek/deepseek-v4-pro",
-    "provider": "Reka",
+    "provider": "StreamLake",
     "choices": [
         {
             "index": 0,
@@ -55,5 +60,4 @@ SAMPLE_RESPONSE = {
 router = make_router(
     route_path=ROUTE_PATH, route_key=ROUTE_KEY, model=MODEL, provider=PROVIDER,
     description_key='llm-deepseek', sample_request=SAMPLE_REQUEST, sample_response=SAMPLE_RESPONSE,
-    fallback_provider=FALLBACK_PROVIDER,
 )

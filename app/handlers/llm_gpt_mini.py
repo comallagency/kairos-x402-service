@@ -1,6 +1,12 @@
 """POST /llm/gpt-mini - pay-per-call openai/gpt-5.4-mini, OpenAI-compatible passthrough.
 
-Pinned to OpenAI's own OpenRouter endpoint - measured 2026-09-30: 100% uptime_last_30m, a real test call succeeded in 0.75s. openai/gpt-5.4-mini is the model OpenRouter's own \"gpt-mini-latest\" alias currently redirects to - the real current \"mini\" tier, not a guess.
+openai/gpt-5.4-mini is the model OpenRouter's own \"gpt-mini-latest\" alias currently redirects to - the real current \"mini\" tier, not a guess.
+
+Ordered provider list (2026-10-10, GET /api/v1/models/{model}/endpoints):
+OpenAI and Azure both live (100% uptime_last_30m), both at the exact
+same price ($0.75/$4.50 per MTok in/out) matching _price_ceiling_usd's
+own reference for this model - margin stays positive regardless of
+which serves. allow_fallbacks=False.
 
 Same engine as POST /v1/chat/completions (app/handlers/llm_gateway.py):
 "exact" scheme only, ceiling computed from max_tokens via that same
@@ -12,12 +18,7 @@ from app.handlers.llm_per_model import make_price_fn, make_router
 from app.receipts import make_receipt
 
 MODEL = 'openai/gpt-5.4-mini'
-PROVIDER = {'only': ['OpenAI'], 'allow_fallbacks': False}
-# 2nd-provider fallback (2026-09-30, same logic as gemini-flash/deepseek):
-# Azure measured 100% uptime_last_30m the same day, a real test call
-# succeeded - used if the primary exceeds PRIMARY_TIMEOUT_S (8s), see
-# app/handlers/llm_per_model.py.
-FALLBACK_PROVIDER = {'only': ['Azure'], 'allow_fallbacks': False}
+PROVIDER = {'order': ['OpenAI', 'Azure'], 'allow_fallbacks': False}
 ROUTE_PATH = '/llm/gpt-mini'
 ROUTE_KEY = 'llm/gpt-mini'
 
@@ -44,5 +45,4 @@ SAMPLE_RESPONSE = {
 router = make_router(
     route_path=ROUTE_PATH, route_key=ROUTE_KEY, model=MODEL, provider=PROVIDER,
     description_key='llm-gpt-mini', sample_request=SAMPLE_REQUEST, sample_response=SAMPLE_RESPONSE,
-    fallback_provider=FALLBACK_PROVIDER,
 )
