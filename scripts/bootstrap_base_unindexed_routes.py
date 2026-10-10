@@ -1,58 +1,57 @@
 #!/usr/bin/env python3
-"""Bazaar bootstrap for the 14 base/* routes that are live, correctly
-optimized, and have ZERO real settled payment ever - PREPARED, NOT RUN.
+"""Bazaar bootstrap for /token-card + every route confirmed absent from
+CDP's own merchant discovery - PREPARED, NOT RUN.
 
-Confirmed directly against app's own requests.db (2026-10-05), not
-inferred: base/pending, base/tx, base/receipt, base/erc20-transfers,
-base/events, base/estimate-gas, base/basename, base/contract, base/proxy,
-base/storage, base/call, base/erc721-tokens, base/nft-metadata,
-base/nft-owner all show COUNT(*) WHERE status='paid' = 0. Cross-checked
-against CDP's real /platform/v2/x402/discovery/search (not an embedding
-score) for each route's own service_name and slug text, with limit=20:
-none appear at all, under any query tried. Separately confirmed this is a
-genuinely different failure mode from a stale-but-indexed entry (see
-scripts/reindex_llm_gateway.py and the 20-route "text differs from what we
-serve" list from the same investigation): these 14 have never been
-crawled into the catalog even once, because CDP's indexing appears to be
-triggered by a real settlement on the specific resource, not an
-independent periodic crawl of /.well-known/x402 - a route can be live,
-correctly described, and 100% invisible until its first real payment.
+Rescoped 2026-10-10 from the original base/* -only version: compared our
+full route catalog (app.x402_setup.build_route_configs(), 118 distinct
+paths) against a live GET /platform/v2/x402/discovery/merchant?payTo=
+<our main payTo>, paginated (104 resources today). 14 of our paths are
+absent. Of those, /x402-echo is EXCLUDED here on purpose: it pays into
+config.X402_ECHO_PAY_TO (0x3cedc3Cba4...45Ec, = ADDRESS_B below), a
+different wallet from the main merchant payTo this discovery query is
+filtered by - it has 205 real settlements and is still structurally
+unable to appear in this specific query, so paying it again here would
+not fix anything. That is a wallet/business decision (whether x402-echo
+should ever be merchant-discoverable under the main payTo), not a fiche
+defect, and is out of scope for this script.
 
-Explicitly NOT reindex_llm_gateway.py's situation: that route already HAD
-a real settlement (plus a genuine third-party payment on 2026-10-04, after
-its vocabulary update) and its catalog entry still didn't refresh 15+
-hours later - the "a payment triggers a refresh" hypothesis is weakened
-for an ALREADY-INDEXED resource. These 14 are a cleaner, different test:
-they have never been indexed at all, so the much better-supported
-"first payment = first indexing" half of the hypothesis (confirmed
-separately for base/simulate, base/quote, and every other PACK PRE-TRADE/
-LECTURE route that did get its first bootstrap payment) is what's actually
-being exercised here, not the "re-crawl an existing entry" half.
+TARGET_ROUTES (13, each confirmed 2026-10-10 against requests.db):
+  - token-card: 0 real paid rows ever (price just lowered to $0.005).
+  - base/call, base/erc721-tokens, base/events, base/nft-metadata,
+    base/nft-owner, base/proxy, base/receipt, base/storage: 0 real paid
+    rows ever (8 of the original 14 base/* targets from the first version
+    of this script - the other 6, estimate-gas/contract/basename/
+    erc20-transfers/pending/tx, already settled and are now indexed,
+    confirmed present in the live 104).
+  - fact-check, tip: 0 real paid rows ever.
+  - agent-claim, jobs: exactly 1 real paid row each, both payer=None,
+    both timestamped 2026-10-09T18:03:3{6,9} (3 seconds apart) - reads as
+    a one-off smoke test, not organic traffic, and neither triggered
+    indexing. Included anyway per the "first payment = first indexing"
+    precedent (base/simulate, base/quote, and the 6 already-reindexed
+    paths above all confirm the general rule) - a second, cleaner
+    settlement may still succeed where the smoke test didn't register.
 
-TARGET_PATHS order: by measured real demand on equivalent competitor
-routes (CDP search, 2026-10-05) - OneSource's "estimate-gas" (300 payers),
-"contract" (587), "basename" (603), "erc20-transfers" (572), then the
-remaining 10 in the order they were discovered as unindexed (base/pending,
-base/tx, base/receipt, base/events, base/proxy, base/storage, base/call,
-base/erc721-tokens, base/nft-metadata, base/nft-owner) - no competitor
-payer counts gathered for those yet.
+token-card is paid via GET with queryParams (its new Bazaar-registered
+method, see app/x402_setup.py's "GET /token-card" entry) - every other
+target here via POST (json body), matching the method each route is
+actually indexed under in /.well-known/x402.
 
-Same shape as scripts/bootstrap_pretrade_base_routes.py (ping-pong funding
-B<-A, pay from B, stop cleanly the moment A can no longer cover one more
-funding, real price read live from each route's own 402 challenge,
-_fundings_needed_for_shortfall already rounds up rather than requiring an
-exact multiple - correct as-is for B's real $0.000108 dust remainder,
-confirmed live 2026-10-05) - copied rather than imported, same
-"standalone one-off artifact" reasoning as every other bootstrap script in
-this directory.
+Same shape as scripts/bootstrap_pretrade_base_routes.py / the original
+base_unindexed version (ping-pong funding B<-A, pay from B, stop cleanly
+the moment A can no longer cover one more funding, real price read live
+from each route's own 402 challenge, _fundings_needed_for_shortfall
+rounds up rather than requiring an exact multiple) - copied rather than
+imported, same "standalone one-off artifact" reasoning as every other
+bootstrap script in this directory.
 
 --dry-run
 ---------
 No real payment (DRY_RUN short-circuits before any signing/broadcast).
 Reads the REAL on-chain balance and each route's REAL live price, and
 simulates the exact same balance bookkeeping and stop condition as a real
-run - reports exactly how many of the 14 would settle with A's current
-balance, in priority order.
+run - reports exactly how many of the 13 would settle with A's current
+balance, in priority order, plus a total-fundings/total-cost summary.
 """
 
 from __future__ import annotations
@@ -74,24 +73,26 @@ NETWORK = "eip155:8453"
 USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 BASE_RPC = "https://mainnet.base.org"
 
-TARGET_PATHS = [
-    "base/estimate-gas",
-    "base/contract",
-    "base/basename",
-    "base/erc20-transfers",
-    "base/pending",
-    "base/tx",
-    "base/receipt",
-    "base/events",
-    "base/proxy",
-    "base/storage",
-    "base/call",
-    "base/erc721-tokens",
-    "base/nft-metadata",
-    "base/nft-owner",
+# (path, method) - method is whichever one each route is actually
+# Bazaar-registered under in /.well-known/x402 (confirmed live 2026-10-10).
+TARGET_ROUTES = [
+    ("token-card", "GET"),
+    ("agent-claim", "POST"),
+    ("fact-check", "POST"),
+    ("jobs", "POST"),
+    ("tip", "POST"),
+    ("base/call", "POST"),
+    ("base/erc721-tokens", "POST"),
+    ("base/events", "POST"),
+    ("base/nft-metadata", "POST"),
+    ("base/nft-owner", "POST"),
+    ("base/proxy", "POST"),
+    ("base/receipt", "POST"),
+    ("base/storage", "POST"),
 ]
-assert len(TARGET_PATHS) == 14
-assert len(set(TARGET_PATHS)) == 14
+TARGET_PATHS = [p for p, _m in TARGET_ROUTES]
+assert len(TARGET_PATHS) == 13
+assert len(set(TARGET_PATHS)) == 13
 
 FUNDING_PATH = "x402-echo"
 FUNDING_PRICE = 0.001  # config.PRICE_X402_ECHO
@@ -103,45 +104,16 @@ EPSILON = 1e-9
 DRY_RUN = "--dry-run" in sys.argv
 
 # Real sample inputs per route - pulled live from each route's own bazaar
-# extension on GET /.well-known/x402 (2026-10-05), not fabricated for this
-# script. base/pending takes no input.
-SAMPLE_BODIES = {
-    "base/estimate-gas": {
-        "from_address": "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d",
-        "to": "0xdb6882db2A406Bc1541988715842906Dfd4FD590",
-        "value_wei": 0,
-    },
-    "base/contract": {
-        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    },
-    "base/basename": {
-        "name": "jesse.base.eth",
-    },
-    "base/erc20-transfers": {
-        "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        "from_block": 52118214,
-        "to_block": 52118214,
-    },
-    "base/pending": {},
-    "base/tx": {
-        "hash": "0xc2490a8a0aedd1196617a0e52111f82d6059986db7f1713ab23221c91c42f5c4",
-    },
-    "base/receipt": {
-        "hash": "0xc2490a8a0aedd1196617a0e52111f82d6059986db7f1713ab23221c91c42f5c4",
-    },
-    "base/events": {
-        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        "topics": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"],
-        "from_block": 52118214,
-        "to_block": 52118214,
-    },
-    "base/proxy": {
-        "address": "0xb125e6687d4313864e53df431d5425969c15eb2f",
-    },
-    "base/storage": {
-        "address": "0xb125e6687d4313864e53df431d5425969c15eb2f",
-        "slot": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
-    },
+# extension on GET /.well-known/x402 (2026-10-10, 8 base/* ones carried
+# over unchanged from the original version of this script), not
+# fabricated for this script. token-card's is used as queryParams (GET),
+# every other one as a json body (POST).
+SAMPLE_INPUTS = {
+    "token-card": {"address": USDC_CONTRACT},
+    "agent-claim": {"url": "https://x402.agentindex.world", "name": "AgentIndex x402"},
+    "fact-check": {"claim": "The Eiffel Tower is taller than the Statue of Liberty."},
+    "jobs": {"subject": "Example Corp"},
+    "tip": {"message": "Keep building agent infrastructure"},
     "base/call": {
         "to": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         "data": "0x313ce567",
@@ -149,6 +121,11 @@ SAMPLE_BODIES = {
     "base/erc721-tokens": {
         "token": "0xdcfeb48770c42a20428f025a69c093155829a11c",
         "wallet": "0xf70da97812CB96acDF810712Aa562db8dfA3dbEF",
+    },
+    "base/events": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "topics": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"],
+        "from_block": 52118214, "to_block": 52118214,
     },
     "base/nft-metadata": {
         "token": "0x217Ec1aC929a17481446a76Ff9B95B9A64f298Cf",
@@ -158,8 +135,14 @@ SAMPLE_BODIES = {
         "token": "0xdcfeb48770c42a20428f025a69c093155829a11c",
         "token_id": 129,
     },
+    "base/proxy": {"address": "0xb125e6687d4313864e53df431d5425969c15eb2f"},
+    "base/receipt": {"hash": "0xc2490a8a0aedd1196617a0e52111f82d6059986db7f1713ab23221c91c42f5c4"},
+    "base/storage": {
+        "address": "0xb125e6687d4313864e53df431d5425969c15eb2f",
+        "slot": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+    },
 }
-assert set(SAMPLE_BODIES) == set(TARGET_PATHS)
+assert set(SAMPLE_INPUTS) == set(TARGET_PATHS)
 
 
 async def usdc_balance(address: str) -> float:
@@ -168,7 +151,7 @@ async def usdc_balance(address: str) -> float:
         resp = await client.post(
             BASE_RPC,
             json={"jsonrpc": "2.0", "id": 1, "method": "eth_call", "params": [{"to": USDC_CONTRACT, "data": data}, "latest"]},
-            headers={"User-Agent": "bootstrap-base-unindexed-routes/1.0"},
+            headers={"User-Agent": "bootstrap-bazaar-unindexed-routes/2.0"},
         )
         resp.raise_for_status()
         raw = resp.json().get("result", "0x0")
@@ -177,7 +160,11 @@ async def usdc_balance(address: str) -> float:
 
 # --- route + price discovery, both live from the real catalog ---------------
 
-async def fetch_route(path: str) -> dict:
+async def fetch_route(path: str, method: str) -> dict:
+    """Matches BOTH resource URL and method - several of these paths have
+    both a GET and a POST entry in /.well-known/x402 (same URL, different
+    extension shape), so matching on URL alone would silently pick
+    whichever one happens to come first in the list."""
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.get(f"{BASE_URL}/.well-known/x402")
         resp.raise_for_status()
@@ -185,18 +172,19 @@ async def fetch_route(path: str) -> dict:
 
     target_url = f"{BASE_URL}/{path}"
     for r in resources:
-        if r["resource"].rstrip("/") != target_url:
+        if r["resource"].rstrip("/") != target_url or r["method"].upper() != method:
             continue
         bazaar_input = (r.get("extensions") or {}).get("bazaar", {}).get("info", {}).get("input", {})
-        if path in SAMPLE_BODIES:
-            bazaar_input = {**bazaar_input, "bodyType": "json", "body": SAMPLE_BODIES[path]}
-        return {
-            "path": path,
-            "url": r["resource"],
-            "method": r["method"].upper(),
-            "bazaar_input": bazaar_input,
-        }
-    raise RuntimeError(f"route introuvable dans /.well-known/x402: {path}")
+        if path in SAMPLE_INPUTS:
+            sample = SAMPLE_INPUTS[path]
+            if method == "GET":
+                bazaar_input = {**bazaar_input, "queryParams": sample}
+            else:
+                bazaar_input = {**bazaar_input, "bodyType": "json", "body": sample}
+        # else (e.g. the x402-echo funding route): use the catalog's own
+        # default sample as-is, no override needed.
+        return {"path": path, "url": r["resource"], "method": method, "bazaar_input": bazaar_input}
+    raise RuntimeError(f"route introuvable dans /.well-known/x402: {method} /{path}")
 
 
 async def fetch_price(route: dict) -> float:
@@ -290,22 +278,22 @@ def _fundings_needed_for_shortfall(shortfall: float) -> int:
     return max(1, math.ceil(shortfall / FUNDING_PRICE - EPSILON))
 
 
-async def fund_b_for_route(account_a, bal_a: float, bal_b: float, price: float, label: str) -> tuple[float, float, bool]:
-    """Returns (bal_a, bal_b, ok). ok=False means A's balance can't cover
-    the funding this ONE route needs - caller should stop here, not treat
-    it as a route failure."""
+async def fund_b_for_route(account_a, bal_a: float, bal_b: float, price: float, label: str) -> tuple[float, float, bool, int]:
+    """Returns (bal_a, bal_b, ok, n_fundings). ok=False means A's balance
+    can't cover the funding this ONE route needs - caller should stop
+    here, not treat it as a route failure."""
     shortfall = price - bal_b
     n_fundings = _fundings_needed_for_shortfall(shortfall)
 
     if n_fundings == 0:
-        return bal_a, bal_b, True
+        return bal_a, bal_b, True, 0
 
     cost_to_a = n_fundings * FUNDING_PRICE
     if bal_a + EPSILON < cost_to_a:
         print(f"  {label}: besoin de {n_fundings} financement(s) ({cost_to_a:.6f}) mais A n'a que {bal_a:.6f}")
-        return bal_a, bal_b, False
+        return bal_a, bal_b, False, n_fundings
 
-    funding_route = await fetch_route(FUNDING_PATH)
+    funding_route = await fetch_route(FUNDING_PATH, "POST")
     for i in range(1, n_fundings + 1):
         outcome, tx, detail = await _pay_with_retry(account_a, funding_route)
         if outcome != "reglee":
@@ -316,7 +304,7 @@ async def fund_b_for_route(account_a, bal_a: float, bal_b: float, price: float, 
         if not DRY_RUN:
             await asyncio.sleep(POST_SETTLE_PAUSE_S)
 
-    return bal_a, bal_b, True
+    return bal_a, bal_b, True, n_fundings
 
 
 async def main() -> int:
@@ -324,7 +312,7 @@ async def main() -> int:
     bal_b = await usdc_balance(ADDRESS_B)
     print(f"A balance (on-chain): {bal_a:.6f} USDC")
     print(f"B balance (on-chain): {bal_b:.6f} USDC")
-    print(f"{len(TARGET_PATHS)} routes base/* jamais indexees en file, prix reel lu par route, financement a la volee")
+    print(f"{len(TARGET_ROUTES)} routes absentes du Bazaar (payTo principal), prix reel lu par route, financement a la volee")
     print()
 
     account_a = account_b = None
@@ -356,36 +344,43 @@ async def main() -> int:
     reached = []
     failed = []
     not_attempted = []
+    total_fundings = 0
+    total_target_cost = 0.0
 
-    for i, path in enumerate(TARGET_PATHS, start=1):
-        route = await fetch_route(path)
+    for i, (path, method) in enumerate(TARGET_ROUTES, start=1):
+        route = await fetch_route(path, method)
         price = await fetch_price(route)
 
-        bal_a, bal_b, ok = await fund_b_for_route(account_a, bal_a, bal_b, price, path)
+        bal_a, bal_b, ok, n_fundings = await fund_b_for_route(account_a, bal_a, bal_b, price, path)
+        total_fundings += n_fundings
         if not ok:
             not_attempted = TARGET_PATHS[i - 1:]
-            print(f"\nARRET: solde A insuffisant pour financer la route {i}/{len(TARGET_PATHS)} ({path}).")
+            print(f"\nARRET: solde A insuffisant pour financer la route {i}/{len(TARGET_ROUTES)} ({path}).")
             break
 
         outcome, tx, body_text = await _pay_with_retry(account_b, route)
         status_word = "OK" if outcome == "reglee" else f"ECHEC({outcome})"
-        print(f"[{i}/{len(TARGET_PATHS)}] POST /{path} -> {status_word} tx={tx} prix=${price:.6f} | solde local A={bal_a:.6f} B={bal_b:.6f}")
+        print(f"[{i}/{len(TARGET_ROUTES)}] {method} /{path} -> {status_word} tx={tx} prix=${price:.6f} | solde local A={bal_a:.6f} B={bal_b:.6f}")
         if outcome == "reglee":
             bal_b -= price
+            total_target_cost += price
             reached.append(path)
         else:
             failed.append((path, outcome, body_text))
-        if not DRY_RUN and i < len(TARGET_PATHS):
+        if not DRY_RUN and i < len(TARGET_ROUTES):
             await asyncio.sleep(POST_SETTLE_PAUSE_S)
 
     print()
-    print(f"routes reglees: {len(reached)}/{len(TARGET_PATHS)}")
+    print(f"routes reglees: {len(reached)}/{len(TARGET_ROUTES)}")
     if failed:
         print(f"routes en echec (hors solde): {len(failed)}: {[f[0] for f in failed]}")
     if not_attempted:
         print(f"routes NON tentees (solde A epuise), dans l'ordre restant: {len(not_attempted)}")
         for p in not_attempted:
             print(f"  - {p}")
+    print(f"total financements /x402-echo: {total_fundings} (${total_fundings * FUNDING_PRICE:.6f})")
+    print(f"total cout cible (routes reglees): ${total_target_cost:.6f}")
+    print(f"cout total (financements + cibles): ${total_fundings * FUNDING_PRICE + total_target_cost:.6f}")
 
     if DRY_RUN:
         print("\n=== DRY RUN - aucun paiement reel ===")
