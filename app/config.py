@@ -167,7 +167,7 @@ PRICE_GUARD = "$0.001"
 PRICE_VERIFY = "$0.001"
 PRICE_RANK = "$0.001"
 PRICE_TOKEN_RISK = "$0.005"
-PRICE_TOKEN_CARD = "$0.01"
+PRICE_TOKEN_CARD = "$0.005"  # 2026-10-10: never settled (confirmed via db), lowered to undercut competitor token verdict cards ~4x
 PRICE_RESEARCH = "$0.005"
 
 # Pack 1 (2026-09-30): Jev-engine text classification, $0.002-$0.005 band.
