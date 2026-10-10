@@ -16,6 +16,27 @@ router = APIRouter()
 MAX_QUERIES = 3
 RESULTS_PER_QUERY = 5
 
+# 2026-10-10: during a bootstrap run, 3 real attempts took 134.8s/143.0s/
+# 161.6s - 3-10x the "14-47s a froid" worst case documented below -
+# almost certainly self-inflicted contention (each client-side retry fired
+# a fresh request while the previous one was still running the same heavy
+# Ollama+SearXNG pipeline, piling concurrent load onto a VPS with no such
+# headroom). One of the three (143.0s) settled payment successfully
+# (status="paid" logged below, confirmed by a real on-chain transfer) with
+# a real computed result ready to return - but the buyer's own client had
+# already given up well before that (any client timing out under ~2min
+# never sees it) - a real charge for an undelivered response. _check_claim
+# previously had no overall deadline at all (every other slow/LLM-backed
+# paid route in this catalog does - see app/handlers/token_card.py's
+# GLOBAL_DEADLINE_S, app/handlers/llm_per_model.py's GLOBAL_TIMEOUT_S).
+# 60s: safely covers the documented 14-47s worst case with margin, stays
+# well under nginx's own 120s proxy_read_timeout (so nginx never kills the
+# connection out from under us first), and bounds each attempt's resource
+# hold on Ollama/SearXNG so retries can no longer pile concurrent load
+# indefinitely. Never charged on timeout - same contract as every other
+# route here.
+GLOBAL_DEADLINE_S = 60.0
+
 # /fact-check/sample documente la forme de sortie pour les sondes (x402watch,
 # hermes-contact-discovery). Le pipeline live prend 14–47 s à froid et peut
 # bloquer indéfiniment si SearXNG ou Ollama ne répond pas sur le VPS — ce qui
@@ -267,7 +288,18 @@ async def _handle_fact_check(request: Request, body: dict):
 
     try:
         with Timer() as t:
-            result, model_served, sources_read, queries_run = await _check_claim(claim)
+            result, model_served, sources_read, queries_run = await asyncio.wait_for(
+                _check_claim(claim), timeout=GLOBAL_DEADLINE_S
+            )
+    except asyncio.TimeoutError:
+        db.log_request(
+            route="fact-check", method=method, status="error", payer=payer,
+            user_agent=user_agent, body_excerpt=body_excerpt, error_reason="timeout",
+        )
+        return JSONResponse(
+            {"error": {"reason": "timeout", "detail": f"No response within {GLOBAL_DEADLINE_S:.0f}s - not charged."}},
+            status_code=504,
+        )
     except FactCheckError as exc:
         db.log_request(
             route="fact-check", method=method, status="error", payer=payer,
