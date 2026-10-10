@@ -53,7 +53,7 @@ a:hover{text-decoration:underline}
 .meta b{color:var(--green);font-weight:600}
 
 /* HERO — one glance */
-.hero{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+.hero{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px}
 @media (max-width:1000px){.hero{grid-template-columns:1fr 1fr}}
 @media (max-width:600px){.hero{grid-template-columns:1fr}}
 .hero > *{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 18px 16px}
@@ -462,81 +462,70 @@ function renderInner(d, demo){
   const cutoff = Date.now() - 24*36e5;
   const all = d.events.filter(e => +e.t >= cutoff);
   const st = d.stats || {};
-  const bySt = st.by_status || {};
-  const paidN = bySt.paid || 0;
-  const unpaidN = bySt.unpaid || 0;
-  const usdc24 = Number.isFinite(Number(st.paid_usdc)) ? Number(st.paid_usdc) : 0;
-  const hasPay = paidN > 0 || d.revenue > 0;
 
-  // 2026-09-29: these used to be computed by filtering `all` (the raw
-  // event array) client-side - correct back when that array held the full
-  // 24h, wrong ever since it got capped to the last 500 (a 3.9MB payload
-  // otherwise). agg24h is computed server-side over the FULL 24h set
-  // (see app/admin.py::_compute_agg_24h) - `all` below is now only used
-  // for the event feed itself and the "Routes actives" visual tick spread,
-  // both fine to sample from the capped 500.
+  // agg24h is computed server-side over the FULL (uncapped) 24h row set,
+  // one single pass (app/admin.py::_compute_agg_24h) - every number below
+  // comes from THAT one pass, so totalN = scanN + qualifiedN always holds
+  // exactly and no percentage against it can exceed 100%. `all` (the
+  // capped-at-500 event array) is ONLY used for the raw feed itself and
+  // the "Routes actives" visual tick spread - never as a denominator.
   const agg = d.agg24h || {};
   const scanN = agg.scan_n || 0;
   const interestN = agg.interest_n || 0;
   const visitN = agg.visit_n || 0;
   const failedN = agg.failed_n || 0;
   const qualifiedN = agg.qualified_n || 0;
+  const totalN = agg.total_n ?? (scanN + qualifiedN);
+  const paidN = agg.paid_n || 0;
+  const paidNAuditors = agg.paid_n_auditors || 0;
   const attemptedN = agg.attempted_n || 0;
-  const conversion = pct(paidN, interestN + attemptedN);
-  const scanShare = pct(scanN, (d.eventsTotal24h ?? all.length));
+  const attemptedNAuditors = agg.attempted_n_auditors || 0;
+  const usdc24 = Number.isFinite(Number(st.paid_usdc)) ? Number(st.paid_usdc) : 0;
+  const hasPay = paidN > 0 || d.revenue > 0;
+  const conversion = pct(paidN, qualifiedN);
+  const scanShare = pct(scanN, totalN);
 
   const lp = d.lastPaymentDetail;
-  const lastPaymentLine = lp
-    ? `${short(lp.payer)} · /${esc(lp.route)} · $${money(lp.amount_usdc)} · ${ago(Date.now()-new Date(lp.ts))}`
-    : 'jamais';
 
-  // hero
+  // Carte 1-4, meme taille (2026-10-11 - 4e demande, disposition exacte) -
+  // plus de carte "Etat commercial" ni de cartes "Aujourd'hui"/"Revenu 30
+  // jours" separees, tout est dans la carte 1.
   document.getElementById('hero').innerHTML = `
-    <div class="hero ${hasPay?'ok':'wait'}">
-      <div class="lbl">État commercial</div>
-      <div class="big">${hasPay ? 'Revenu réel encaissé' : '0 paiement réel — conversion bloquée'}</div>
-      <div class="hint">${hasPay
-        ? 'Le Bazaar CDP peut maintenant indexer les routes réglées.'
-        : `${interestN} intention${interestN===1?'':'s'} non-scanner ont vu un 402. L’offre d’entrée commence à $${money(d.commercial.minimum_price_usdc||.0001)}.`}</div>
+    <div>
+      <div class="lbl">Encaissé total 30 j</div>
+      <div class="num ${d.revenuesTotal.d30>0?'':'zero'} mono">$${money(d.revenuesTotal.d30)}</div>
+      <div class="hint" style="margin-top:8px">clients $${money(d.revenues.d30)} · auditeurs $${money(d.revenuesAuditors.d30)}</div>
+      <div class="hint" style="margin-top:2px">7 j $${money(d.revenuesTotal.d7)} · 24 h $${money(d.revenuesTotal.d1)} · aujourd'hui $${money(d.revenueTotalToday)}</div>
     </div>
     <div>
-      <div class="lbl">Encaissé total</div>
-      <div class="num ${d.revenueTotalToday>0?'':'zero'} mono">$${money(d.revenueTotalToday)}</div>
-      <div class="hint" style="margin-top:8px">24 h $${money(d.revenuesTotal.d1)} · 7 j $${money(d.revenuesTotal.d7)} · 30 j $${money(d.revenuesTotal.d30)}</div>
-      <div class="hint" style="margin-top:2px">clients $${money(d.revenueToday)} · auditeurs $${money(d.revenueTodayAuditors)}</div>
-      ${d.walletABalance != null ? `<div class="hint" style="margin-top:8px">Solde wallet A : $${money(d.walletABalance)}${d.walletAMinutesAgo != null ? ` (mis à jour il y a ${d.walletAMinutesAgo} min)` : ''}</div>` : ''}
+      <div class="lbl">Solde wallet A</div>
+      <div class="num mono">${d.walletABalance != null ? '$'+money(d.walletABalance) : '—'}</div>
+      <div class="hint" style="margin-top:8px">${d.walletAMinutesAgo != null ? `mis à jour il y a ${d.walletAMinutesAgo} min` : 'jamais mesuré'}</div>
     </div>
     <div>
-      <div class="lbl">Aujourd'hui depuis 00:00 UTC (clients)</div>
-      <div class="num ${d.revenueToday>0?'':'zero'} mono">$${money(d.revenueToday)}</div>
-      <div class="hint" style="margin-top:8px">${d.buyersToday} acheteur${d.buyersToday===1?'':'s'} · dernier ${esc(lastPaymentLine)}</div>
-      <div class="hint" style="margin-top:2px">auditeurs $${money(d.revenueTodayAuditors)} · ${d.buyersTodayAuditors} auditeur${d.buyersTodayAuditors===1?'':'s'}</div>
-    </div>
-    <div>
-      <div class="lbl">Revenu 30 jours (clients)</div>
-      <div class="num ${d.revenues.d30>0?'':'zero'} mono">$${money(d.revenues.d30)}</div>
-      <div class="hint" style="margin-top:8px">24 h $${money(d.revenues.d1)} · 7 j $${money(d.revenues.d7)}</div>
-      <div class="hint" style="margin-top:2px">revenu auditeurs 30 j $${money(d.revenuesAuditors.d30)} (24 h $${money(d.revenuesAuditors.d1)} · 7 j $${money(d.revenuesAuditors.d7)})</div>
-    </div>
-    <div>
-      <div class="lbl">Acheteurs on-chain (clients)</div>
+      <div class="lbl">Acheteurs clients 30 j</div>
       <div class="num ${d.buyers>0?'':'zero'} mono">${d.buyers}</div>
-      <div class="hint" style="margin-top:8px">${d.returning} récurrent${d.returning===1?'':'s'}</div>
-      <div class="hint" style="margin-top:2px">${d.buyersAuditors} auditeur${d.buyersAuditors===1?'':'s'} (hors total acheteurs)</div>
+      <div class="hint" style="margin-top:8px">${d.returning} récurrent${d.returning===1?'':'s'} · + ${d.buyersAuditors} auditeur${d.buyersAuditors===1?'':'s'}</div>
+    </div>
+    <div>
+      <div class="lbl">Dernier paiement</div>
+      <div class="num mono">${lp ? '$'+money(lp.amount_usdc) : '—'}</div>
+      <div class="hint" style="margin-top:8px">${lp ? '/'+esc(lp.route) : 'jamais'}</div>
+      <div class="hint" style="margin-top:2px">${lp ? short(lp.payer) + ' · il y a ' + ago(Date.now()-new Date(lp.ts)) : ''}</div>
     </div>`;
 
   document.getElementById('kpis').innerHTML = `
-    <div class="kpi"><div class="n">${st.total ?? all.length}</div><div class="l">requêtes · 24 h</div></div>
+    <div class="kpi"><div class="n">${totalN}</div><div class="l">requêtes · 24 h</div></div>
     <div class="kpi a"><div class="n">${interestN}</div><div class="l">402 qualifiés · hors scanners</div></div>
     <div class="kpi g"><div class="n">${conversion}</div><div class="l">conversion 402 → payé</div></div>
     <div class="kpi"><div class="n">${scanShare}</div><div class="l">bruit scanners</div></div>`;
 
   document.getElementById('funnel').innerHTML = `
-    <div class="fstep"><div class="v">${all.length}</div><div class="k">requêtes reçues</div><div class="rate">100% entrée</div></div>
+    <div class="fstep"><div class="v">${totalN}</div><div class="k">requêtes reçues</div><div class="rate">100% entrée</div></div>
     <div class="fstep"><div class="v">${scanN}</div><div class="k">scanners écartés</div><div class="rate">${scanShare} du trafic</div></div>
-    <div class="fstep ${qualifiedN?'warn':''}"><div class="v">${qualifiedN}</div><div class="k">signaux qualifiés</div><div class="rate">${pct(qualifiedN,all.length)} de l’entrée</div></div>
-    <div class="fstep ${attemptedN?'warn':''}"><div class="v">${attemptedN}</div><div class="k">paiements tentés</div><div class="rate">${pct(attemptedN,qualifiedN)} des qualifiés</div></div>
-    <div class="fstep ${paidN?'good':'warn'}"><div class="v">${paidN}</div><div class="k">paiements réussis</div><div class="rate">${conversion} des 402 utiles</div></div>`;
+    <div class="fstep ${qualifiedN?'warn':''}"><div class="v">${qualifiedN}</div><div class="k">signaux qualifiés</div><div class="rate">${pct(qualifiedN,totalN)} de l’entrée</div></div>
+    <div class="fstep ${attemptedN?'warn':''}"><div class="v">${attemptedN}</div><div class="k">paiements tentés${attemptedNAuditors?` (dont ${attemptedNAuditors} auditeurs)`:''}</div><div class="rate">${pct(attemptedN,qualifiedN)} des qualifiés</div></div>
+    <div class="fstep ${paidN?'good':'warn'}"><div class="v">${paidN}</div><div class="k">paiements réussis${paidNAuditors?` (dont ${paidNAuditors} auditeurs)`:''}</div><div class="rate">${conversion} des 402 utiles</div></div>`;
 
   let actionTitle, actionCopy;
   if (d.paymentFailures.length) {

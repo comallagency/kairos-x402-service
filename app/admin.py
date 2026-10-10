@@ -336,8 +336,22 @@ def _route_p50_latency_24h() -> dict[str, float]:
 
 
 def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> dict:
+    """2026-10-11: every number this returns comes from the SAME loop over
+    the SAME (already test-identity-filtered) `recent` rows - "requêtes
+    totales" (total_n = scan_n + qualified_n) is derived from the exact
+    counters below, by construction, rather than compared against a
+    differently-filtered total computed elsewhere (the earlier bug: the
+    template divided by a client-side-capped 500-event sample instead of
+    this function's own true count, which could push a percentage over
+    100% whenever the real qualified/attempted count exceeded 500).
+    attempted_n/attempted_n_auditors specifically mean "payer presented a
+    payment" (paid or payment_failed) - narrower than failed_n, which also
+    covers generic handler errors (capacity_reached, compute errors) with
+    no payment involved at all."""
     mechanical = db.mechanical_wallets()
+    auditors = db.auditor_wallets()
     scan_n = interest_n = visit_n = paid_n = failed_n = 0
+    paid_n_auditors = payment_failed_n = payment_failed_n_auditors = 0
     by_ua: dict[str, dict] = {}
     by_route: dict[str, dict] = {}
 
@@ -349,6 +363,7 @@ def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> 
         status = row.get("status") or ""
         ua = (row.get("user_agent") or "").strip()
         payer = row.get("payer")
+        is_auditor = (payer or "").strip().lower() in auditors
         paid = status == "paid"
         failed = status == "payment_failed"
         k = _live_classify(status, ua, paid, failed, payer, mechanical)
@@ -360,8 +375,14 @@ def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> 
             visit_n += 1
         elif k == "paid":
             paid_n += 1
+            if is_auditor:
+                paid_n_auditors += 1
         elif k == "err":
             failed_n += 1
+        if failed and k != "scan":
+            payment_failed_n += 1
+            if is_auditor:
+                payment_failed_n_auditors += 1
 
         ts = row.get("ts") or ""
         agent_key = ua or "\u2014"
@@ -405,7 +426,9 @@ def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> 
             r["errors"] += 1
 
     qualified_n = interest_n + visit_n + paid_n + failed_n
-    attempted_n = paid_n + sum(1 for row in recent if row.get("status") == "payment_failed")
+    total_n = scan_n + qualified_n
+    attempted_n = paid_n + payment_failed_n
+    attempted_n_auditors = paid_n_auditors + payment_failed_n_auditors
 
     agents_full = list(by_ua.values())
     for a in agents_full:
@@ -423,8 +446,9 @@ def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> 
 
     return {
         "scan_n": scan_n, "interest_n": interest_n, "visit_n": visit_n,
-        "paid_n": paid_n, "failed_n": failed_n,
-        "qualified_n": qualified_n, "attempted_n": attempted_n,
+        "paid_n": paid_n, "paid_n_auditors": paid_n_auditors, "failed_n": failed_n,
+        "qualified_n": qualified_n, "total_n": total_n,
+        "attempted_n": attempted_n, "attempted_n_auditors": attempted_n_auditors,
         "agents": agents_full[:40],
         "agents_total": len(agents_full),
         "agents_total_non_scanner": sum(1 for a in agents_full if not a["is_scanner"]),
