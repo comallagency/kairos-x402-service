@@ -47,12 +47,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app import config, db
-from app.handlers.token_risk import SAMPLE_RESPONSE as TOKEN_RISK_SAMPLE_RESPONSE
 from app.handlers.token_risk import _lookup
 from app.receipts import Timer, effective_price, extract_payer_address, make_receipt, price_float
 from app.upstream.evm_rpc import EvmRpcError
 from app.upstream.anthropic import AnthropicCardError, generate_token_card
-from app.x402_setup import ROUTE_DESCRIPTIONS
+from app.x402_setup import ROUTE_DESCRIPTIONS, TOKEN_CARD_SAMPLE_INPUT, TOKEN_CARD_SAMPLE_OUTPUT
 
 router = APIRouter()
 
@@ -168,27 +167,14 @@ async def _compute_card(body: dict) -> tuple[dict, dict, float]:
 
 
 # --- GET /token-card/sample - free, static ----------------------------------
-# Built from token_risk.py's own real SAMPLE_RESPONSE (USDC) - the
-# deterministic mapping applied to it (dangerous=True, renounced=True,
-# liquidity found -> CAUTION) matches what _deterministic_card would
-# actually produce for these exact inputs, kept in sync by hand.
+# 2026-10-10: reuses app.x402_setup.TOKEN_CARD_SAMPLE_INPUT/OUTPUT directly -
+# the exact same frozen, real Claude-written card (source="claude") shown
+# in the Bazaar fiche's own output example, not a second hand-written copy.
+# The previous version invented a "set_max_tx_amount"/renounced-ownership
+# story for real Base USDC, which has neither - wrong on both counts.
 
-SAMPLE_REQUEST = {"address": TOKEN_RISK_SAMPLE_RESPONSE["address"]}
-SAMPLE_RESPONSE = {
-    "address": TOKEN_RISK_SAMPLE_RESPONSE["address"],
-    "network": TOKEN_RISK_SAMPLE_RESPONSE["network"],
-    "card": {
-        "note": "CAUTION",
-        "tagline": "CAUTION: dangerous power present, but renounced.",
-        "explanation": (
-            "This contract exposes a dangerous owner-only function (set_max_tx_amount). "
-            "Ownership has been renounced. Real on-chain liquidity was found on at least one DEX."
-        ),
-        "disclaimer": "Not financial advice.",
-        "source": "deterministic_fallback",
-    },
-    "token_risk_verdict": TOKEN_RISK_SAMPLE_RESPONSE["verdict"],
-}
+SAMPLE_REQUEST = TOKEN_CARD_SAMPLE_INPUT
+SAMPLE_RESPONSE = TOKEN_CARD_SAMPLE_OUTPUT
 
 
 @router.get("/token-card/sample", openapi_extra={"security": []})
