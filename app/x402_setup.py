@@ -615,11 +615,11 @@ ROUTE_DESCRIPTIONS = {
         "only when history fits 1-2 log queries. Try GET /token-risk/sample."
     ),
     "token-card": (
-        "Base token verdict card written by Claude Haiku 5.5 (Anthropic) "
-        "from real on-chain data: SAFE/CAUTION/RISKY/DANGER, a tagline, a "
-        "short explanation. A deterministic fallback takes over if Claude "
-        "is slow, honestly labeled. $0.005 - about 4x cheaper than "
-        "comparable cards. Try GET /token-card/sample."
+        "Base token safety check: Claude Haiku 5.5 (Anthropic) writes a "
+        "rug pull / honeypot verdict (SAFE/CAUTION/RISKY/DANGER) from "
+        "on-chain data, a tagline, a short explanation. Deterministic "
+        "fallback if Claude is slow, honestly labeled. $0.005 - 4x "
+        "cheaper than comparable cards. GET /token-card/sample."
     ),
     "research": (
         "Jev-powered research: routed search, cited answer, claims "
@@ -1932,10 +1932,14 @@ RANK_SAMPLE_OUTPUT = {
 }
 
 
+# 2026-10-11: CDP's Bazaar caps displayed tags at 5 and keeps only the
+# first 5 (confirmed live across all 116 indexed resources) - order is
+# load-bearing, not cosmetic. The 5 most search-relevant terms lead;
+# everything else still ships in the fiche (harmless, just not shown).
 TOKEN_CARD_TAGS = [
-    "ai token verdict", "token verdict card", "base token analysis", "shareable token verdict",
-    "claude", "anthropic", "token safety check", "rug pull check", "honeypot check",
-    "is this token safe", "memecoin scanner",
+    "token safety check", "rug pull check", "honeypot check", "is this token safe", "claude",
+    "anthropic", "ai token verdict", "token verdict card", "base token analysis",
+    "shareable token verdict", "memecoin scanner",
 ]
 
 TOKEN_CARD_SAMPLE_INPUT = {"address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"}
@@ -3038,7 +3042,10 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             mime_type="application/json",
             service_name="token-risk-scan",
             icon_url=ICON_URL,
-            tags=["token risk", "rug check", "honeypot", "Base token safety"],
+            # 2026-10-11: reordered/reworded so "token safety" and "rug pull"
+            # are literal tags, not just substrings of "Base token safety" /
+            # "rug check" - Bazaar shows only the first 5, order matters.
+            tags=["token safety", "rug pull", "honeypot", "rug check", "token risk"],
             extensions=declare_discovery_extension(
                 input=TOKEN_RISK_SAMPLE_INPUT,
                 input_schema=TOKEN_RISK_INPUT_SCHEMA,

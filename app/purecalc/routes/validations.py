@@ -54,7 +54,11 @@ def compute_iban(inp: IbanInput) -> IbanOutput:
 register(ComputeSpec(
     slug="validate/iban", price="$0.002", service_name="validate-iban",
     description="ISO 13616 IBAN mod-97 checksum validation, with optional BIC (ISO 9362) format check.",
-    tags=["iban", "bic", "bank account", "validation", "checksum", "swift"],
+    # 2026-10-11: "swift" promoted ahead of the generic "validation"/
+    # "checksum" tags also used by every other validate/* route - Bazaar
+    # shows only the first 5, and swift/bic/iban is this route's distinct
+    # search surface.
+    tags=["iban", "bic", "swift", "bank account", "validation", "checksum"],
     input_model=IbanInput, output_model=IbanOutput, compute=compute_iban,
     sample_input={"iban": "GB82 WEST 1234 5698 7654 32", "bic": "NWBKGB2L"},
     sample_output={"valid": True, "country": "GB", "bic_format_valid": True},
