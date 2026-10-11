@@ -16,26 +16,34 @@ router = APIRouter()
 MAX_QUERIES = 3
 RESULTS_PER_QUERY = 5
 
-# 2026-10-10: during a bootstrap run, 3 real attempts took 134.8s/143.0s/
-# 161.6s - 3-10x the "14-47s a froid" worst case documented below -
+# 2026-10-10/11: during a bootstrap run, 3 real attempts took 134.8s/
+# 143.0s/161.6s - 3-10x the "14-47s a froid" worst case documented below -
 # almost certainly self-inflicted contention (each client-side retry fired
 # a fresh request while the previous one was still running the same heavy
 # Ollama+SearXNG pipeline, piling concurrent load onto a VPS with no such
-# headroom). One of the three (143.0s) settled payment successfully
-# (status="paid" logged below, confirmed by a real on-chain transfer) with
-# a real computed result ready to return - but the buyer's own client had
-# already given up well before that (any client timing out under ~2min
-# never sees it) - a real charge for an undelivered response. _check_claim
-# previously had no overall deadline at all (every other slow/LLM-backed
-# paid route in this catalog does - see app/handlers/token_card.py's
-# GLOBAL_DEADLINE_S, app/handlers/llm_per_model.py's GLOBAL_TIMEOUT_S).
-# 60s: safely covers the documented 14-47s worst case with margin, stays
-# well under nginx's own 120s proxy_read_timeout (so nginx never kills the
-# connection out from under us first), and bounds each attempt's resource
-# hold on Ollama/SearXNG so retries can no longer pile concurrent load
-# indefinitely. Never charged on timeout - same contract as every other
-# route here.
-GLOBAL_DEADLINE_S = 60.0
+# headroom). nginx's own access log settles the question of what the
+# buyer actually received for the 143.0s one, which DID settle payment
+# (confirmed by a real on-chain transfer) with a real computed result
+# ready to return: "POST /fact-check 499 0 60.055" - nginx logged a 499
+# (client already gone) with a ZERO-byte body after exactly 60.055s,
+# because the client (python-httpx, same 60s timeout the first fix here
+# used) gave up and closed the connection at the 60s mark while our
+# backend kept running for another ~83s regardless. A real $0.01 charge,
+# confirmed réglé, for a 499/empty response - billing without delivery,
+# proven by the access log, not just inferred from latency.
+#
+# The first fix here (2026-10-10) capped _check_claim at 60.0s to match -
+# wrong: tied to the exact client timeout that caused the incident, it
+# would only RACE that client rather than reliably beat it (our clock
+# starts after network transit, so it starts later than the client's).
+# 45s: comfortably covers the documented 14-47s worst case (47s) with
+# only ~5s less margin than before, while leaving a real ~15s buffer
+# under the 60s client timeout this specific incident proved is in play -
+# still well under nginx's 120s proxy_read_timeout, and short attempts
+# free Ollama/SearXNG fast enough that retries can no longer pile
+# concurrent load indefinitely. Never charged on timeout - same contract
+# as every other route here.
+GLOBAL_DEADLINE_S = 45.0
 
 # /fact-check/sample documente la forme de sortie pour les sondes (x402watch,
 # hermes-contact-discovery). Le pipeline live prend 14–47 s à froid et peut
