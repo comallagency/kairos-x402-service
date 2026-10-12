@@ -493,10 +493,10 @@ ROUTE_DESCRIPTIONS = {
         "facts. Try GET /summarize/sample. " + _KIT_MENTION
     ),
     "fact-check": (
-        "Check a claim against live web sources - a verdict, a confidence level, "
-        "and the sources that support or contradict it, each with its URL and "
-        "stance. Returns 'inconclusive' rather than a guess when the sources "
-        "don't clearly settle it. Try GET /fact-check/sample. " + _KIT_MENTION
+        "Fact-check verdict written by Claude Haiku 5.5 (Anthropic) from real "
+        "web sources: supported/contradicted/mixed/unverifiable, each source "
+        "with its stance (supports/contradicts/neutral). Answer in a few "
+        "seconds. Try GET /fact-check/sample."
     ),
     "discover": (
         "Find MCP servers matching a need, ranked by semantic similarity over a "
@@ -2511,7 +2511,9 @@ def _core_route_configs() -> dict[str, RouteConfig]:
             mime_type="application/json",
             service_name="fact-check",
             icon_url=ICON_URL,
-            tags=["fact check", "verification", "claim"],
+            # 2026-10-12: Bazaar shows only the first 5 tags - these 5 ARE
+            # the full list now (previously 3), ordered most-important-first.
+            tags=["fact check api", "claim verification", "claude", "fact checking", "sources"],
             extensions=declare_discovery_extension(
                 input={"claim": "The Eiffel Tower is taller than the Statue of Liberty."},
                 input_schema=FACT_CHECK_INPUT_SCHEMA,
