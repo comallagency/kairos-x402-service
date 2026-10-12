@@ -141,10 +141,12 @@ async def server_json_manifest():
         "name": "world.agentindex/x402",
         "title": "AgentIndex x402",
         "description": (
-            "Jev-powered decisions, web search, PDF/web to Markdown, summarize. "
-            "From $0.001, no API key."
+            "Pay-per-call tools for AI agents on Base (USDC, x402): token "
+            "safety check (rug pull / honeypot), fact-check by Claude with "
+            "sources, onchain reads, web search, PDF/web to Markdown. From "
+            "$0.001."
         ),
-        "version": "1.2.0",
+        "version": "1.3.0",
         "websiteUrl": f"{base}/openapi.json",
         "remotes": [
             {"type": "streamable-http", "url": f"{base}/mcp/"},
