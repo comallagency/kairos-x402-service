@@ -496,7 +496,8 @@ ROUTE_DESCRIPTIONS = {
         "Fact-check verdict written by Claude Haiku 5.5 (Anthropic) from real "
         "web sources: supported/contradicted/mixed/unverifiable, each source "
         "with its stance (supports/contradicts/neutral). Answer in a few "
-        "seconds. Try GET /fact-check/sample."
+        "seconds. Try GET /fact-check/sample. Independently monitored: "
+        "lumierepaycheck.org/e?url=https://x402.agentindex.world/fact-check"
     ),
     "discover": (
         "Find MCP servers matching a need, ranked by semantic similarity over a "
@@ -621,7 +622,8 @@ ROUTE_DESCRIPTIONS = {
         "rug pull / honeypot verdict (SAFE/CAUTION/RISKY/DANGER) from "
         "on-chain data, a tagline, a short explanation. Deterministic "
         "fallback if Claude is slow, honestly labeled. GET "
-        "/token-card/sample."
+        "/token-card/sample. Independently monitored: "
+        "lumierepaycheck.org/e?url=https://x402.agentindex.world/token-card"
     ),
     "research": (
         "Jev-powered research: routed search, cited answer, claims "
