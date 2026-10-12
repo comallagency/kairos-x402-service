@@ -448,7 +448,7 @@ def _llms_catalog() -> str:
         "",
         "## High-value web and document tools",
         "",
-        f"- [Search + Content]({base}/search): POST `{{\"query\":\"...\",\"include_content\":true}}` — each query routed by Jev to the best specialised source (code, facts, news, prices, weather), results ranked by relevance, each with a short extract ($0.001)",
+        f"- [Search + Content]({base}/search): POST `{{\"query\":\"...\",\"include_content\":true}}` — each query routed by Jev to the best specialised source (code, facts, news, prices, weather), results ranked by relevance, each with a short extract ($0.01)",
         f"- [PDF to Markdown]({base}/pdf): POST `{{\"url\":\"https://...pdf\"}}` — text, metadata and token count ($0.002)",
         f"- [Web Read]({base}/web-read): POST `{{\"url\":\"https://...\"}}` — main content as clean Markdown ($0.002)",
         f"- [Structured Extract]({base}/extract): POST URL/text plus JSON schema ($0.002)",
@@ -464,10 +464,12 @@ def _llms_catalog() -> str:
         f"- [Verify]({base}/verify): POST {{\"claim\":...,\"source\":...}} - supported/contradicted/not_enough_info with a probability",
         f"- [Rank]({base}/rank): POST {{\"query\":...,\"documents\":[...]}} (up to 50) - documents sorted by relevance probability",
         "",
-        "## On-chain token safety ($0.005 USDC)",
+        # 2026-10-12: no blanket price here anymore - token-risk ($0.005)
+        # and token-card ($0.02) now differ, each bullet shows its own.
+        "## On-chain token safety",
         "",
         f"- [Token Risk]({base}/token-risk): POST {{\"address\":\"0x...\"}} - 100% on-chain Base ERC-20 rug check (mint/blacklist/pause/tax bytecode flags, proxy, ownership, Uniswap v2/v3 + Aerodrome liquidity), Jev-powered avoid/caution/acceptable verdict",
-        f"- [Token Card]({base}/token-card): GET ?address=0x... or POST {{\"address\":\"0x...\"}} - shareable SAFE/CAUTION/RISKY/DANGER verdict card for a Base ERC-20, written by Claude Haiku 5.5 from /token-risk's own on-chain signals ($0.005). Try GET /token-card/sample.",
+        f"- [Token Card]({base}/token-card): GET ?address=0x... or POST {{\"address\":\"0x...\"}} - shareable SAFE/CAUTION/RISKY/DANGER verdict card for a Base ERC-20, written by Claude Haiku 5.5 from /token-risk's own on-chain signals ($0.02). Try GET /token-card/sample.",
         "",
         f"- [Research]({base}/research): POST {{\"query\":\"...\"}} - cited web research report, 5-8 sentences with numbered-source citations, under 4.5s guaranteed",
         "",

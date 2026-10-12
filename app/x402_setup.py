@@ -615,11 +615,13 @@ ROUTE_DESCRIPTIONS = {
         "only when history fits 1-2 log queries. Try GET /token-risk/sample."
     ),
     "token-card": (
+        # 2026-10-12: price raised to $0.02 (was $0.005) - "4x cheaper than
+        # comparable cards" and the $0.005 figure removed, both now false.
         "Base token safety check: Claude Haiku 5.5 (Anthropic) writes a "
         "rug pull / honeypot verdict (SAFE/CAUTION/RISKY/DANGER) from "
         "on-chain data, a tagline, a short explanation. Deterministic "
-        "fallback if Claude is slow, honestly labeled. $0.005 - 4x "
-        "cheaper than comparable cards. GET /token-card/sample."
+        "fallback if Claude is slow, honestly labeled. GET "
+        "/token-card/sample."
     ),
     "research": (
         "Jev-powered research: routed search, cited answer, claims "
