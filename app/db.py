@@ -550,18 +550,31 @@ def count_paid_today(route: str) -> int:
         return cur.fetchone()["n"]
 
 
-def anthropic_monthly_spend_usd(route: str = "token-card") -> float:
-    """Real Anthropic spend this calendar month, summed from requests.db's
-    own upstream_cost_usd column (set on every real Claude call this
-    route made, success or not - see app/handlers/token_card.py). No
-    stateful counter to reset: "resets on the 1st" falls out of this
-    query's date filter. Anthropic's API has no "get my usage" endpoint to
-    cross-check against, unlike OpenRouter's /api/v1/key."""
+_ANTHROPIC_ROUTES = ("token-card", "fact-check")
+
+
+def anthropic_monthly_spend_usd() -> float:
+    """Real Anthropic spend this calendar month, account-wide - summed
+    from requests.db's own upstream_cost_usd column across every route
+    that actually calls Anthropic (app/upstream/anthropic.py), success or
+    not. 2026-10-12: used to take a `route` param defaulting to
+    "token-card" and filter on it alone - monthly_budget_ok() never passed
+    a route, so fact-check's own Claude spend (added the same day) was
+    silently invisible to this check. upstream_cost_usd is NOT Anthropic-
+    specific (llm_gateway.py/llm_per_model.py/research.py set it too, for
+    their own OpenRouter cost) - _ANTHROPIC_ROUTES, not an unfiltered SUM,
+    is what makes this an Anthropic account cap rather than a mix of
+    unrelated upstream spend. No stateful counter to reset: "resets on
+    the 1st" falls out of this query's date filter. Anthropic's API has
+    no "get my usage" endpoint to cross-check against, unlike
+    OpenRouter's /api/v1/key."""
     start_of_month = datetime.now(timezone.utc).strftime("%Y-%m-01T00:00:00+00:00")
+    placeholders = ",".join("?" for _ in _ANTHROPIC_ROUTES)
     with cursor() as cur:
         cur.execute(
-            "SELECT COALESCE(SUM(upstream_cost_usd), 0) AS total FROM requests WHERE route=? AND ts >= ?",
-            (route, start_of_month),
+            f"SELECT COALESCE(SUM(upstream_cost_usd), 0) AS total FROM requests "
+            f"WHERE route IN ({placeholders}) AND ts >= ?",
+            (*_ANTHROPIC_ROUTES, start_of_month),
         )
         return float(cur.fetchone()["total"])
 
