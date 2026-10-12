@@ -7,7 +7,7 @@ well-formed regardless of when this actually runs) toward A. One real
 settlement is enough to give the route a live Bazaar listing, same purpose
 as scripts/bootstrap_token_risk.py for /token-risk.
 
-/token-card has a single flat price ($0.01, config.PRICE_TOKEN_CARD) and
+/token-card has a single flat price ($0.02, config.PRICE_TOKEN_CARD) and
 only the "exact" accepts[] option - no dynamic ceiling to compute, no
 dual-scheme choice. Same simplest shape as bootstrap_token_risk.py.
 
@@ -52,7 +52,7 @@ NETWORK = "eip155:8453"
 USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 BASE_RPC = "https://mainnet.base.org"
 
-TARGET_PRICE = 0.01  # config.PRICE_TOKEN_CARD
+TARGET_PRICE = 0.02  # config.PRICE_TOKEN_CARD (2026-10-12: was 0.01, already stale before that - real price went 0.005->0.02 same day)
 TARGET_SCAN_ADDRESS = USDC_CONTRACT  # real, stable Base contract - always a well-formed analysis
 
 FUNDING_SLUG = "x402-echo"

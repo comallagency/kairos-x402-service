@@ -126,12 +126,12 @@ PRICE_JOB = "$0.10"
 # this is 10x below Tavily's $0.01 endpoint while still using zero-cost local
 # SearXNG/page retrieval. Keep until independent settlements unlock Bazaar,
 # then restore the sustainable $0.002 price.
-PRICE_SEARCH = "$0.001"
+PRICE_SEARCH = "$0.01"  # 2026-10-12: raised from $0.001
 PRICE_PDF = "$0.002"
 PRICE_WEB_READ = "$0.002"
 PRICE_EXTRACT = "$0.002"
 PRICE_SUMMARIZE = "$0.002"
-PRICE_FACT_CHECK = "$0.01"
+PRICE_FACT_CHECK = "$0.02"  # 2026-10-12: raised from $0.01
 
 # Re-wired 2026-09-16, after the first PRICE_DISCOVER = "$0.001" (13:29 on
 # 2026-09-11) was written and never connected to anything - a run was cut by
@@ -174,7 +174,7 @@ PRICE_GUARD = "$0.001"
 PRICE_VERIFY = "$0.001"
 PRICE_RANK = "$0.001"
 PRICE_TOKEN_RISK = "$0.005"
-PRICE_TOKEN_CARD = "$0.005"  # 2026-10-10: never settled (confirmed via db), lowered to undercut competitor token verdict cards ~4x
+PRICE_TOKEN_CARD = "$0.02"  # 2026-10-12: raised from $0.005
 PRICE_RESEARCH = "$0.005"
 
 # Pack 1 (2026-09-30): Jev-engine text classification, $0.002-$0.005 band.

@@ -1,26 +1,21 @@
 #!/usr/bin/env python3
-"""Bazaar REFRESH bootstrap for /token-card, /token-risk, /fact-check -
+"""Bazaar REFRESH bootstrap for /token-card, /search, /fact-check -
 PREPARED, NOT RUN.
 
-Rescoped 2026-10-12, third version of this script. Not about indexing
-absence this time (all three ARE indexed) - about CDP's Bazaar cache
-being stale: confirmed live 2026-10-11 that both token-card's and
-token-risk's fiches, as actually shown by GET /platform/v2/x402/
-discovery/merchant, still reflected their PRE-fix description/tags from
-before the 2026-10-10/11 corrections (token-card indexed 2026-10-10
-23:15, before that day's tag fix; token-risk indexed 2026-09-28, before
-either fix) - CDP only re-crawls a fiche on a real new settlement, not on
-a periodic schedule, so our server-side fiche being correct does nothing
-for the buyer-visible Bazaar listing until one more real payment lands.
-/fact-check's fiche + Claude integration were both corrected 2026-10-12
-and have never settled since (its last 3 real/attempted settlements,
-2026-10-10, predate the Claude integration and 2 of those 3 didn't even
-settle on-chain - see that day's report) - same refresh need.
+Rescoped 2026-10-12, fourth version of this script - same day these
+three routes' prices changed (token-card $0.005->$0.02, search
+$0.001->$0.01, fact-check $0.01->$0.02). CDP's Bazaar fiche for a route
+freezes whatever price/description was true at its LAST real settlement
+and only re-crawls on the next one, not periodically - so each of these
+three now shows a stale, wrong price in the live Bazaar listing until one
+more real payment lands on it. (token-risk, the third route in the
+previous version of this script, had no price change today and is
+dropped from this run; its fiche is not stale from this event.)
 
 TARGET_ROUTES (3): token-card is paid via GET with queryParams (its
 Bazaar-registered method, see app/x402_setup.py's "GET /token-card"
-entry); token-risk and fact-check via POST (json body), matching the
-method each is actually indexed under in /.well-known/x402.
+entry); search and fact-check via POST (json body), matching the method
+each is actually indexed under in /.well-known/x402.
 
 Same shape as the previous two versions of this script (ping-pong
 funding B<-A, pay from B, stop cleanly the moment A can no longer cover
@@ -62,7 +57,7 @@ BASE_RPC = "https://mainnet.base.org"
 # Bazaar-registered under in /.well-known/x402 (confirmed live 2026-10-12).
 TARGET_ROUTES = [
     ("token-card", "GET"),
-    ("token-risk", "POST"),
+    ("search", "POST"),
     ("fact-check", "POST"),
 ]
 TARGET_PATHS = [p for p, _m in TARGET_ROUTES]
@@ -84,7 +79,7 @@ DRY_RUN = "--dry-run" in sys.argv
 # (GET), the other two as a json body (POST).
 SAMPLE_INPUTS = {
     "token-card": {"address": USDC_CONTRACT},
-    "token-risk": {"address": USDC_CONTRACT},
+    "search": {"query": "recent earthquake news"},
     "fact-check": {"claim": "The Eiffel Tower is taller than the Statue of Liberty."},
 }
 assert set(SAMPLE_INPUTS) == set(TARGET_PATHS)
