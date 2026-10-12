@@ -14,36 +14,63 @@ from app.x402_setup import ROUTE_DESCRIPTIONS
 router = APIRouter()
 
 MAX_QUERIES = 3
-RESULTS_PER_QUERY = 5
+# 2026-10-12: lowered 5 -> 3. Root cause of the timeout incidents below is
+# proven, not inferred: Ollama on this VPS is CPU-only (no GPU), confirmed
+# via `ollama[...]: tg = 5.01 t/s` in its own log during a live profile -
+# the verdict call alone generated 258 tokens in 88.6s at that rate (decode
+# time is ~tokens/5, independent of prompt size). The model echoes every
+# source's url+stance back in its JSON output, so fewer merged sources
+# means fewer generated tokens, not just a shorter prompt - this is the
+# one lever that actually shortens DECODE time, which prompt trimming
+# alone cannot touch. No code change fixes the 5 t/s ceiling itself; that
+# needs a GPU or a faster/hosted model, which is an infra decision, not
+# something this fix attempts.
+RESULTS_PER_QUERY = 3
 
-# 2026-10-10/11: during a bootstrap run, 3 real attempts took 134.8s/
-# 143.0s/161.6s - 3-10x the "14-47s a froid" worst case documented below -
-# almost certainly self-inflicted contention (each client-side retry fired
-# a fresh request while the previous one was still running the same heavy
-# Ollama+SearXNG pipeline, piling concurrent load onto a VPS with no such
-# headroom). nginx's own access log settles the question of what the
-# buyer actually received for the 143.0s one, which DID settle payment
-# (confirmed by a real on-chain transfer) with a real computed result
-# ready to return: "POST /fact-check 499 0 60.055" - nginx logged a 499
-# (client already gone) with a ZERO-byte body after exactly 60.055s,
-# because the client (python-httpx, same 60s timeout the first fix here
-# used) gave up and closed the connection at the 60s mark while our
-# backend kept running for another ~83s regardless. A real $0.01 charge,
-# confirmed réglé, for a 499/empty response - billing without delivery,
-# proven by the access log, not just inferred from latency.
+# 2026-10-10/11/12: three fixes to the same underlying problem, in order.
 #
-# The first fix here (2026-10-10) capped _check_claim at 60.0s to match -
-# wrong: tied to the exact client timeout that caused the incident, it
-# would only RACE that client rather than reliably beat it (our clock
-# starts after network transit, so it starts later than the client's).
-# 45s: comfortably covers the documented 14-47s worst case (47s) with
-# only ~5s less margin than before, while leaving a real ~15s buffer
-# under the 60s client timeout this specific incident proved is in play -
-# still well under nginx's 120s proxy_read_timeout, and short attempts
-# free Ollama/SearXNG fast enough that retries can no longer pile
-# concurrent load indefinitely. Never charged on timeout - same contract
-# as every other route here.
-GLOBAL_DEADLINE_S = 45.0
+# (1) 2026-10-10: a bootstrap run showed 3 real attempts taking 134.8s/
+# 143.0s/161.6s. nginx's own access log proved what the buyer actually
+# got for the one that settled payment: "POST /fact-check 499 0 60.055" -
+# a 499 (client already gone) with a ZERO-byte body at 60.055s, while our
+# backend kept running for another ~83s and would have returned a real
+# result to nobody. A real $0.01 charge for an empty response - billing
+# without delivery, proven by the access log. First fix capped the
+# pipeline at 60.0s to match the client's own timeout - wrong, since that
+# only RACES the client rather than reliably beating it.
+#
+# (2) 2026-10-11: lowered to 45.0s. Then Lumiere's own 24h probe (same
+# claim every time) showed 5/5 real attempts hitting that exact timeout,
+# spread across the full day, not clustered around any bootstrap run -
+# proof this was never a one-off contention spike.
+#
+# (3) 2026-10-12: root-caused properly via a live in-container profile
+# (app.handlers.fact_check._plan_search_queries/_multi_search/
+# _request_verdict timed individually) plus Ollama's own log line at the
+# same moment: "tg = 5.01 t/s" - Ollama on this VPS is CPU-only, no GPU.
+# Decode time is tokens-generated / 5, independent of prompt size, and
+# the model echoes every source's url+stance back in its JSON output, so
+# MAX_QUERIES/RESULTS_PER_QUERY (fewer sources to echo) is the one lever
+# that actually shortens decode, not just prompt length. Lowering
+# RESULTS_PER_QUERY 5->3 and the per-source extract 500->300 chars cut
+# the worst-case comparative claim (same one Lumiere probes) from 126.9s
+# to 69.1s in a second live profile - real, but still over 45s. No code
+# change fixes the 5 t/s ceiling itself; that needs a GPU or a faster/
+# hosted model, an infra decision out of scope here.
+#
+# 90s balances the two real risks instead of only optimizing one: (a)
+# below 90s, most real fact-check calls on this CPU-only Ollama would
+# simply always time out (safe, but a route that essentially never
+# works); (b) above it risks billing a buyer whose own client times out
+# first, same failure mode as (1) - 90s stays well under nginx's 120s
+# proxy_read_timeout, and under the x402 "maxTimeoutSeconds": 300 this
+# resource itself declares in its 402 challenge (the protocol's own
+# stated expectation for how long a buyer's client should wait) - but a
+# buyer using a shorter client timeout (as low as the 60s one that caused
+# incident (1)) remains exposed to the same risk, now with a smaller
+# window than before rather than none. Never charged on timeout - same
+# contract as every other route here.
+GLOBAL_DEADLINE_S = 90.0
 
 # /fact-check/sample documente la forme de sortie pour les sondes (x402watch,
 # hermes-contact-discovery). Le pipeline live prend 14–47 s à froid et peut
@@ -146,7 +173,7 @@ async def _plan_search_queries(claim: str) -> list[str]:
         {"role": "user", "content": claim},
     ]
     try:
-        parsed = await chat_json(messages, max_tokens=150)
+        parsed = await chat_json(messages, max_tokens=100)
         queries = parsed.get("queries")
         if isinstance(queries, list) and queries and all(isinstance(q, str) and q.strip() for q in queries):
             return [q.strip() for q in queries[:MAX_QUERIES]]
@@ -214,7 +241,7 @@ async def _request_verdict(claim: str, sources_context: str) -> dict:
     # VPS) a depasse 60s sur au moins un claim reel (2026-09-10, ollama_timeout
     # -> 502), sous le budget nginx proxy_read_timeout de 120s pour laisser de
     # la marge a la recherche qui le precede.
-    parsed = await chat_json(messages, max_tokens=800, timeout=100.0)
+    parsed = await chat_json(messages, max_tokens=500, timeout=100.0)
     return _parse_verdict_response(parsed)
 
 
@@ -228,7 +255,7 @@ async def _check_claim(claim: str) -> tuple[dict, str | None, int, int]:
         raise FactCheckError("no_sources_found")
 
     sources_context = "\n\n".join(
-        f"[{i + 1}] {r['title'] or r['url']} ({r['url']}): {(r['extract'] or '')[:500]}"
+        f"[{i + 1}] {r['title'] or r['url']} ({r['url']}): {(r['extract'] or '')[:300]}"
         for i, r in enumerate(results)
     )
     try:
