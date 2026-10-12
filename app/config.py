@@ -59,7 +59,14 @@ AUDITOR_WALLETS = os.getenv(
     "0xec2abd3eda89bed90124736e317e847d5fb6d034,"
     "0x6a0b784cf4e3f79e0bca889e35a1b3aa1dc24518,"
     "0xc9c7b38c0942914fc8ea12063bc92dcd3b581670,"
-    "0x0ffab3cea2221070abfb6deb76206946d5e0daaf",
+    "0x0ffab3cea2221070abfb6deb76206946d5e0daaf,"
+    # 2026-10-12: nohumans-scout, SettledScout, Vellium - confirmed
+    # third-party verifiers from their own requests.db user_agent strings.
+    # Real revenue, never added to MECHANICAL_WALLETS, just excluded from
+    # the client-buyer count - same treatment as the 4 above.
+    "0x54e163e9b8edda194d83f46add921bfa5fc5f4e0,"
+    "0xa1d1c0cf717402ff3651aa4873ccf96410b01978,"
+    "0xf2bea48bb4facdc5d8a5603bb70cb46da68103a3",
 )
 
 ADMIN_BASIC_AUTH_USER = os.getenv("ADMIN_BASIC_AUTH_USER", "admin")
