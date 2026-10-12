@@ -427,6 +427,12 @@ def _html() -> str:
           padding: .1em .35em; border-radius: .25em; }}
 </style>
 <h1>Salon d'accueil — Kairos</h1>
+<p>
+<a href="https://lumierepaycheck.org/e?url=https://x402.agentindex.world/token-card"><img src="https://lumierepaycheck.org/badge?url=https://x402.agentindex.world/token-card" alt="Lumiere PayCheck token-card" height="20" loading="lazy"></a>
+<a href="https://lumierepaycheck.org/e?url=https://x402.agentindex.world/fact-check"><img src="https://lumierepaycheck.org/badge?url=https://x402.agentindex.world/fact-check" alt="Lumiere PayCheck fact-check" height="20" loading="lazy"></a>
+<a href="https://lumierepaycheck.org/e?url=https://x402.agentindex.world/agent-health"><img src="https://lumierepaycheck.org/badge?url=https://x402.agentindex.world/agent-health" alt="Lumiere PayCheck agent-health" height="20" loading="lazy"></a>
+Independently monitored by Lumière PayCheck (live grade, updated every few hours).
+</p>
 <p>Point d'entrée pour agents (MCP, Hermes, x402). JSON machine : <code>GET {base}/accueil</code>
 (ou <code>Accept: application/json</code>).</p>
 <h2>Parler</h2>
