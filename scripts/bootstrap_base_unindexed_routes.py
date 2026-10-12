@@ -1,56 +1,41 @@
 #!/usr/bin/env python3
-"""Bazaar bootstrap for /token-card + every route confirmed absent from
-CDP's own merchant discovery - PREPARED, NOT RUN.
+"""Bazaar REFRESH bootstrap for /token-card, /token-risk, /fact-check -
+PREPARED, NOT RUN.
 
-Rescoped 2026-10-10 from the original base/* -only version: compared our
-full route catalog (app.x402_setup.build_route_configs(), 118 distinct
-paths) against a live GET /platform/v2/x402/discovery/merchant?payTo=
-<our main payTo>, paginated (104 resources today). 14 of our paths are
-absent. Of those, /x402-echo is EXCLUDED here on purpose: it pays into
-config.X402_ECHO_PAY_TO (0x3cedc3Cba4...45Ec, = ADDRESS_B below), a
-different wallet from the main merchant payTo this discovery query is
-filtered by - it has 205 real settlements and is still structurally
-unable to appear in this specific query, so paying it again here would
-not fix anything. That is a wallet/business decision (whether x402-echo
-should ever be merchant-discoverable under the main payTo), not a fiche
-defect, and is out of scope for this script.
+Rescoped 2026-10-12, third version of this script. Not about indexing
+absence this time (all three ARE indexed) - about CDP's Bazaar cache
+being stale: confirmed live 2026-10-11 that both token-card's and
+token-risk's fiches, as actually shown by GET /platform/v2/x402/
+discovery/merchant, still reflected their PRE-fix description/tags from
+before the 2026-10-10/11 corrections (token-card indexed 2026-10-10
+23:15, before that day's tag fix; token-risk indexed 2026-09-28, before
+either fix) - CDP only re-crawls a fiche on a real new settlement, not on
+a periodic schedule, so our server-side fiche being correct does nothing
+for the buyer-visible Bazaar listing until one more real payment lands.
+/fact-check's fiche + Claude integration were both corrected 2026-10-12
+and have never settled since (its last 3 real/attempted settlements,
+2026-10-10, predate the Claude integration and 2 of those 3 didn't even
+settle on-chain - see that day's report) - same refresh need.
 
-TARGET_ROUTES (13, each confirmed 2026-10-10 against requests.db):
-  - token-card: 0 real paid rows ever (price just lowered to $0.005).
-  - base/call, base/erc721-tokens, base/events, base/nft-metadata,
-    base/nft-owner, base/proxy, base/receipt, base/storage: 0 real paid
-    rows ever (8 of the original 14 base/* targets from the first version
-    of this script - the other 6, estimate-gas/contract/basename/
-    erc20-transfers/pending/tx, already settled and are now indexed,
-    confirmed present in the live 104).
-  - fact-check, tip: 0 real paid rows ever.
-  - agent-claim, jobs: exactly 1 real paid row each, both payer=None,
-    both timestamped 2026-10-09T18:03:3{6,9} (3 seconds apart) - reads as
-    a one-off smoke test, not organic traffic, and neither triggered
-    indexing. Included anyway per the "first payment = first indexing"
-    precedent (base/simulate, base/quote, and the 6 already-reindexed
-    paths above all confirm the general rule) - a second, cleaner
-    settlement may still succeed where the smoke test didn't register.
+TARGET_ROUTES (3): token-card is paid via GET with queryParams (its
+Bazaar-registered method, see app/x402_setup.py's "GET /token-card"
+entry); token-risk and fact-check via POST (json body), matching the
+method each is actually indexed under in /.well-known/x402.
 
-token-card is paid via GET with queryParams (its new Bazaar-registered
-method, see app/x402_setup.py's "GET /token-card" entry) - every other
-target here via POST (json body), matching the method each route is
-actually indexed under in /.well-known/x402.
-
-Same shape as scripts/bootstrap_pretrade_base_routes.py / the original
-base_unindexed version (ping-pong funding B<-A, pay from B, stop cleanly
-the moment A can no longer cover one more funding, real price read live
-from each route's own 402 challenge, _fundings_needed_for_shortfall
-rounds up rather than requiring an exact multiple) - copied rather than
-imported, same "standalone one-off artifact" reasoning as every other
-bootstrap script in this directory.
+Same shape as the previous two versions of this script (ping-pong
+funding B<-A, pay from B, stop cleanly the moment A can no longer cover
+one more funding, real price read live from each route's own 402
+challenge, _fundings_needed_for_shortfall rounds up rather than requiring
+an exact multiple) - copied rather than imported, same "standalone
+one-off artifact" reasoning as every other bootstrap script in this
+directory.
 
 --dry-run
 ---------
 No real payment (DRY_RUN short-circuits before any signing/broadcast).
 Reads the REAL on-chain balance and each route's REAL live price, and
 simulates the exact same balance bookkeeping and stop condition as a real
-run - reports exactly how many of the 13 would settle with A's current
+run - reports exactly how many of the 3 would settle with A's current
 balance, in priority order, plus a total-fundings/total-cost summary.
 """
 
@@ -74,25 +59,15 @@ USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 BASE_RPC = "https://mainnet.base.org"
 
 # (path, method) - method is whichever one each route is actually
-# Bazaar-registered under in /.well-known/x402 (confirmed live 2026-10-10).
+# Bazaar-registered under in /.well-known/x402 (confirmed live 2026-10-12).
 TARGET_ROUTES = [
     ("token-card", "GET"),
-    ("agent-claim", "POST"),
+    ("token-risk", "POST"),
     ("fact-check", "POST"),
-    ("jobs", "POST"),
-    ("tip", "POST"),
-    ("base/call", "POST"),
-    ("base/erc721-tokens", "POST"),
-    ("base/events", "POST"),
-    ("base/nft-metadata", "POST"),
-    ("base/nft-owner", "POST"),
-    ("base/proxy", "POST"),
-    ("base/receipt", "POST"),
-    ("base/storage", "POST"),
 ]
 TARGET_PATHS = [p for p, _m in TARGET_ROUTES]
-assert len(TARGET_PATHS) == 13
-assert len(set(TARGET_PATHS)) == 13
+assert len(TARGET_PATHS) == 3
+assert len(set(TARGET_PATHS)) == 3
 
 FUNDING_PATH = "x402-echo"
 FUNDING_PRICE = 0.001  # config.PRICE_X402_ECHO
@@ -103,44 +78,14 @@ EPSILON = 1e-9
 
 DRY_RUN = "--dry-run" in sys.argv
 
-# Real sample inputs per route - pulled live from each route's own bazaar
-# extension on GET /.well-known/x402 (2026-10-10, 8 base/* ones carried
-# over unchanged from the original version of this script), not
-# fabricated for this script. token-card's is used as queryParams (GET),
-# every other one as a json body (POST).
+# Real sample inputs per route - token-card/token-risk's own Base USDC
+# test address, fact-check's own SAMPLE_CLAIM (app/handlers/fact_check.py)
+# - not fabricated for this script. token-card's is used as queryParams
+# (GET), the other two as a json body (POST).
 SAMPLE_INPUTS = {
     "token-card": {"address": USDC_CONTRACT},
-    "agent-claim": {"url": "https://x402.agentindex.world", "name": "AgentIndex x402"},
+    "token-risk": {"address": USDC_CONTRACT},
     "fact-check": {"claim": "The Eiffel Tower is taller than the Statue of Liberty."},
-    "jobs": {"subject": "Example Corp"},
-    "tip": {"message": "Keep building agent infrastructure"},
-    "base/call": {
-        "to": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        "data": "0x313ce567",
-    },
-    "base/erc721-tokens": {
-        "token": "0xdcfeb48770c42a20428f025a69c093155829a11c",
-        "wallet": "0xf70da97812CB96acDF810712Aa562db8dfA3dbEF",
-    },
-    "base/events": {
-        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        "topics": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"],
-        "from_block": 52118214, "to_block": 52118214,
-    },
-    "base/nft-metadata": {
-        "token": "0x217Ec1aC929a17481446a76Ff9B95B9A64f298Cf",
-        "token_id": 1,
-    },
-    "base/nft-owner": {
-        "token": "0xdcfeb48770c42a20428f025a69c093155829a11c",
-        "token_id": 129,
-    },
-    "base/proxy": {"address": "0xb125e6687d4313864e53df431d5425969c15eb2f"},
-    "base/receipt": {"hash": "0xc2490a8a0aedd1196617a0e52111f82d6059986db7f1713ab23221c91c42f5c4"},
-    "base/storage": {
-        "address": "0xb125e6687d4313864e53df431d5425969c15eb2f",
-        "slot": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
-    },
 }
 assert set(SAMPLE_INPUTS) == set(TARGET_PATHS)
 
@@ -312,7 +257,7 @@ async def main() -> int:
     bal_b = await usdc_balance(ADDRESS_B)
     print(f"A balance (on-chain): {bal_a:.6f} USDC")
     print(f"B balance (on-chain): {bal_b:.6f} USDC")
-    print(f"{len(TARGET_ROUTES)} routes absentes du Bazaar (payTo principal), prix reel lu par route, financement a la volee")
+    print(f"{len(TARGET_ROUTES)} fiches Bazaar a rafraichir (CDP n'a pas encore vu les derniers correctifs), prix reel lu par route, financement a la volee")
     print()
 
     account_a = account_b = None
