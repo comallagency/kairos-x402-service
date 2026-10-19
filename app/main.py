@@ -239,9 +239,9 @@ for _rpc_router in build_rpc_routers():
     inner_app.include_router(_rpc_router)
 inner_app.openapi = build_custom_openapi(inner_app)
 
-inner_app.mount("/mcp", mcp_app)
 inner_app.mount("/mcp/relationship-memory", relationship_memory_mcp_app)
 inner_app.mount("/mcp/coordination-thread", coordination_thread_mcp_app)
+inner_app.mount("/mcp", mcp_app)
 
 
 @inner_app.get("/health", openapi_extra={"security": []})
