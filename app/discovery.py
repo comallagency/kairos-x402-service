@@ -109,6 +109,14 @@ async def discovery_resources():
     }
 
 
+# Alias CDP / agentic-web : sondes appellent /v2/x402/discovery/resources ou
+# /x402/discovery/resources sur l'hôte du fournisseur (404 mesuré 2026-10-19).
+@router.get("/v2/x402/discovery/resources", openapi_extra={"security": []})
+@router.get("/x402/discovery/resources", openapi_extra={"security": []})
+async def discovery_resources_cdp_path_aliases():
+    return await discovery_resources()
+
+
 # VerifyMCP-OwnersBot/1.0 et d'autres sondes (7 hits en six jours, 2026-09-17).
 # Spec : https://verifymcp.io/docs/build/owners-json
 @router.get("/.well-known/brick-blue.json", openapi_extra={"security": []})
