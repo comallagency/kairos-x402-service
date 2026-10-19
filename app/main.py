@@ -16,8 +16,8 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from fastmcp.utilities.lifespan import combine_lifespans
 
 from app import db
@@ -244,9 +244,7 @@ inner_app.openapi = build_custom_openapi(inner_app)
 # son filet de rattrapage redirect_slashes rate ces deux routes (reproduit en
 # isole avec starlette==1.7.0, independant de l'ordre d'enregistrement des
 # Mount). Des routes explicites, avant les Mount, court-circuitent le bug.
-async def _redirect_mcp_trailing_slash(request):
-    from starlette.responses import RedirectResponse
-
+async def _redirect_mcp_trailing_slash(request: Request) -> RedirectResponse:
     return RedirectResponse(url=f"{request.url.path}/", status_code=307)
 
 
