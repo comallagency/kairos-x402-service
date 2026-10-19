@@ -239,6 +239,25 @@ for _rpc_router in build_rpc_routers():
     inner_app.include_router(_rpc_router)
 inner_app.openapi = build_custom_openapi(inner_app)
 
+# Starlette ne retrouve pas le slash manquant quand un Mount plus court
+# ("/mcp") partage le prefixe d'un Mount plus long ("/mcp/relationship-memory") :
+# son filet de rattrapage redirect_slashes rate ces deux routes (reproduit en
+# isole avec starlette==1.7.0, independant de l'ordre d'enregistrement des
+# Mount). Des routes explicites, avant les Mount, court-circuitent le bug.
+async def _redirect_mcp_trailing_slash(request):
+    from starlette.responses import RedirectResponse
+
+    return RedirectResponse(url=f"{request.url.path}/", status_code=307)
+
+
+for _mcp_subpath in ("/mcp/relationship-memory", "/mcp/coordination-thread"):
+    inner_app.add_api_route(
+        _mcp_subpath,
+        _redirect_mcp_trailing_slash,
+        methods=["GET", "POST", "HEAD"],
+        include_in_schema=False,
+    )
+
 inner_app.mount("/mcp/relationship-memory", relationship_memory_mcp_app)
 inner_app.mount("/mcp/coordination-thread", coordination_thread_mcp_app)
 inner_app.mount("/mcp", mcp_app)
