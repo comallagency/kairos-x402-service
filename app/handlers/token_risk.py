@@ -519,7 +519,10 @@ async def _ask_jev_verdict(address: str, bytecode: dict, liquidity: dict, holder
         "probability": answer["probabilities"][answer["choice"]],
         "probabilities": answer["probabilities"],
         "confidence": answer.get("confidence"),
-        "verdict_source": "jev",
+        # Public field never names the internal engine (Jev) - "model" is
+        # the neutral, externally-meaningful label; "rules" (the
+        # deterministic fallback below) is the only other value.
+        "verdict_source": "model",
     }
 
 
@@ -583,7 +586,7 @@ SAMPLE_RESPONSE = {
         "probability": 0.62,
         "probabilities": {"acceptable": 0.31, "avoid": 0.07, "caution": 0.62},
         "confidence": 0.55,
-        "verdict_source": "jev",
+        "verdict_source": "model",
     },
     "bytecode_analysis": {
         "status": "ok",
