@@ -61,6 +61,7 @@ async def test_simulate_malformed_data_rejected():
 
 # -------------------------------------------------------------------- base/quote
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_quote_usdc_to_weth_structural():
     r = await compute_quote(QuoteInput(token_in=USDC, token_out=WETH, amount_in=1_000_000))
     assert r.decimals_in == 6

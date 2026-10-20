@@ -6,6 +6,8 @@ accuracy bar, not per-case, since this is a probabilistic classifier."""
 
 import asyncio
 
+import pytest
+
 from app.handlers.sentiment import _lookup
 
 CASES = [
@@ -32,6 +34,7 @@ CASES = [
 ]
 
 
+@pytest.mark.integration
 def test_sentiment_accuracy_at_least_90_percent() -> None:
     correct = 0
     wrong = []
