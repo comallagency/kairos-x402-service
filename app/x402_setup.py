@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import time
 
@@ -2285,6 +2286,37 @@ def _upto_payment_option(price) -> PaymentOption:
     )
 
 
+def _get_twin_route_config(post_route: RouteConfig) -> RouteConfig:
+    """Rebuild a GET-twin's discovery extension from its POST counterpart.
+
+    The POST route's extensions dict already encodes, under
+    bazaar.info/bazaar.schema, the exact (input example, input_schema,
+    output) that declare_discovery_extension() was called with - so they
+    can be read back out instead of re-threading those three values through
+    every one of the ~26 POST route-construction call sites. Rebuilding with
+    declare_discovery_extension(..., body_type=None) produces a schema whose
+    "input" is queryParams with method enum [GET, HEAD, DELETE], instead of
+    silently keeping the POST schema's method enum [POST, PUT, PATCH] on a
+    GET-listed resource (the bug: probes read a GET entry promising a schema
+    only a POST/PUT/PATCH call could satisfy).
+    """
+    bazaar = (post_route.extensions or {}).get("bazaar", {})
+    info_input = bazaar.get("info", {}).get("input", {})
+    info_output = bazaar.get("info", {}).get("output")
+    schema_props = bazaar.get("schema", {}).get("properties", {})
+    input_schema = schema_props.get("input", {}).get("properties", {}).get("body")
+    output = None
+    if info_output is not None:
+        output_schema = schema_props.get("output", {}).get("properties", {}).get("example")
+        output = OutputConfig(example=info_output.get("example"), schema=output_schema)
+    new_extensions = declare_discovery_extension(
+        input=info_input.get("body"),
+        input_schema=input_schema,
+        output=output,
+    )
+    return dataclasses.replace(post_route, extensions=new_extensions)
+
+
 def _build_route_configs_uncached() -> dict[str, RouteConfig]:
     # The 3 hand-built core routes, plus anything the usine (Prospecteur/
     # Ouvrier/Crieur - see usine/) has added to app/generated/routes_registry.yaml.
@@ -3374,7 +3406,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
     ):
         _post_key = f"POST {_get_twin_path}"
         if _post_key in _routes:
-            _routes[f"GET {_get_twin_path}"] = _routes[_post_key]
+            _routes[f"GET {_get_twin_path}"] = _get_twin_route_config(_routes[_post_key])
 
     return _routes
 

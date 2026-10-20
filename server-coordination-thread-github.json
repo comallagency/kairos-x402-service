@@ -4,7 +4,11 @@
   "title": "Kairos Coordination Thread",
   "description": "Free MCP tools to validate multi-agent coordination thread turns and retrieve schema/samples.",
   "version": "1.0.0",
-  "websiteUrl": "https://x402.agentindex.world/place/coordination-thread",
+  "websiteUrl": "https://comallagency.github.io/kairos-place/coordination-thread.html",
+  "repository": {
+    "url": "https://github.com/comallagency/kairos-x402-service",
+    "source": "github"
+  },
   "remotes": [
     {
       "type": "streamable-http",
