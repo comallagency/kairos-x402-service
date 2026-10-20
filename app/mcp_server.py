@@ -173,6 +173,10 @@ from app.x402_setup import (
     TOKEN_RISK_OUTPUT_SCHEMA,
     TOKEN_RISK_SAMPLE_INPUT,
     TOKEN_RISK_SAMPLE_OUTPUT,
+    DUE_DILIGENCE_INPUT_SCHEMA,
+    DUE_DILIGENCE_OUTPUT_SCHEMA,
+    DUE_DILIGENCE_SAMPLE_INPUT,
+    DUE_DILIGENCE_SAMPLE_OUTPUT,
     RESEARCH_INPUT_SCHEMA,
     RESEARCH_OUTPUT_SCHEMA,
     RESEARCH_SAMPLE_INPUT,
@@ -1246,6 +1250,7 @@ from app.handlers.agent_health import _lookup as _agent_health_lookup
 from app.handlers.wallet_balance import _lookup as _wallet_balance_lookup
 from app.handlers.wallet_intelligence import _lookup as _wallet_intelligence_lookup
 from app.handlers.token_risk import _lookup as _token_risk_lookup
+from app.handlers.due_diligence import _lookup as _due_diligence_lookup
 from app.handlers.research import RESEARCH_ENABLED, ResearchError, _lookup as _research_lookup
 from app.upstream.evm_rpc import EvmRpcError
 from app.handlers.jev_classify import ClassifyError
@@ -1545,6 +1550,15 @@ _TOKEN_RISK_EXTENSIONS = declare_mcp_discovery_extension(
         output=OutputConfig(example=TOKEN_RISK_SAMPLE_OUTPUT),
     )
 )
+_DUE_DILIGENCE_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="due_diligence",
+        description=ROUTE_DESCRIPTIONS["due-diligence"],
+        input_schema=DUE_DILIGENCE_INPUT_SCHEMA,
+        example=DUE_DILIGENCE_SAMPLE_INPUT,
+        output=OutputConfig(example=DUE_DILIGENCE_SAMPLE_OUTPUT),
+    )
+)
 _X402_ECHO_EXTENSIONS = declare_mcp_discovery_extension(
     DeclareMcpDiscoveryConfig(
         tool_name="x402_echo",
@@ -1614,6 +1628,29 @@ async def _run_token_risk(args: dict, payer: str | None) -> dict:
     return {
         **result,
         "x402_receipt": make_receipt(None, "token-risk", timer.elapsed_ms, price),
+    }
+
+
+async def _run_due_diligence(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as timer:
+            result = await _due_diligence_lookup(args)
+    except EvmRpcError as exc:
+        db.log_request(
+            route="due-diligence", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+        )
+        raise ServiceError(str(exc)) from exc
+    price = effective_price(payer, price_float(config.PRICE_DUE_DILIGENCE))
+    db.log_request(
+        route="due-diligence", method="MCP", status="paid",
+        latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+        user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {
+        **result,
+        "x402_receipt": make_receipt(None, "due-diligence", timer.elapsed_ms, price, steps_executed=3),
     }
 
 
@@ -1768,6 +1805,40 @@ async def token_risk_tool(
         args={"address": address},
         extensions=_TOKEN_RISK_EXTENSIONS,
         run_and_log=_run_token_risk,
+    )
+
+
+@mcp.tool(
+    name="due_diligence",
+    title="Due Diligence",
+    description=ROUTE_DESCRIPTIONS["due-diligence"],
+    output_schema=DUE_DILIGENCE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def due_diligence_tool(
+    address: Annotated[str | None, Field(description=DUE_DILIGENCE_INPUT_SCHEMA["properties"]["address"]["description"])] = None,
+    token: Annotated[str | None, Field(description=DUE_DILIGENCE_INPUT_SCHEMA["properties"]["token"]["description"])] = None,
+    url: Annotated[str | None, Field(description=DUE_DILIGENCE_INPUT_SCHEMA["properties"]["url"]["description"])] = None,
+    method: Annotated[str, Field(description=DUE_DILIGENCE_INPUT_SCHEMA["properties"]["method"]["description"])] = "GET",
+    networks: Annotated[str | list[str] | None, Field(description=DUE_DILIGENCE_INPUT_SCHEMA["properties"]["networks"]["description"])] = None,
+    amount_usdc: Annotated[float | None, Field(description=DUE_DILIGENCE_INPUT_SCHEMA["properties"]["amount_usdc"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    args = {
+        "address": address,
+        "token": token,
+        "url": url,
+        "method": method,
+        "networks": networks,
+        "amount_usdc": amount_usdc,
+    }
+    return await _paid_tool_call(
+        tool_name="due_diligence",
+        route_key="POST /due-diligence",
+        ctx=ctx,
+        args=args,
+        extensions=_DUE_DILIGENCE_EXTENSIONS,
+        run_and_log=_run_due_diligence,
     )
 
 

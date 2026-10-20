@@ -328,6 +328,7 @@ def _sitemap_urls() -> list[str]:
         "/wallet-intelligence/sample",
         "/x402-echo/sample",
         "/agent-health/sample",
+        "/due-diligence/sample",
         "/agent.json",
         "/capabilities",
         "/openapi.json",
@@ -470,6 +471,7 @@ def _llms_catalog() -> str:
         "",
         f"- [Token Risk]({base}/token-risk): POST {{\"address\":\"0x...\"}} - 100% on-chain Base ERC-20 rug check (mint/blacklist/pause/tax bytecode flags, proxy, ownership, Uniswap v2/v3 + Aerodrome liquidity), Jev-powered avoid/caution/acceptable verdict",
         f"- [Token Card]({base}/token-card): GET ?address=0x... or POST {{\"address\":\"0x...\"}} - shareable SAFE/CAUTION/RISKY/DANGER verdict card for a Base ERC-20, written by Claude Haiku 5.5 from /token-risk's own on-chain signals ($0.02). Try GET /token-card/sample.",
+        f"- [Due Diligence]({base}/due-diligence): POST {{\"address\":\"0x...\",\"url\":\"https://...\"}} - 3 checks in 1 call: token-risk + wallet-intelligence + agent-health, one overall_verdict ($0.20). Try GET /due-diligence/sample.",
         "",
         f"- [Research]({base}/research): POST {{\"query\":\"...\"}} - cited web research report, 5-8 sentences with numbered-source citations, under 4.5s guaranteed",
         "",
@@ -541,6 +543,7 @@ def _llms_catalog() -> str:
         f"- {base}/rank/sample",
         f"- {base}/token-risk/sample",
         f"- {base}/token-card/sample",
+        f"- {base}/due-diligence/sample",
         f"- {base}/research/sample",
         f"- {base}/sentiment/sample",
         f"- {base}/classify/sample",
@@ -649,7 +652,7 @@ _WALLET_MCP_SECTIONS = [
     ),
     (
         "On-chain token safety and research",
-        ["token-risk", "research"],
+        ["token-risk", "due-diligence", "research"],
     ),
     (
         "Pay-per-call LLMs (dynamic price from max_tokens)",

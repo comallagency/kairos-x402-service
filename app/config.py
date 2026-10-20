@@ -182,6 +182,14 @@ PRICE_RANK = "$0.001"
 PRICE_TOKEN_RISK = "$0.005"
 PRICE_TOKEN_CARD = "$0.02"  # 2026-10-12: raised from $0.005
 PRICE_RESEARCH = "$0.005"
+# Composite check: token-risk + wallet-intelligence + agent-health in one
+# call - the three questions an agent asks before trusting a new
+# counterparty (is the token safe, is the wallet funded, is the service
+# actually live). Priced directly by Comall (2026-10-20) at ~10x the dearest
+# of its 3 underlying routes (token-risk, $0.005) - no upstream cost beyond
+# what those three already pay for themselves, so the margin is the full
+# convenience premium of one call instead of three.
+PRICE_DUE_DILIGENCE = "$0.20"
 
 # Pack 1 (2026-09-30): Jev-engine text classification, $0.002-$0.005 band.
 PRICE_SENTIMENT = "$0.002"
