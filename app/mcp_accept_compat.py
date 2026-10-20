@@ -1,9 +1,30 @@
-"""Normalise Accept pour les sondes MCP qui n'envoient que application/json.
+"""Normalise les requetes MCP qui n'arrivent pas dans la forme que FastMCP attend.
 
-FastMCP streamable HTTP exige « application/json, text/event-stream ». Arclan et
-d'autres registres handshake parfois sans event-stream ; on complète le header
-sans retirer ce que le client a demandé.
+Deux cas, mesures en logs nginx :
+
+1. Accept manquant ou incomplet. FastMCP streamable HTTP exige
+   « application/json, text/event-stream ». Arclan et d'autres registres
+   handshake parfois sans event-stream ; on complete le header sans retirer
+   ce que le client a demande.
+
+2. Chemin sans slash final sur un point de montage MCP. Starlette redirige
+   /mcp -> /mcp/ (307) via redirect_slashes, et les deux montages plus longs
+   (/mcp/relationship-memory, /mcp/coordination-thread) ont le meme probleme
+   avec un filet de rattrapage qui rate ce cas precis (voir main.py). Un
+   307 est invisible pour tout client qui ne suit pas les redirections sur
+   POST - releve a 57k+ POST /mcp et 42 POST /mcp/relationship-memory dans
+   les journaux du 2026-10-20, avant ce correctif. On reecrit le chemin en
+   interne (pas de redirection HTTP) pour que ces clients recoivent la
+   vraie reponse du premier coup.
 """
+
+_MCP_TRAILING_SLASH_PATHS = frozenset(
+    {
+        "/mcp",
+        "/mcp/relationship-memory",
+        "/mcp/coordination-thread",
+    }
+)
 
 
 class McpAcceptCompatMiddleware:
@@ -44,4 +65,11 @@ class McpAcceptCompatMiddleware:
 
         new_scope = dict(scope)
         new_scope["headers"] = headers
+
+        if path in _MCP_TRAILING_SLASH_PATHS:
+            new_scope["path"] = path + "/"
+            raw_path = new_scope.get("raw_path")
+            if raw_path:
+                new_scope["raw_path"] = raw_path + b"/"
+
         await self.app(new_scope, receive, send)
