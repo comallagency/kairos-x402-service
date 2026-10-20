@@ -108,6 +108,14 @@
   </section>
 
   <section>
+    <h2>Ce que les sondes demandent et n'obtiennent pas (24h, hors 402)</h2>
+    <table id="protocol-errors-table">
+      <thead><tr><th>Méthode</th><th>Route</th><th>Statut</th><th>Occurrences</th><th>Dernier agent</th><th>Dernière fois</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section>
     <h2>Derniers 402 non convertis (intentions)</h2>
     <table id="intents-table">
       <thead><tr><th>Heure (UTC)</th><th>Route</th><th>User-Agent</th><th>Corps</th></tr></thead>
@@ -226,6 +234,19 @@ function render(data) {
     tt.appendChild(tile('Paiements on-chain (test)', data.testnet.chain.total_payments));
   } else {
     testnetSection.style.display = 'none';
+  }
+
+  const protoBody = document.querySelector('#protocol-errors-table tbody');
+  protoBody.innerHTML = '';
+  const protoErrors = data.protocol_errors_24h || [];
+  if (!protoErrors.length) {
+    protoBody.innerHTML = '<tr><td colspan="6" class="muted">Aucun écart protocole relevé sur 24h</td></tr>';
+  }
+  for (const e of protoErrors) {
+    const tr = document.createElement('tr');
+    const ua = (e.last_ua || '').slice(0, 60);
+    tr.innerHTML = `<td>${e.method}</td><td>${e.route}</td><td><span class="pill bad">${e.status}</span></td><td>${e.count}</td><td class="excerpt">${ua}</td><td>${fmtDate(e.last_ts)}</td>`;
+    protoBody.appendChild(tr);
   }
 
   const intentsBody = document.querySelector('#intents-table tbody');
