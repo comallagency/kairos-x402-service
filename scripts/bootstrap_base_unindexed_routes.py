@@ -1,36 +1,50 @@
 #!/usr/bin/env python3
-"""Bazaar REFRESH bootstrap for /token-card, /search, /fact-check -
+"""Bazaar FIRST-SETTLEMENT bootstrap for /due-diligence, /company-leads -
 PREPARED, NOT RUN.
 
-Rescoped 2026-10-12, fourth version of this script - same day these
-three routes' prices changed (token-card $0.005->$0.02, search
-$0.001->$0.01, fact-check $0.01->$0.02). CDP's Bazaar fiche for a route
-freezes whatever price/description was true at its LAST real settlement
-and only re-crawls on the next one, not periodically - so each of these
-three now shows a stale, wrong price in the live Bazaar listing until one
-more real payment lands on it. (token-risk, the third route in the
-previous version of this script, had no price change today and is
-dropped from this run; its fiche is not stale from this event.)
+Rescoped 2026-10-20, fifth version of this script - these 2 routes
+shipped today (PRs #42, #44) and have never had a single real settlement,
+so CDP's Bazaar has no fiche for either yet at all (not stale - entirely
+absent: a fiche is only CREATED on a route's first real settlement, never
+proactively). The previous 3 targets (token-card, search, fact-check) are
+dropped from this run - already indexed and settled by the 2026-10-12
+version of this script, nothing stale about them from today's changes.
 
-TARGET_ROUTES (3): token-card is paid via GET with queryParams (its
-Bazaar-registered method, see app/x402_setup.py's "GET /token-card"
-entry); search and fact-check via POST (json body), matching the method
-each is actually indexed under in /.well-known/x402.
+TARGET_ROUTES (2), both paid via POST (json body), matching the method
+each is actually indexed under in /.well-known/x402 (both also have a GET
+twin registered at the same price - see app/x402_setup.py's
+`_get_twin_path` loop - POST chosen here as the richer, more natural shape
+for each route's own payload, same reasoning as search/fact-check above):
 
-Same shape as the previous two versions of this script (ping-pong
-funding B<-A, pay from B, stop cleanly the moment A can no longer cover
-one more funding, real price read live from each route's own 402
-challenge, _fundings_needed_for_shortfall rounds up rather than requiring
-an exact multiple) - copied rather than imported, same "standalone
-one-off artifact" reasoning as every other bootstrap script in this
-directory.
+- due-diligence: address (wallet-intelligence + default token-risk
+  target) + url (agent-health target) - USDC's own contract address and
+  this service's own /search route, same real values already published as
+  this route's own Bazaar sample input (app/x402_setup.py's
+  DUE_DILIGENCE_SAMPLE_INPUT) - not fabricated for this script.
+- company-leads: sector + country (required) + city (optional) +
+  max_results. UNLIKE every other route this script (or its predecessors)
+  has ever targeted, this one has a REAL third-party cost per real call
+  (Apify, ~$0.003/lead delivered + a $0.0002 start fee - see
+  docs/company-leads-dry-run-report.md) - every other route's upstream
+  cost is $0 internal compute. max_results is set to 3, not the route's
+  own default of 25, specifically to keep that real cost to roughly
+  3 x $0.003 + $0.0002 ~= $0.009 for this one bootstrap call, not a full
+  25-lead run (~$0.075) that would add nothing extra toward the only goal
+  here (one real settlement, so Bazaar creates the fiche).
+
+Same shape as every previous version of this script (ping-pong funding
+B<-A, pay from B, stop cleanly the moment A can no longer cover one more
+funding, real price read live from each route's own 402 challenge,
+_fundings_needed_for_shortfall rounds up rather than requiring an exact
+multiple) - copied rather than imported, same "standalone one-off
+artifact" reasoning as every other bootstrap script in this directory.
 
 --dry-run
 ---------
 No real payment (DRY_RUN short-circuits before any signing/broadcast).
 Reads the REAL on-chain balance and each route's REAL live price, and
 simulates the exact same balance bookkeeping and stop condition as a real
-run - reports exactly how many of the 3 would settle with A's current
+run - reports exactly how many of the 2 would settle with A's current
 balance, in priority order, plus a total-fundings/total-cost summary.
 """
 
@@ -54,15 +68,14 @@ USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 BASE_RPC = "https://mainnet.base.org"
 
 # (path, method) - method is whichever one each route is actually
-# Bazaar-registered under in /.well-known/x402 (confirmed live 2026-10-12).
+# Bazaar-registered under in /.well-known/x402 (confirmed live 2026-10-20).
 TARGET_ROUTES = [
-    ("token-card", "GET"),
-    ("search", "POST"),
-    ("fact-check", "POST"),
+    ("due-diligence", "POST"),
+    ("company-leads", "POST"),
 ]
 TARGET_PATHS = [p for p, _m in TARGET_ROUTES]
-assert len(TARGET_PATHS) == 3
-assert len(set(TARGET_PATHS)) == 3
+assert len(TARGET_PATHS) == 2
+assert len(set(TARGET_PATHS)) == 2
 
 FUNDING_PATH = "x402-echo"
 FUNDING_PRICE = 0.001  # config.PRICE_X402_ECHO
@@ -73,14 +86,19 @@ EPSILON = 1e-9
 
 DRY_RUN = "--dry-run" in sys.argv
 
-# Real sample inputs per route - token-card/token-risk's own Base USDC
-# test address, fact-check's own SAMPLE_CLAIM (app/handlers/fact_check.py)
-# - not fabricated for this script. token-card's is used as queryParams
-# (GET), the other two as a json body (POST).
+# Real sample inputs per route, both used as a json body (POST):
+# - due-diligence: the same address/url pair already published as this
+#   route's own Bazaar sample (app/x402_setup.py's
+#   DUE_DILIGENCE_SAMPLE_INPUT) - USDC's own Base contract, and this
+#   service's own /search route as the agent-health audit target.
+# - company-leads: a real sector+country+city combination already
+#   verified to return real leads (docs/company-leads-dry-run-report.md),
+#   max_results capped at 3 (not the route's own default of 25) to bound
+#   the real per-call Apify cost this one route alone carries - see the
+#   module docstring.
 SAMPLE_INPUTS = {
-    "token-card": {"address": USDC_CONTRACT},
-    "search": {"query": "recent earthquake news"},
-    "fact-check": {"claim": "The Eiffel Tower is taller than the Statue of Liberty."},
+    "due-diligence": {"address": USDC_CONTRACT, "url": f"{BASE_URL}/search"},
+    "company-leads": {"sector": "Software Development", "country": "fr", "city": "Paris", "max_results": 3},
 }
 assert set(SAMPLE_INPUTS) == set(TARGET_PATHS)
 
@@ -252,7 +270,7 @@ async def main() -> int:
     bal_b = await usdc_balance(ADDRESS_B)
     print(f"A balance (on-chain): {bal_a:.6f} USDC")
     print(f"B balance (on-chain): {bal_b:.6f} USDC")
-    print(f"{len(TARGET_ROUTES)} fiches Bazaar a rafraichir (CDP n'a pas encore vu les derniers correctifs), prix reel lu par route, financement a la volee")
+    print(f"{len(TARGET_ROUTES)} fiches Bazaar a creer (aucun reglement reel jamais vu sur ces routes), prix reel lu par route, financement a la volee")
     print()
 
     account_a = account_b = None
