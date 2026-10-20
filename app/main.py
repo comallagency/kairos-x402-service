@@ -53,6 +53,8 @@ from app.handlers.search import router as search_router
 from app.handlers.summarize import router as summarize_router
 from app.handlers.token_risk import router as token_risk_router
 from app.handlers.token_card import router as token_card_router
+from app.handlers.company_leads import router as company_leads_router
+from app.company_leads_worker import worker_loop as company_leads_worker_loop
 from app.handlers.due_diligence import router as due_diligence_router
 from app.handlers.research import router as research_router
 from app.handlers.sentiment import router as sentiment_router
@@ -139,6 +141,7 @@ async def app_lifespan(app: FastAPI):
     tasks = [
         asyncio.create_task(warm_discover_cache()),
         asyncio.create_task(worker_loop()),
+        asyncio.create_task(company_leads_worker_loop()),
         asyncio.create_task(heartbeat_loop()),
         asyncio.create_task(marketplace_loop()),
         asyncio.create_task(dashboard_cache_loop()),
@@ -188,6 +191,7 @@ inner_app.include_router(summarize_router)
 inner_app.include_router(token_risk_router)
 inner_app.include_router(token_card_router)
 inner_app.include_router(due_diligence_router)
+inner_app.include_router(company_leads_router)
 inner_app.include_router(research_router)
 inner_app.include_router(sentiment_router)
 inner_app.include_router(classify_router)

@@ -466,6 +466,13 @@ ROUTE_DESCRIPTIONS = {
         "and its whole context window. Free status polling and result retrieval. "
         "Try GET /jobs/sample."
     ),
+    "company-leads": (
+        "B2B lead search: give a sector and a country (city optional), get back "
+        "people currently working at matching companies - name, title, a real "
+        "work email, and their company's name, domain (when known) and employee "
+        "count. Async job - POST creates it, free status polling and result "
+        "retrieval. Up to 25 leads per call. Try GET /company-leads/sample."
+    ),
     "pdf": (
         "Extract a public PDF (by HTTPS URL or base64) into clean Markdown - "
         "headings and tables preserved via layout-aware parsing, plus title/author/"
@@ -1153,6 +1160,37 @@ JOBS_OUTPUT_SCHEMA = {
     "properties": {
         "job_id": {"type": "string", "description": "Identifier to poll for status and fetch the finished result."},
         "eta_seconds": {"type": "integer", "description": "Estimated seconds until the research brief is ready."},
+    },
+    "required": ["job_id", "eta_seconds"],
+}
+
+COMPANY_LEADS_INPUT_SCHEMA = {
+    "properties": {
+        "sector": {
+            "type": "string",
+            "description": "Industry/sector to search, e.g. \"Software Development\", \"Marketing and Advertising\".",
+        },
+        "country": {
+            "type": "string",
+            "description": "Two-letter ISO country code where the leads are located, e.g. \"fr\", \"us\".",
+        },
+        "city": {
+            "type": "string",
+            "description": "Optional city or region to narrow the search within the country, e.g. \"Paris\".",
+        },
+        "max_results": {
+            "type": "integer",
+            "description": "How many leads to return, 1-25 (default 25).",
+        },
+    },
+    "required": ["sector", "country"],
+}
+
+COMPANY_LEADS_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "job_id": {"type": "string", "description": "Identifier to poll for status and fetch the finished result."},
+        "eta_seconds": {"type": "integer", "description": "Estimated seconds until the lead list is ready."},
     },
     "required": ["job_id", "eta_seconds"],
 }
@@ -2523,6 +2561,24 @@ def _core_route_configs() -> dict[str, RouteConfig]:
                 ),
             ),
         ),
+        "POST /company-leads": RouteConfig(
+            accepts=_payment_option(config.PRICE_COMPANY_LEADS),
+            resource=f"{config.BASE_URL}/company-leads",
+            description=ROUTE_DESCRIPTIONS["company-leads"],
+            mime_type="application/json",
+            service_name="b2b-lead-search",
+            icon_url=ICON_URL,
+            tags=["b2b leads", "lead generation", "company search", "sales leads", "async research"],
+            extensions=declare_discovery_extension(
+                input={"sector": "Software Development", "country": "fr", "city": "Paris"},
+                input_schema=COMPANY_LEADS_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(
+                    example={"job_id": "abc123", "eta_seconds": 30},
+                    schema=COMPANY_LEADS_OUTPUT_SCHEMA,
+                ),
+            ),
+        ),
         "POST /pdf": RouteConfig(
             accepts=_payment_option(config.PRICE_PDF),
             resource=f"{config.BASE_URL}/pdf",
@@ -3477,7 +3533,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
         # (2026-10-01) - listed in /.well-known/x402 but not yet in CDP
         # Bazaar's own index, so the earlier Bazaar-listing audit missed
         # them; same gap, same fix.
-        "/agent-claim", "/fact-check", "/jobs",
+        "/agent-claim", "/fact-check", "/jobs", "/company-leads",
     ):
         _post_key = f"POST {_get_twin_path}"
         if _post_key in _routes:

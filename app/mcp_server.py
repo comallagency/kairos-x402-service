@@ -68,6 +68,7 @@ from app.upstream.websearch import SearchError
 from app.handlers.extract import ExtractError, _get_content as _get_extract_content, _run_extract
 from app.handlers.fact_check import FactCheckError, _check_claim
 from app.handlers.jobs import JOB_POLL_SLOT_SECONDS
+from app.handlers.company_leads import COMPANY_LEADS_POLL_SLOT_SECONDS, _validate_query as _validate_company_leads_query
 from app.handlers.pdf import PdfError, _get_pdf_bytes, parse_pdf
 from app.handlers.search import (
     DEFAULT_CONTENT_CHARS,
@@ -118,6 +119,8 @@ from app.x402_setup import (
     FACT_CHECK_INPUT_SCHEMA,
     FACT_CHECK_SAMPLE_OUTPUT,
     JOBS_INPUT_SCHEMA,
+    COMPANY_LEADS_INPUT_SCHEMA,
+    COMPANY_LEADS_OUTPUT_SCHEMA,
     JOBS_SAMPLE_OUTPUT,
     KIT_TAGLINE,
     NEWS_INPUT_SCHEMA,
@@ -648,6 +651,66 @@ async def jobs_tool(
         args=args,
         extensions=_JOBS_EXTENSIONS,
         run_and_log=_run_jobs,
+    )
+
+
+# --- company_leads (POST /company-leads) ------------------------------------
+
+_COMPANY_LEADS_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="company_leads",
+        description=ROUTE_DESCRIPTIONS["company-leads"],
+        input_schema=COMPANY_LEADS_INPUT_SCHEMA,
+        example={"sector": "Software Development", "country": "fr", "city": "Paris"},
+        output=OutputConfig(example={"job_id": "abc123", "eta_seconds": 30}),
+    )
+)
+
+
+async def _run_company_leads(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    query, error = _validate_company_leads_query(args)
+    if error is not None:
+        db.log_request(
+            route="company-leads", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=error,
+        )
+        raise ServiceError(error)
+
+    price = effective_price(payer, price_float(config.PRICE_COMPANY_LEADS))
+    job_id = db.create_company_leads_job(query, amount_usdc=price, payer=payer)
+    position = db.company_leads_queue_position(job_id)
+    eta_seconds = (position + 1) * COMPANY_LEADS_POLL_SLOT_SECONDS
+
+    db.log_request(
+        route="company-leads", method="MCP", status="paid", amount_usdc=price, payer=payer,
+        user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {"job_id": job_id, "eta_seconds": eta_seconds}
+
+
+@mcp.tool(
+    name="company_leads",
+    title="Company Leads",
+    description=ROUTE_DESCRIPTIONS["company-leads"],
+    output_schema=COMPANY_LEADS_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": False, "openWorldHint": True, "idempotentHint": False},
+)
+async def company_leads_tool(
+    sector: Annotated[str, Field(description=COMPANY_LEADS_INPUT_SCHEMA["properties"]["sector"]["description"])],
+    country: Annotated[str, Field(description=COMPANY_LEADS_INPUT_SCHEMA["properties"]["country"]["description"])],
+    city: Annotated[str | None, Field(description=COMPANY_LEADS_INPUT_SCHEMA["properties"]["city"]["description"])] = None,
+    max_results: Annotated[int | None, Field(description=COMPANY_LEADS_INPUT_SCHEMA["properties"]["max_results"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    args = {"sector": sector, "country": country, "city": city, "max_results": max_results}
+    return await _paid_tool_call(
+        tool_name="company_leads",
+        route_key="POST /company-leads",
+        ctx=ctx,
+        args=args,
+        extensions=_COMPANY_LEADS_EXTENSIONS,
+        run_and_log=_run_company_leads,
     )
 
 
