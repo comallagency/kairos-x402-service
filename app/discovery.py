@@ -329,6 +329,7 @@ def _sitemap_urls() -> list[str]:
         "/x402-echo/sample",
         "/agent-health/sample",
         "/due-diligence/sample",
+        "/company-leads/sample",
         "/agent.json",
         "/capabilities",
         "/openapi.json",
@@ -544,6 +545,7 @@ def _llms_catalog() -> str:
         f"- {base}/token-risk/sample",
         f"- {base}/token-card/sample",
         f"- {base}/due-diligence/sample",
+        f"- {base}/company-leads/sample",
         f"- {base}/research/sample",
         f"- {base}/sentiment/sample",
         f"- {base}/classify/sample",
@@ -663,6 +665,7 @@ _WALLET_MCP_SECTIONS = [
         [
             "weather", "crypto", "news", "can-pay", "probe", "wallet-balance", "gas-price",
             "wallet-intelligence", "x402-echo", "agent-health", "discover",
+            "company-leads",
         ],
     ),
 ]

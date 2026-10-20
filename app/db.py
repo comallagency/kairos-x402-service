@@ -49,6 +49,28 @@ CREATE TABLE IF NOT EXISTS jobs (
     payer TEXT
 );
 
+-- Own table and worker loop (app/company_leads_worker.py), deliberately
+-- separate from `jobs`/app/jobs_worker.py above even though the shape is
+-- the same create->poll->result pattern: `jobs`'s own worker is hardcoded to
+-- the web-research pipeline (OpenRouter + websearch), and branching it by a
+-- `kind` column would risk the already-live POST /jobs route for a brand
+-- new, unproven Apify-backed feature. Full isolation costs one duplicated
+-- table/worker, buys zero blast radius on existing revenue.
+CREATE TABLE IF NOT EXISTS company_leads_jobs (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,          -- queued | running | done | failed
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    input_json TEXT NOT NULL,
+    apify_run_id TEXT,
+    result_json TEXT,
+    error_json TEXT,
+    leads_delivered INTEGER DEFAULT 0,
+    amount_usdc REAL,
+    payer TEXT
+);
+
 -- La boite aux lettres de l'agent (app/handlers/contact.py). Ecrire est
 -- gratuit et sans compte ; repondre demande le jeton du PC. `fingerprint` rend
 -- l'identifiant deja attribue a un doublon exact plutot qu'une erreur : un
@@ -648,6 +670,74 @@ def fail_job(job_id: str, error: dict, steps_executed: int = 0, sources_read: in
             """UPDATE jobs SET status='failed', finished_at=?, error_json=?,
                steps_executed=?, sources_read=? WHERE id=?""",
             (now_iso(), json.dumps(error), steps_executed, sources_read, job_id),
+        )
+
+
+def create_company_leads_job(input_data: dict, amount_usdc: float | None = None, payer: str | None = None) -> str:
+    job_id = uuid.uuid4().hex
+    with cursor() as cur:
+        cur.execute(
+            """INSERT INTO company_leads_jobs (id, status, created_at, input_json, amount_usdc, payer)
+               VALUES (?, 'queued', ?, ?, ?, ?)""",
+            (job_id, now_iso(), json.dumps(input_data), amount_usdc, payer),
+        )
+    return job_id
+
+
+def company_leads_queue_position(job_id: str) -> int:
+    """Number of company-leads jobs queued/running strictly before this one."""
+    with cursor() as cur:
+        cur.execute("SELECT created_at FROM company_leads_jobs WHERE id=?", (job_id,))
+        row = cur.fetchone()
+        if row is None:
+            return 0
+        created_at = row["created_at"]
+        cur.execute(
+            """SELECT COUNT(*) AS n FROM company_leads_jobs
+               WHERE status IN ('queued','running') AND created_at < ?""",
+            (created_at,),
+        )
+        return cur.fetchone()["n"]
+
+
+def get_company_leads_job(job_id: str) -> dict | None:
+    with cursor() as cur:
+        cur.execute("SELECT * FROM company_leads_jobs WHERE id=?", (job_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def next_queued_company_leads_job() -> dict | None:
+    with cursor() as cur:
+        cur.execute(
+            "SELECT * FROM company_leads_jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1"
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def mark_company_leads_job_running(job_id: str, apify_run_id: str) -> None:
+    with cursor() as cur:
+        cur.execute(
+            "UPDATE company_leads_jobs SET status='running', started_at=?, apify_run_id=? WHERE id=?",
+            (now_iso(), apify_run_id, job_id),
+        )
+
+
+def finish_company_leads_job(job_id: str, result: dict, leads_delivered: int) -> None:
+    with cursor() as cur:
+        cur.execute(
+            """UPDATE company_leads_jobs SET status='done', finished_at=?, result_json=?,
+               leads_delivered=? WHERE id=?""",
+            (now_iso(), json.dumps(result), leads_delivered, job_id),
+        )
+
+
+def fail_company_leads_job(job_id: str, error: dict) -> None:
+    with cursor() as cur:
+        cur.execute(
+            "UPDATE company_leads_jobs SET status='failed', finished_at=?, error_json=? WHERE id=?",
+            (now_iso(), json.dumps(error), job_id),
         )
 
 

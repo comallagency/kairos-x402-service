@@ -37,6 +37,31 @@ ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
 # account's token: this one lives in a public-facing search path.
 GITHUB_SEARCH_TOKEN = os.getenv("GITHUB_SEARCH_TOKEN") or None
 
+# Apify (POST /company-leads, app/company_leads_worker.py) - pay-per-event
+# actor b2bsearch/b2b-leads-finder (API id b2bsearch~b2b-leads-finder),
+# chosen 2026-10-20 after a real test run on our own account showed the
+# alternative (coladeu/apollo-organizations-scraper, company-level, no
+# email/size fields) only succeeds ~60% of the time (285/478 runs over 30
+# days, per the Apify Store's own public stats) and structurally cannot
+# return size or email at all. b2bsearch's actor is person-level (a lead =
+# a contact, with their current company's name/domain/size attached, same
+# meaning "lead" has in B2B sales) and verified at 99.8%+ success (2991/2996
+# runs, 30 days). Real cost measured directly against our own Apify account
+# (FREE tier) on 2026-10-20: $0.003 per lead delivered with an email, plus a
+# one-time $0.0002 actor-start fee per run - leads without a reachable email
+# are never charged. emailType is forced to "work" (never "any"): a real
+# 20-lead test run with emailType="any" came back 45% personal-mailbox
+# (gmail/yahoo/hotmail/free.fr) - unusable as sales leads and a quality
+# issue the buyer would be paying for. "work" filters to current-employer
+# addresses only, verified 100% work-domain on a real follow-up run. See
+# docs/company-leads-dry-run-report.md.
+APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN") or None
+APIFY_ACTOR_ID = os.getenv("APIFY_ACTOR_ID", "b2bsearch~b2b-leads-finder")
+# Bounds our own Apify cost exposure per sold call - the price below is flat
+# per job (not per lead), so this cap is what keeps the real cost under the
+# price's margin regardless of how many leads a query could have matched.
+COMPANY_LEADS_MAX_RESULTS = int(os.getenv("COMPANY_LEADS_MAX_RESULTS", "25"))
+
 # Gemma3:4b local (systemd ollama, VPS) - juge /fact-check sans passer
 # par OpenRouter (voir app/upstream/ollama.py). host.docker.internal:
 # resolu vers l'hote via extra_hosts dans docker-compose.yml.
@@ -190,6 +215,16 @@ PRICE_RESEARCH = "$0.005"
 # what those three already pay for themselves, so the margin is the full
 # convenience premium of one call instead of three.
 PRICE_DUE_DILIGENCE = "$0.20"
+# Flat price for up to COMPANY_LEADS_MAX_RESULTS (25) leads from Apify
+# (b2bsearch/b2b-leads-finder, emailType="work" only - see APIFY_ACTOR_ID
+# above). Real cost at 25 leads: 25 x $0.003 + $0.0002 start fee = $0.0752
+# (measured directly on our own account, FREE tier). $0.30 is ~4x that
+# cost - covers Apify's own platform cut plus a buffer for runs that find
+# fewer than 25 matching work-email leads (still billed the flat price,
+# since the search itself - not a per-lead guarantee - is what the call
+# pays for, same as /jobs's existing flat $0.10 regardless of how much
+# research the job actually finds).
+PRICE_COMPANY_LEADS = "$0.30"
 
 # Pack 1 (2026-09-30): Jev-engine text classification, $0.002-$0.005 band.
 PRICE_SENTIMENT = "$0.002"
@@ -233,6 +268,10 @@ DAILY_CAPACITY = {
     "tip": int(os.getenv("DAILY_CAPACITY_TIP", "10000")),
     "agent-claim": int(os.getenv("DAILY_CAPACITY_AGENT_CLAIM", "3000")),
     "agent-health": int(os.getenv("DAILY_CAPACITY_AGENT_HEALTH", "3000")),
+    # Real third-party cost per call (~$0.075 in Apify spend) unlike the
+    # $0.001-$0.02 routes above - capped to bound worst-case daily Apify
+    # exposure (50 x ~$0.075 = ~$3.75/day) while this route is new/unproven.
+    "company-leads": int(os.getenv("DAILY_CAPACITY_COMPANY_LEADS", "50")),
 }
 
 # OpenRouter caps the "models" fallback array at 3 entries per request, so the
