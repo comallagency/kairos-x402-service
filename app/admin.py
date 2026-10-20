@@ -335,6 +335,66 @@ def _route_p50_latency_24h() -> dict[str, float]:
     return result
 
 
+_PROTO_ERROR_CACHE: dict = {}
+_PROTO_ERROR_CACHE_TTL_S = 60.0  # même ordre de grandeur que _LATENCY_CACHE_TTL_S
+
+# 402 est la réponse normale d'une route payante, jamais une panne - tout le
+# reste (400/404/405/5xx...) est un écart entre ce que les cartes du service
+# annoncent et ce qu'il sert réellement à une sonde (voir CLAUDE.md "Ce que
+# les sondes demandent et n'obtiennent pas"). Lu sur la même source que
+# _route_p50_latency_24h car requests.db ne connaît que les routes payantes,
+# jamais /mcp, /oauth/*, ni un 404 générique.
+_IGNORED_ERROR_STATUSES = {"402"}
+
+
+def _recent_protocol_errors_24h(limit: int = 20) -> list[dict]:
+    now = time.monotonic()
+    cached_at = _PROTO_ERROR_CACHE.get("at")
+    if cached_at is not None and now - cached_at < _PROTO_ERROR_CACHE_TTL_S:
+        return _PROTO_ERROR_CACHE["value"]
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    counts: dict[tuple[str, str, str], dict] = {}
+    for log_path in _NGINX_LOG_PATHS:
+        if not log_path.exists():
+            continue
+        try:
+            with open(log_path, "r", errors="replace") as f:
+                for line in f:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) < 9:
+                        continue
+                    ts, host, _ip, method, uri, status, _bytes, _req_time, ua = parts[:9]
+                    if host != "x402.agentindex.world":
+                        continue
+                    if status.startswith(("2", "3")) or status in _IGNORED_ERROR_STATUSES:
+                        continue
+                    try:
+                        ts_dt = datetime.fromisoformat(ts)
+                    except ValueError:
+                        continue
+                    if ts_dt < cutoff:
+                        continue
+                    route = uri.split("?", 1)[0]
+                    key = (method, route, status)
+                    row = counts.setdefault(key, {"count": 0, "last_ua": ua, "last_ts": ts})
+                    row["count"] += 1
+                    if ts > row["last_ts"]:
+                        row["last_ts"] = ts
+                        row["last_ua"] = ua
+        except OSError:
+            continue
+
+    result = [
+        {"method": m, "route": r, "status": s, "count": row["count"],
+         "last_ts": row["last_ts"], "last_ua": row["last_ua"]}
+        for (m, r, s), row in sorted(counts.items(), key=lambda kv: -kv[1]["count"])[:limit]
+    ]
+    _PROTO_ERROR_CACHE["value"] = result
+    _PROTO_ERROR_CACHE["at"] = now
+    return result
+
+
 def _compute_agg_24h(recent: list[dict], latency_by_route: dict[str, float]) -> dict:
     """2026-10-11: every number this returns comes from the SAME loop over
     the SAME (already test-identity-filtered) `recent` rows - "requêtes
@@ -584,6 +644,7 @@ def _collect_dashboard_data_sync(openrouter: dict) -> dict:
         "unconverted_recent": db.recent_unconverted(20),
         "mpp_attempts_24h": db.count_mpp_attempts_since(24),
         "payment_failures_recent": db.recent_payment_failures(limit=10, hours=24),
+        "protocol_errors_24h": _recent_protocol_errors_24h(),
         "routes": routes_map,
         "events": events_payload[-MAX_LIVE_EVENTS:],
         "events_total_24h": len(events_payload),
