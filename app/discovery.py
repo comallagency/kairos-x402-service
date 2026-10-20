@@ -454,6 +454,8 @@ def _llms_catalog() -> str:
         f"- [Structured Extract]({base}/extract): POST URL/text plus JSON schema ($0.002)",
         f"- [Summarize]({base}/summarize): POST URL/text/HTML ($0.002)",
         f"- [Translate]({base}/translate): POST `{{\"text\":\"...\",\"target_lang\":\"en\"}}` \u2014 up to 200 segments in one call ($0.002, GET /translate/sample)",
+        f"- [Fact Check]({base}/fact-check): POST {{\"claim\":\"...\"}} — verdict written by Claude Haiku 5.5 from real web sources: supported/contradicted/mixed/unverifiable, each source with its stance ($0.02, GET /fact-check/sample)",
+        f"- [Jobs]({base}/jobs): POST {{\"query\":\"...\"}} — multi-query web research synthesized into one sourced JSON brief, what would otherwise take twenty calls ($0.10, free status polling, GET /jobs/sample)",
         "",
         "## Decision and judgment tools ($0.001 USDC)",
         "",
