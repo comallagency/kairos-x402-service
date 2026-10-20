@@ -383,6 +383,7 @@ function normalise(j){
     revenueTotalToday: Number(j.revenue_total_today_usdc) || 0,
     walletABalance: j.wallet_a_balance_usdc,
     walletAMinutesAgo: j.wallet_a_balance_minutes_ago,
+    walletEcart: j.wallet_ecart_usdc,
     availability: j.availability_7d_pct,
     commercial: j.commercial || {},
     chain: j.chain || {},
@@ -502,6 +503,7 @@ function renderInner(d, demo){
       <div class="lbl">Solde wallet A</div>
       <div class="num mono">${d.walletABalance != null ? '$'+money(d.walletABalance) : '—'}</div>
       <div class="hint" style="margin-top:8px">${d.walletAMinutesAgo != null ? `mis à jour il y a ${d.walletAMinutesAgo} min` : 'jamais mesuré'}</div>
+      <div class="hint" style="margin-top:2px">${d.walletEcart != null ? `écart vs revenu depuis toujours ${d.walletEcart>=0?'+':''}$${money(d.walletEcart)}` : ''}</div>
     </div>
     <div>
       <div class="lbl">Acheteurs clients 30 j</div>

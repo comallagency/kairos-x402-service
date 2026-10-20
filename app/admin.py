@@ -557,6 +557,14 @@ def _collect_dashboard_data_sync(openrouter: dict) -> dict:
         except ValueError:
             pass
 
+    # Le seul couple comparable: un solde (depuis toujours) contre un revenu
+    # non borne dans le temps (depuis toujours aussi), pas contre une fenetre
+    # glissante (24h/7j/30j) qui ne mesure pas la meme chose.
+    revenue_all_time = db.chain_revenue_all_time(network)
+    wallet_ecart_usdc = (
+        round(wallet_a["balance_usdc"] - revenue_all_time, 6) if wallet_a["balance_usdc"] is not None else None
+    )
+
     data = {
         "generated_at": generated_at,
         "updated_at": generated_at,
@@ -565,6 +573,8 @@ def _collect_dashboard_data_sync(openrouter: dict) -> dict:
         "wallet_a_balance_usdc": wallet_a["balance_usdc"],
         "wallet_a_balance_checked_at": wallet_a["checked_at"],
         "wallet_a_balance_minutes_ago": wallet_a_minutes_ago,
+        "revenue_all_time_usdc": round(revenue_all_time, 6),
+        "wallet_ecart_usdc": wallet_ecart_usdc,
         "revenue_usdc": main["revenue_usdc"],
         "revenue_usdc_auditors": main["revenue_usdc_auditors"],
         # 2026-10-10: "Encaisse total" card - clients + auditors, pure

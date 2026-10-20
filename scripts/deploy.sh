@@ -129,3 +129,6 @@ docker compose stop "$live_service"
 docker compose rm -f "$live_service"
 
 echo "== deploy OK: $target_service is live (port $target_port), $live_service stopped, pre-cutover + 60s post-cutover watch both passed =="
+
+echo "== vérification /place : republie ce qui aurait disparu du recreate =="
+python3 scripts/place_backup_guard.py || echo "place_backup_guard.py a échoué (non bloquant) :" >&2

@@ -890,6 +890,19 @@ def chain_revenue_since(network: str, hours: int) -> float:
         return cur.fetchone()["total"]
 
 
+def chain_revenue_all_time(network: str) -> float:
+    """Same filter as chain_revenue_since() (is_mechanical=0), unbounded in
+    time - the only number comparable to wallet_a_balance_usdc(), which is
+    itself a lifetime balance, not a windowed one."""
+    with cursor() as cur:
+        cur.execute(
+            "SELECT COALESCE(SUM(amount_usdc), 0) AS total FROM chain_payments "
+            "WHERE network=? AND is_mechanical=0",
+            (network,),
+        )
+        return cur.fetchone()["total"]
+
+
 def chain_buyer_stats(network: str) -> dict:
     """Excludes MECHANICAL_WALLETS - see chain_revenue_since()."""
     with cursor() as cur:

@@ -186,12 +186,21 @@ def _route_config_for(spec: ComputeSpec) -> RouteConfig:
 
 
 def build_compute_route_configs() -> dict[str, RouteConfig]:
+    # Lazy import: x402_setup imports this module's build_compute_route_configs
+    # from inside _build_route_configs_uncached(), so a top-level import here
+    # would be circular.
+    from app.x402_setup import _get_twin_route_config
+
     configs = {}
     for spec in COMPUTE_SPECS:
         cfg = _route_config_for(spec)
         configs[f"POST /{spec.slug}"] = cfg
         # GET twin from day one (2026-10-01 fix, applied here pre-emptively
         # instead of retrofitted): an unpaid GET probe must get 402, never
-        # FastAPI's own 405 for a method with no registered handler.
-        configs[f"GET /{spec.slug}"] = cfg
+        # FastAPI's own 405 for a method with no registered handler. Rebuilt
+        # via _get_twin_route_config (2026-10-19 fix, same bug as the ~26
+        # hand-built twin routes in x402_setup.py): sharing the literal POST
+        # RouteConfig left body_type="json" and method enum [POST, PUT,
+        # PATCH] on a GET-listed resource.
+        configs[f"GET /{spec.slug}"] = _get_twin_route_config(cfg)
     return configs
