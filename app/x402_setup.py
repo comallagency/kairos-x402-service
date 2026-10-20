@@ -568,6 +568,15 @@ ROUTE_DESCRIPTIONS = {
         "agent card and MCP manifest. Returns a 0-100 score, verdict and issues. "
         "Try GET /agent-health/sample."
     ),
+    "due-diligence": (
+        "3 checks in 1 call: token-risk + wallet-intelligence + agent-health, "
+        "the three questions an agent asks before trusting a new counterparty "
+        "- is the token safe, is the wallet funded and payment-ready, is the "
+        "agent's own service actually live. One overall_verdict plus each "
+        "check's full result. address/token/url are each optional (give "
+        "whichever you have) - an omitted one is marked skipped, never "
+        "guessed. Try GET /due-diligence/sample."
+    ),
     "decide": (
         "Ask up to 20 typed yes/no, multiple-choice or ordinal-scale questions "
         "about one shared piece of context in a single call - each answered "
@@ -2127,6 +2136,88 @@ TOKEN_RISK_OUTPUT_SCHEMA = {
 }
 
 
+DUE_DILIGENCE_SAMPLE_INPUT = {
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "url": "https://x402.agentindex.world/search",
+}
+
+DUE_DILIGENCE_INPUT_SCHEMA = {
+    "properties": {
+        "address": {
+            "type": "string",
+            "description": (
+                "Wallet address to check with wallet-intelligence, and the "
+                "default token address for token-risk unless `token` is "
+                "given separately."
+            ),
+        },
+        "token": {
+            "type": "string",
+            "description": "ERC-20 contract address on Base to analyze with token-risk, if different from `address`.",
+        },
+        "url": {
+            "type": "string",
+            "description": "Public agent/API endpoint to audit with agent-health.",
+        },
+        "method": {
+            "type": "string",
+            "enum": ["GET", "POST", "PUT", "HEAD"],
+            "description": "HTTP method for the agent-health target; defaults to GET.",
+        },
+        "networks": {
+            "description": "Up to five networks for wallet-intelligence; defaults to all supported EVM networks.",
+            "oneOf": [
+                {"type": "string"},
+                {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+            ],
+        },
+        "amount_usdc": {
+            "type": "number",
+            "description": "Amount to compare with the Base USDC balance for wallet-intelligence's x402 readiness.",
+        },
+    },
+    "required": [],
+}
+
+DUE_DILIGENCE_SAMPLE_OUTPUT = {
+    "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "agent_url": "https://x402.agentindex.world/search",
+    "overall_verdict": "caution",
+    "token_risk": TOKEN_RISK_SAMPLE_OUTPUT,
+    "wallet_intelligence": WALLET_INTELLIGENCE_SAMPLE_OUTPUT,
+    "agent_health": AGENT_HEALTH_SAMPLE_OUTPUT,
+}
+
+DUE_DILIGENCE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "address": {"type": ["string", "null"], "description": "The wallet address checked, if given."},
+        "token": {"type": ["string", "null"], "description": "The token address checked, if given."},
+        "agent_url": {"type": ["string", "null"], "description": "The agent endpoint checked, if given."},
+        "overall_verdict": {
+            "type": "string",
+            "enum": ["avoid", "caution", "acceptable", "insufficient_data"],
+            "description": "Rollup of the 3 legs' own verdicts - 'avoid' beats 'caution' beats 'acceptable'.",
+        },
+        "token_risk": {
+            "type": "object",
+            "description": "Same shape as POST /token-risk's response, or {status: skipped/error} if no address/token was given or the call failed.",
+        },
+        "wallet_intelligence": {
+            "type": "object",
+            "description": "Same shape as POST /wallet-intelligence's response, or {status: skipped/error} if no address was given or the call failed.",
+        },
+        "agent_health": {
+            "type": "object",
+            "description": "Same shape as POST /agent-health's response, or {status: skipped/error} if no url was given or the call failed.",
+        },
+        "x402_receipt": {"type": "object", "description": "Billing and provenance receipt for this call."},
+    },
+    "required": ["overall_verdict", "token_risk", "wallet_intelligence", "agent_health"],
+}
+
+
 # Pack 1 (2026-09-30): shared input/output schema shape for the 7
 # Jev-engine text-classification routes - all return {label, probability,
 # alternate_label, alternate_probability, engine} plus the usual receipt.
@@ -3059,6 +3150,21 @@ def _core_route_configs() -> dict[str, RouteConfig]:
                 output=OutputConfig(example=TOKEN_RISK_SAMPLE_OUTPUT, schema=TOKEN_RISK_OUTPUT_SCHEMA),
             ),
         ),
+        "POST /due-diligence": RouteConfig(
+            accepts=_payment_option(config.PRICE_DUE_DILIGENCE),
+            resource=f"{config.BASE_URL}/due-diligence",
+            description=ROUTE_DESCRIPTIONS["due-diligence"],
+            mime_type="application/json",
+            service_name="counterparty-due-diligence",
+            icon_url=ICON_URL,
+            tags=["due diligence", "token risk", "wallet intelligence", "agent health", "composite"],
+            extensions=declare_discovery_extension(
+                input=DUE_DILIGENCE_SAMPLE_INPUT,
+                input_schema=DUE_DILIGENCE_INPUT_SCHEMA,
+                body_type="json",
+                output=OutputConfig(example=DUE_DILIGENCE_SAMPLE_OUTPUT, schema=DUE_DILIGENCE_OUTPUT_SCHEMA),
+            ),
+        ),
         "GET /token-card": RouteConfig(
             accepts=_payment_option(config.PRICE_TOKEN_CARD),
             resource=f"{config.BASE_URL}/token-card",
@@ -3360,6 +3466,7 @@ def _core_route_configs() -> dict[str, RouteConfig]:
         # otherwise clobber it right back with the POST-body-shaped one.
         "/search", "/translate", "/pdf", "/web-read", "/extract", "/summarize",
         "/discover", "/decide", "/guard", "/verify", "/rank", "/token-risk",
+        "/due-diligence",
         "/v1/chat/completions",
         # Same gap, found by auditing every Bazaar-listed resource rather than
         # just the 2 days of probe logs that caught the first 13 (2026-10-01).

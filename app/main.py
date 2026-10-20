@@ -53,6 +53,7 @@ from app.handlers.search import router as search_router
 from app.handlers.summarize import router as summarize_router
 from app.handlers.token_risk import router as token_risk_router
 from app.handlers.token_card import router as token_card_router
+from app.handlers.due_diligence import router as due_diligence_router
 from app.handlers.research import router as research_router
 from app.handlers.sentiment import router as sentiment_router
 from app.handlers.classify import router as classify_router
@@ -186,6 +187,7 @@ inner_app.include_router(extract_router)
 inner_app.include_router(summarize_router)
 inner_app.include_router(token_risk_router)
 inner_app.include_router(token_card_router)
+inner_app.include_router(due_diligence_router)
 inner_app.include_router(research_router)
 inner_app.include_router(sentiment_router)
 inner_app.include_router(classify_router)
