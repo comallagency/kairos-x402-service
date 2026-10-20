@@ -31,3 +31,6 @@ dev = ["pytest", "pytest-asyncio"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: needs a live engine (Jev/Groq/OpenRouter) or live chain state; excluded from default CI, see issue #39",
+]

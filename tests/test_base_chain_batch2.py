@@ -234,6 +234,7 @@ async def test_erc20_transfers_finds_known_transfer():
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_erc20_transfers_quiet_contract_is_empty():
     r = await compute_erc20_transfers(Erc20TransfersInput(token=MULTICALL3, from_block=TX1_BLOCK, to_block=TX1_BLOCK + 1000))
     assert r.transfers == []
