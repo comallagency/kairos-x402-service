@@ -530,6 +530,7 @@ def _llms_catalog() -> str:
         f"- {base}/wallet-intelligence/sample",
         f"- {base}/x402-echo/sample",
         f"- {base}/agent-health/sample",
+        f"- {base}/agent-salut (free - signed greeting with a memory-of-relationship excerpt per caller)",
         f"- {base}/weather/sample",
         f"- {base}/crypto/sample",
         f"- {base}/news/sample",
