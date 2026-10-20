@@ -94,6 +94,12 @@ FREE_FIRST_CALL = os.getenv("FREE_FIRST_CALL", "false").strip().lower() == "true
 # in-flight challenges fail closed and the client retries with a fresh one)
 # but SHOULD be set explicitly in production so challenges survive restarts.
 MPP_CHALLENGE_SECRET = os.getenv("MPP_CHALLENGE_SECRET") or secrets.token_hex(32)
+
+# Signs GET /agent-salut responses (app/handlers/agent_salut.py), a free
+# greeting route - same fallback rationale as MPP_CHALLENGE_SECRET: a
+# container restart just rotates the key, which only means a caller's
+# previously-saved signature stops verifying, never a security issue.
+AGENT_SALUT_SECRET = os.getenv("AGENT_SALUT_SECRET") or secrets.token_hex(32)
 # CDP-managed server account name that pays gas and submits the
 # transferWithAuthorization call - CDP holds the key, this process never
 # does. Must be funded with a small amount of native gas token on the target
