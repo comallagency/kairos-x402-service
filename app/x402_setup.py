@@ -1980,7 +1980,7 @@ TOKEN_CARD_SAMPLE_OUTPUT = {
         "explanation": (
             "Bytecode analysis flagged no mint, blacklist, pause, or fee-setting functions, "
             "and the contract is not an upgradeable proxy. Liquidity was found on Uniswap V2, "
-            "V3, and Aerodrome, and the JEV risk verdict is caution with 99% probability. "
+            "V3, and Aerodrome, and the model's risk verdict is caution with 99% probability. "
             "Ownership is not renounced, and holder analysis was skipped because this is an "
             "established token."
         ),
@@ -1990,7 +1990,7 @@ TOKEN_CARD_SAMPLE_OUTPUT = {
     "token_risk_verdict": {
         "verdict": "caution", "probability": 0.99,
         "probabilities": {"avoid": 0.01, "caution": 0.99, "acceptable": 0},
-        "confidence": 0.98, "verdict_source": "jev",
+        "confidence": 0.98, "verdict_source": "model",
     },
 }
 
@@ -2049,7 +2049,7 @@ TOKEN_RISK_SAMPLE_OUTPUT = {
         "probability": 0.62,
         "probabilities": {"acceptable": 0.31, "avoid": 0.07, "caution": 0.62},
         "confidence": 0.55,
-        "verdict_source": "jev",
+        "verdict_source": "model",
     },
     "bytecode_analysis": {
         "status": "ok",
@@ -2083,20 +2083,20 @@ TOKEN_RISK_OUTPUT_SCHEMA = {
         "verdict": {
             "type": "object",
             "description": (
-                "avoid/caution/acceptable. verdict_source is 'jev' (a real "
-                "Jev decision with a real probability) or 'rules' "
+                "avoid/caution/acceptable. verdict_source is 'model' (a real "
+                "model decision with a real probability) or 'rules' "
                 "(deterministic mint/blacklist/pause/owner/liquidity check, "
                 "probability/probabilities/confidence null) - used whenever "
-                "Jev does not answer within 2 seconds, so the route always "
-                "returns a verdict without ever waiting on an upstream with "
-                "no SLA."
+                "the model does not answer within 2 seconds, so the route "
+                "always returns a verdict without ever waiting on an "
+                "upstream with no SLA."
             ),
             "properties": {
                 "verdict": {"type": "string", "enum": ["avoid", "caution", "acceptable"]},
                 "probability": {"type": ["number", "null"]},
                 "probabilities": {"type": ["object", "null"]},
                 "confidence": {"type": ["number", "null"]},
-                "verdict_source": {"type": "string", "enum": ["jev", "rules"]},
+                "verdict_source": {"type": "string", "enum": ["model", "rules"]},
                 "reason": {"type": "string", "description": "Only present when verdict_source is 'rules'."},
             },
         },
