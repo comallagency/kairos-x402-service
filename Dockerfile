@@ -10,6 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
+# pymupdf listed explicitly, not left to pymupdf4llm's own transitive pull:
+# a 2026-10-20 deploy's pre-cutover health check caught pip resolving
+# pymupdf4llm 2.0 without installing pymupdf alongside it (app/handlers/
+# pdf.py imports pymupdf directly) - x402_green never became healthy and
+# nginx never cut over, so no real impact, but the next deploy would have
+# hit the same gap again without this.
 RUN pip install --no-cache-dir \
     "x402[extensions]==2.22.0" \
     cdp-sdk \
@@ -24,6 +30,7 @@ RUN pip install --no-cache-dir \
     pyyaml \
     trafilatura \
     pypdf \
+    pymupdf \
     pymupdf4llm \
     jsonschema \
     jsonpath-ng \
