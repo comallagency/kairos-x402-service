@@ -1,4 +1,5 @@
 import json
+import re
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -11,16 +12,41 @@ from app.x402_setup import ROUTE_DESCRIPTIONS
 
 router = APIRouter()
 
+# 100 -> 180 (2026-09-25): today's working free-tier model spends part of
+# its budget on hidden reasoning before any visible output - 100 tokens
+# produced empty content even from the best available model, see
+# config.OPENROUTER_TRANSLATE_MODELS.
 _LENGTH_TARGETS = {
-    "short": ("2-3 sentences", 100),
+    "short": ("2-3 sentences", 180),
     "medium": ("one paragraph (roughly 100-150 words)", 250),
     "long": ("3-4 paragraphs", 700),
 }
 
 SYSTEM_PROMPT_TEMPLATE = (
     "Summarize the following content, neutral and factual. Do not invent "
-    "facts beyond what is given. Target length: {length_desc}."
+    "facts beyond what is given. Target length: {length_desc}. Output ONLY "
+    "the summary itself - no preamble, no meta-commentary such as 'Here is "
+    "a summary' or 'Sure, here's...', no closing remarks."
 )
+
+# Belt-and-suspenders cleanup (2026-09-30): the prompt instruction above
+# reduces but does not eliminate preamble leakage from smaller free-tier
+# models - caught live in the delivery audit ("Here is a 2-3 sentence
+# summary of the content:" prefixing a correct, otherwise-clean summary).
+# Strips a single leading line that announces the summary rather than
+# being part of it - deliberately narrow (anchored to the start of the
+# string, common announcement verbs only) so it can never eat into a
+# summary that legitimately starts with one of these words as its own
+# first sentence.
+_PREAMBLE_RE = re.compile(
+    r"^(?:here'?s|here is|sure,?|certainly,?|of course,?)\b.*:\s*\n*",
+    re.IGNORECASE,
+)
+
+
+def _strip_preamble(summary: str) -> str:
+    cleaned = _PREAMBLE_RE.sub("", summary, count=1).strip()
+    return cleaned or summary
 
 SAMPLE_TEXT = (
     "Photosynthesis is the process by which green plants, algae, and some "
@@ -63,43 +89,41 @@ async def _get_content_and_sources(body: dict) -> tuple[str, list[str]]:
     return text, []
 
 
-async def _summarize_content(content: str, length: str) -> tuple[str, str | None]:
+async def _summarize_content(content: str, length: str) -> tuple[str, str | None, bool]:
     length_desc, max_tokens = _LENGTH_TARGETS.get(length, _LENGTH_TARGETS["medium"])
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE.format(length_desc=length_desc)},
         {"role": "user", "content": content[:12000]},
     ]
     try:
-        data, _used_last_resort = await chat_completion_with_fallback(
+        data, used_last_resort = await chat_completion_with_fallback(
             messages, config.OPENROUTER_TRANSLATE_MODELS, config.OPENROUTER_LAST_RESORT_MODEL, max_tokens=max_tokens,
         )
     except OpenRouterError as exc:
         raise SummarizeError("upstream_error", str(exc)[:200])
-    summary = data["choices"][0]["message"]["content"].strip()
-    return summary, data.get("model")
+    summary = _strip_preamble(data["choices"][0]["message"]["content"].strip())
+    model_served = data.get("model")
+    fallback_used = used_last_resort or (model_served is not None and model_served != config.OPENROUTER_TRANSLATE_MODELS[0])
+    return summary, model_served, fallback_used
 
 
 @router.get("/summarize/sample", openapi_extra={"security": []})
 async def summarize_sample():
-    if not config.OPENROUTER_API_KEY:
-        return JSONResponse({"error": {"reason": "upstream_not_configured"}}, status_code=503)
-    with Timer() as t:
-        try:
-            summary, model_served = await _summarize_content(SAMPLE_TEXT, "short")
-        except SummarizeError as exc:
-            return JSONResponse({"error": {"reason": exc.reason, "detail": exc.detail}}, status_code=502)
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, 0.0)
-    return {"summary": summary, "length": "short", "sources": [], "x402_receipt": receipt}
+    # Static capture (2026-10-01), not a live call: this was making a real
+    # OpenRouter summary on every anonymous hit, free - found during the
+    # gemini-flash/deepseek leak audit (same bug class, see CLAUDE.md).
+    return {
+        "summary": "The article explains how photosynthesis converts light energy into chemical energy in plants.",
+        "length": "short",
+        "sources": ["https://en.wikipedia.org/wiki/Photosynthesis"],
+        "x402_receipt": make_receipt(None, "llm", 1, 0.0),
+    }
 
 
-@router.post("/summarize", description=ROUTE_DESCRIPTIONS["summarize"])
-async def summarize(request: Request):
+async def _handle_summarize(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000]
     length = body.get("length", "medium")
     if length not in _LENGTH_TARGETS:
@@ -108,10 +132,10 @@ async def summarize(request: Request):
     try:
         with Timer() as t:
             content, sources = await _get_content_and_sources(body)
-            summary, model_served = await _summarize_content(content, length)
+            summary, model_served, fallback_used = await _summarize_content(content, length)
     except SummarizeError as exc:
         db.log_request(
-            route="summarize", method="POST", status="error", payer=payer,
+            route="summarize", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=exc.reason,
         )
         status_code = 400 if exc.reason in _CALLER_ERROR_REASONS else 502
@@ -119,8 +143,24 @@ async def summarize(request: Request):
 
     price = effective_price(payer, price_float(config.PRICE_SUMMARIZE))
     db.log_request(
-        route="summarize", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="summarize", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
     )
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price)
+    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price, fallback_used=fallback_used)
     return {"summary": summary, "length": length, "sources": sources, "x402_receipt": receipt}
+
+
+@router.get("/summarize", description=ROUTE_DESCRIPTIONS["summarize"])
+async def summarize_get(request: Request):
+    params = dict(request.query_params)
+    body = params if params else {"text": SAMPLE_TEXT, "length": "short"}
+    return await _handle_summarize(request, body)
+
+
+@router.post("/summarize", description=ROUTE_DESCRIPTIONS["summarize"])
+async def summarize(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_summarize(request, body)

@@ -35,6 +35,7 @@ class RouteSpec:
     handler_type: str = "http_proxy"  # only generic type implemented so far
     daily_capacity: int = 100  # same purpose as config.DAILY_CAPACITY for the core routes
     status: str = "live"  # "live" | "retired"
+    retired_at: str | None = None  # ISO date, set by Fossoyeur - feeds app/retired_routes.py
 
     def __post_init__(self):
         if not self.slug or "/" in self.slug:
@@ -59,6 +60,14 @@ def save_registry(specs: list[RouteSpec]) -> None:
 
 def live_routes() -> list[RouteSpec]:
     return [spec for spec in load_registry() if spec.status == "live"]
+
+
+def retired_routes() -> list[RouteSpec]:
+    """Feeds app/retired_routes.py's RETIRED_ROUTES (2026-10-01): a usine
+    route Fossoyeur retires must answer 410 like any other retired route,
+    never a bare 404 from simply not being registered anymore - the same
+    CLAUDE.md rule that governs the hand-built routes."""
+    return [spec for spec in load_registry() if spec.status == "retired"]
 
 
 def get_route(slug: str) -> RouteSpec | None:

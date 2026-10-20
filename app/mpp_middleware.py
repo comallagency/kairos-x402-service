@@ -22,6 +22,7 @@ Route prices/assets/recipients are read fresh from build_route_configs() on
 every request - never hand-copied, matching the rest of this project.
 """
 
+import contextvars
 import json
 import logging
 
@@ -30,6 +31,19 @@ from app.capacity import ROUTE_KEYS
 from app.x402_setup import build_route_configs, resolve_payment_requirements
 
 logger = logging.getLogger("x402.mpp_middleware")
+
+# Same pattern as app/client_ip.py's contextvar: an MPP-settled request goes
+# straight to inner_app, bypassing x402's PaymentMiddlewareASGI entirely, so
+# request.state.payment_payload is never set for it. A handler that only
+# checks payment_payload (incident 2026-10-02's fix in app/purecalc/engine.py)
+# would wrongly 402 a legitimately-paid MPP buyer without this second signal.
+_mpp_verified_payer: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "mpp_verified_payer", default=None
+)
+
+
+def current_mpp_verified_payer() -> str | None:
+    return _mpp_verified_payer.get()
 
 
 def _route_payment_terms(route_key: str):
@@ -56,8 +70,16 @@ class MPPMiddleware:
     def __init__(self, app, inner_app):
         self.app = app
         self.inner_app = inner_app
+        # MPP settlement signs/sends through a CDP managed server wallet.
+        # Without its wallet secret, advertising this rail creates a challenge
+        # that can verify but can never settle. Fail closed and expose only the
+        # fully configured x402 rail.
+        self.enabled = bool(config.CDP_WALLET_SECRET)
 
     async def __call__(self, scope, receive, send):
+        if not self.enabled:
+            await self.app(scope, receive, send)
+            return
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -158,4 +180,8 @@ class MPPMiddleware:
                 message = {**message, "headers": headers}
             await send(message)
 
-        await self.inner_app(scope, receive, receipt_injecting_send)
+        token = _mpp_verified_payer.set(verified["from"])
+        try:
+            await self.inner_app(scope, receive, receipt_injecting_send)
+        finally:
+            _mpp_verified_payer.reset(token)

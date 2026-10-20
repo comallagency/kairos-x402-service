@@ -7,14 +7,82 @@ from fastapi.responses import JSONResponse
 
 from app import config, db
 from app.receipts import Timer, effective_price, extract_payer_address, make_receipt, neutral_model_id, price_float
+from app.upstream.anthropic import AnthropicCardError, generate_fact_check_queries, generate_fact_check_verdict
 from app.upstream.ollama import OllamaError, chat_json
 from app.upstream.websearch import SearchError, run_web_search
 from app.x402_setup import ROUTE_DESCRIPTIONS
 
 router = APIRouter()
 
+# 2026-10-12: Claude Haiku 5.5 (app/upstream/anthropic.py) is now the
+# primary engine for both LLM steps below - short per-call timeouts so an
+# unavailable/slow Claude falls back to the local Ollama pipeline quickly
+# rather than eating into the overall GLOBAL_DEADLINE_S budget. Normal
+# case (Claude up): web search (~1-2s) + query planning (~1-3s) + verdict
+# (~2-4s) - comfortably under the <8s target. Degraded case (Claude down,
+# Ollama fallback): same CPU-only pipeline as before, still bounded by
+# GLOBAL_DEADLINE_S below.
+CLAUDE_QUERIES_TIMEOUT_S = 8.0
+CLAUDE_VERDICT_TIMEOUT_S = 10.0
+
 MAX_QUERIES = 3
-RESULTS_PER_QUERY = 5
+# 2026-10-12: lowered 5 -> 3. Root cause of the timeout incidents below is
+# proven, not inferred: Ollama on this VPS is CPU-only (no GPU), confirmed
+# via `ollama[...]: tg = 5.01 t/s` in its own log during a live profile -
+# the verdict call alone generated 258 tokens in 88.6s at that rate (decode
+# time is ~tokens/5, independent of prompt size). The model echoes every
+# source's url+stance back in its JSON output, so fewer merged sources
+# means fewer generated tokens, not just a shorter prompt - this is the
+# one lever that actually shortens DECODE time, which prompt trimming
+# alone cannot touch. No code change fixes the 5 t/s ceiling itself; that
+# needs a GPU or a faster/hosted model, which is an infra decision, not
+# something this fix attempts.
+RESULTS_PER_QUERY = 3
+
+# 2026-10-10/11/12: three fixes to the same underlying problem, in order.
+#
+# (1) 2026-10-10: a bootstrap run showed 3 real attempts taking 134.8s/
+# 143.0s/161.6s. nginx's own access log proved what the buyer actually
+# got for the one that settled payment: "POST /fact-check 499 0 60.055" -
+# a 499 (client already gone) with a ZERO-byte body at 60.055s, while our
+# backend kept running for another ~83s and would have returned a real
+# result to nobody. A real $0.01 charge for an empty response - billing
+# without delivery, proven by the access log. First fix capped the
+# pipeline at 60.0s to match the client's own timeout - wrong, since that
+# only RACES the client rather than reliably beating it.
+#
+# (2) 2026-10-11: lowered to 45.0s. Then Lumiere's own 24h probe (same
+# claim every time) showed 5/5 real attempts hitting that exact timeout,
+# spread across the full day, not clustered around any bootstrap run -
+# proof this was never a one-off contention spike.
+#
+# (3) 2026-10-12: root-caused properly via a live in-container profile
+# (app.handlers.fact_check._plan_search_queries/_multi_search/
+# _request_verdict timed individually) plus Ollama's own log line at the
+# same moment: "tg = 5.01 t/s" - Ollama on this VPS is CPU-only, no GPU.
+# Decode time is tokens-generated / 5, independent of prompt size, and
+# the model echoes every source's url+stance back in its JSON output, so
+# MAX_QUERIES/RESULTS_PER_QUERY (fewer sources to echo) is the one lever
+# that actually shortens decode, not just prompt length. Lowering
+# RESULTS_PER_QUERY 5->3 and the per-source extract 500->300 chars cut
+# the worst-case comparative claim (same one Lumiere probes) from 126.9s
+# to 69.1s in a second live profile - real, but still over 45s. No code
+# change fixes the 5 t/s ceiling itself; that needs a GPU or a faster/
+# hosted model, an infra decision out of scope here.
+#
+# 90s balances the two real risks instead of only optimizing one: (a)
+# below 90s, most real fact-check calls on this CPU-only Ollama would
+# simply always time out (safe, but a route that essentially never
+# works); (b) above it risks billing a buyer whose own client times out
+# first, same failure mode as (1) - 90s stays well under nginx's 120s
+# proxy_read_timeout, and under the x402 "maxTimeoutSeconds": 300 this
+# resource itself declares in its 402 challenge (the protocol's own
+# stated expectation for how long a buyer's client should wait) - but a
+# buyer using a shorter client timeout (as low as the 60s one that caused
+# incident (1)) remains exposed to the same risk, now with a smaller
+# window than before rather than none. Never charged on timeout - same
+# contract as every other route here.
+GLOBAL_DEADLINE_S = 90.0
 
 # /fact-check/sample documente la forme de sortie pour les sondes (x402watch,
 # hermes-contact-discovery). Le pipeline live prend 14–47 s à froid et peut
@@ -106,24 +174,33 @@ class FactCheckError(Exception):
         super().__init__(reason)
 
 
-async def _plan_search_queries(claim: str) -> list[str]:
+async def _plan_search_queries(claim: str) -> tuple[list[str], float]:
     """Ask the model what to search for before searching, rather than
     reusing the claim verbatim as the only query - see the diagnosis above.
-    Falls back to the raw claim (the old behavior) if planning fails for any
-    reason, so a query-planning hiccup degrades gracefully instead of
-    blocking the whole route."""
+    Claude Haiku first (fast); falls back to the local Ollama pipeline on
+    ANY AnthropicCardError (not configured, breaker open, over monthly
+    budget, timeout, malformed response), then to the raw claim if that
+    ALSO fails - three tiers, so a planning hiccup degrades gracefully
+    instead of blocking the whole route. Returns (queries, cost_usd) -
+    cost is 0.0 whenever Claude wasn't the one that answered."""
+    try:
+        queries, cost = await generate_fact_check_queries(claim, timeout_s=CLAUDE_QUERIES_TIMEOUT_S)
+        return queries, cost
+    except AnthropicCardError:
+        pass
+
     messages = [
         {"role": "system", "content": QUERY_PLANNING_PROMPT},
         {"role": "user", "content": claim},
     ]
     try:
-        parsed = await chat_json(messages, max_tokens=150)
+        parsed = await chat_json(messages, max_tokens=100)
         queries = parsed.get("queries")
         if isinstance(queries, list) and queries and all(isinstance(q, str) and q.strip() for q in queries):
-            return [q.strip() for q in queries[:MAX_QUERIES]]
+            return [q.strip() for q in queries[:MAX_QUERIES]], 0.0
     except (OllamaError, AttributeError):
         pass
-    return [claim]
+    return [claim], 0.0
 
 
 async def _multi_search(queries: list[str]) -> tuple[list[dict], str | None]:
@@ -171,26 +248,38 @@ def _parse_verdict_response(parsed: dict) -> dict:
     return {"verdict": verdict, "confidence": confidence, "sources": sources}
 
 
-async def _request_verdict(claim: str, sources_context: str) -> dict:
-    """Jugement par gemma3:4b en local (app/upstream/ollama.py) plutot que par
-    OpenRouter - remplace un modele gratuit distant, dependant d'un solde de
-    compte, par un modele local sans quota ni cle. Une seule tentative : pas
-    de modele de secours a essayer, contrairement au montage OpenRouter
-    d'origine (models -> last-resort)."""
+async def _request_verdict(claim: str, sources_context: str) -> tuple[dict, float, str]:
+    """Claude Haiku 5.5 first (app/upstream/anthropic.py - same module-
+    level budget/breaker state as POST /token-card, so both share one
+    monthly cap and one breaker). Falls back to the local gemma3:4b
+    pipeline (app/upstream/ollama.py) on ANY AnthropicCardError - unlike
+    /token-card, this route is NOT wired to app/capacity.py's
+    TokenCardCircuitBreakerMiddleware (that stays exact-path-matched to
+    POST /token-card only): fact-check always has a fully functional
+    fallback, so a Claude outage degrades the route rather than refusing
+    the sale. Returns (verdict_dict, cost_usd, source) where source is
+    "claude" or "ollama" - the caller surfaces this as model_served."""
+    try:
+        verdict, cost = await generate_fact_check_verdict(claim, sources_context, timeout_s=CLAUDE_VERDICT_TIMEOUT_S)
+        return verdict, cost, "claude"
+    except AnthropicCardError:
+        pass
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"Claim: {claim}\n\nSources:\n{sources_context}"},
     ]
-    # 100s, pas le defaut de 60s : le jugement (800 tokens, gemma3:4b sur ce
-    # VPS) a depasse 60s sur au moins un claim reel (2026-09-10, ollama_timeout
-    # -> 502), sous le budget nginx proxy_read_timeout de 120s pour laisser de
-    # la marge a la recherche qui le precede.
-    parsed = await chat_json(messages, max_tokens=800, timeout=100.0)
-    return _parse_verdict_response(parsed)
+    # 100s, pas le defaut de 60s : le jugement (gemma3:4b, CPU-only, ~5
+    # tokens/sec mesure sur ce VPS - voir GLOBAL_DEADLINE_S) peut depasser
+    # 60s, sous le budget nginx proxy_read_timeout de 120s pour laisser de
+    # la marge a la recherche qui le precede. N'est plus le chemin normal
+    # depuis que Claude est tente en premier - uniquement le secours.
+    parsed = await chat_json(messages, max_tokens=500, timeout=100.0)
+    return _parse_verdict_response(parsed), 0.0, "ollama"
 
 
-async def _check_claim(claim: str) -> tuple[dict, str | None, int, int]:
-    queries = await _plan_search_queries(claim)
+async def _check_claim(claim: str) -> tuple[dict, str | None, int, int, float]:
+    queries, queries_cost = await _plan_search_queries(claim)
     try:
         results, _search_model = await _multi_search(queries)
     except (OllamaError, SearchError) as exc:
@@ -199,17 +288,18 @@ async def _check_claim(claim: str) -> tuple[dict, str | None, int, int]:
         raise FactCheckError("no_sources_found")
 
     sources_context = "\n\n".join(
-        f"[{i + 1}] {r['title'] or r['url']} ({r['url']}): {(r['extract'] or '')[:500]}"
+        f"[{i + 1}] {r['title'] or r['url']} ({r['url']}): {(r['extract'] or '')[:300]}"
         for i, r in enumerate(results)
     )
     try:
-        verdict_result = await _request_verdict(claim, sources_context)
+        verdict_result, verdict_cost, verdict_source = await _request_verdict(claim, sources_context)
     except OllamaError as exc:
         raise FactCheckError("upstream_error", str(exc)[:200])
     except (KeyError, TypeError, ValueError) as exc:
         raise FactCheckError("verification_failed", f"malformed model response: {exc}"[:200])
 
-    model_served = config.OLLAMA_MODEL
+    model_served = config.ANTHROPIC_MODEL if verdict_source == "claude" else config.OLLAMA_MODEL
+    anthropic_cost = queries_cost + verdict_cost
     verdict = verdict_result["verdict"]
     confidence = verdict_result["confidence"]
     sources = verdict_result["sources"]
@@ -244,7 +334,7 @@ async def _check_claim(claim: str) -> tuple[dict, str | None, int, int]:
         "confidence": confidence,
         "sources": enriched_sources,
     }
-    return result, model_served, len(results), len(queries)
+    return result, model_served, len(results), len(queries), anthropic_cost
 
 
 @router.get("/fact-check/sample", openapi_extra={"security": []})
@@ -252,29 +342,36 @@ async def fact_check_sample():
     return FACT_CHECK_SAMPLE_RESPONSE
 
 
-@router.post("/fact-check", description=ROUTE_DESCRIPTIONS["fact-check"])
-async def fact_check(request: Request):
+async def _handle_fact_check(request: Request, body: dict):
+    method = request.method
     payer = extract_payer_address(request)
     user_agent = request.headers.get("user-agent")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
     body_excerpt = json.dumps(body)[:2000]
     claim = body.get("claim")
     if not claim or not isinstance(claim, str):
         db.log_request(
-            route="fact-check", method="POST", status="error", payer=payer,
+            route="fact-check", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason="missing_claim",
         )
         return JSONResponse({"error": {"reason": "missing_claim"}}, status_code=400)
 
     try:
         with Timer() as t:
-            result, model_served, sources_read, queries_run = await _check_claim(claim)
+            result, model_served, sources_read, queries_run, anthropic_cost = await asyncio.wait_for(
+                _check_claim(claim), timeout=GLOBAL_DEADLINE_S
+            )
+    except asyncio.TimeoutError:
+        db.log_request(
+            route="fact-check", method=method, status="error", payer=payer,
+            user_agent=user_agent, body_excerpt=body_excerpt, error_reason="timeout",
+        )
+        return JSONResponse(
+            {"error": {"reason": "timeout", "detail": f"No response within {GLOBAL_DEADLINE_S:.0f}s - not charged."}},
+            status_code=504,
+        )
     except FactCheckError as exc:
         db.log_request(
-            route="fact-check", method="POST", status="error", payer=payer,
+            route="fact-check", method=method, status="error", payer=payer,
             user_agent=user_agent, body_excerpt=body_excerpt, error_reason=exc.reason,
         )
         status_code = 400 if exc.reason == "no_sources_found" else 502
@@ -282,11 +379,28 @@ async def fact_check(request: Request):
 
     price = effective_price(payer, price_float(config.PRICE_FACT_CHECK))
     db.log_request(
-        route="fact-check", method="POST", status="paid", latency_ms=t.elapsed_ms,
+        route="fact-check", method=method, status="paid", latency_ms=t.elapsed_ms,
         amount_usdc=price, payer=payer, user_agent=user_agent, body_excerpt=body_excerpt,
+        upstream_cost_usd=anthropic_cost,
     )
     receipt = make_receipt(
         neutral_model_id(model_served), "web_search+llm", t.elapsed_ms, price,
         searches_run=queries_run, sources_read=sources_read,
     )
     return {"claim": claim, **result, "x402_receipt": receipt}
+
+
+@router.get("/fact-check", description=ROUTE_DESCRIPTIONS["fact-check"])
+async def fact_check_get(request: Request):
+    params = dict(request.query_params)
+    body = params if params else {"claim": SAMPLE_CLAIM}
+    return await _handle_fact_check(request, body)
+
+
+@router.post("/fact-check", description=ROUTE_DESCRIPTIONS["fact-check"])
+async def fact_check(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _handle_fact_check(request, body)

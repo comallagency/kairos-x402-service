@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from app import db
 from app.discover_freshness import combined_relevance, parse_observed_day
 from app.upstream.ollama import OllamaError, embed
-from app.x402_setup import KIT_TAGS
+from app.x402_setup import KIT_TAGS, build_route_configs
 
 router = APIRouter()
 
@@ -76,40 +76,135 @@ def _top_matches(
     return match_count, picked
 
 
+# Nos propres routes payantes, éligibles à se promouvoir en tête de /discover
+# si leur similarité dépasse le meilleur match externe. Réutilise
+# build_route_configs() (déjà la source de vérité pour /.well-known/x402 et
+# /discovery/resources) - pas de liste séparée à maintenir.
+_own_routes_cache: dict[str, object] = {}
+
+
+def _own_route_rows() -> list[dict]:
+    rows = []
+    for route_key, rc in build_route_configs().items():
+        method, path = route_key.split(" ", 1)
+        accepts = rc.accepts if isinstance(rc.accepts, list) else [rc.accepts]
+        info = (rc.extensions or {}).get("bazaar", {}).get("info", {})
+        input_block = info.get("input", {})
+        body = input_block.get("body") if input_block.get("bodyType") == "json" else None
+        rows.append({
+            "name": rc.service_name or path.lstrip("/"),
+            "url": rc.resource,
+            "method": method,
+            "description": rc.description or "",
+            "price_usdc": accepts[0].price,
+            "example_body": body,
+        })
+    # /discover ne doit jamais se promouvoir lui-meme dans ses propres
+    # resultats.
+    return [r for r in rows if not r["url"].endswith("/discover")]
+
+
+def _embed_text_for(row: dict) -> str:
+    """Seule la première phrase de la description sert a l'embedding - la
+    description publiée (build_route_configs(), /.well-known/x402,
+    /capabilities) reste inchangée et plus détaillée. row['name'] est
+    service_name (build_route_configs()) - déjà un préfixe fonctionnel
+    littéral pour les routes mesurées (voir x402_setup.py), plus besoin
+    de table de substitution ici."""
+    desc = row["description"] or ""
+    idx = desc.find(".")
+    first_sentence = desc[: idx + 1] if idx != -1 else desc
+    return f"{row['name']}: {first_sentence}"
+
+
+async def _load_own_routes() -> tuple[list[dict], np.ndarray]:
+    """Même schéma que _load_snapshot(), mais embed() est async donc pas de
+    lru_cache direct - un dict-cache calculé une seule fois par process."""
+    if "matrix" in _own_routes_cache:
+        return _own_routes_cache["rows"], _own_routes_cache["matrix"]
+    rows = _own_route_rows()
+    texts = [_embed_text_for(r) for r in rows]
+    vectors = await embed(texts)
+    matrix = np.asarray(vectors, dtype=np.float32)
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    matrix = matrix / norms
+    _own_routes_cache["rows"] = rows
+    _own_routes_cache["matrix"] = matrix
+    return rows, matrix
+
+
+def _best_own_match(rows: list[dict], matrix: np.ndarray, query_vec: list[float]):
+    q = np.asarray(query_vec, dtype=np.float32)
+    qn = float(np.linalg.norm(q))
+    if qn == 0 or matrix.size == 0:
+        return None
+    scores = matrix @ (q / qn)
+    best_idx = int(np.argmax(scores))
+    return float(scores[best_idx]), rows[best_idx]
+
+
 async def _run_discover(q: str, max_results: int, threshold: float) -> dict:
     rows, matrix = _load_snapshot()
     vectors = await embed([q])
-    match_count, top = _top_matches(rows, matrix, vectors[0], max_results, threshold)
+    query_vec = vectors[0]
+    match_count, top = _top_matches(rows, matrix, query_vec, max_results, threshold)
+
+    own_rows, own_matrix = await _load_own_routes()
+    own_best = _best_own_match(own_rows, own_matrix, query_vec)
+    best_external_score = top[0][0] if top else 0.0
+    promote = own_best if own_best and own_best[0] >= best_external_score else None
+
+    results = [
+        {
+            "name": r["name"],
+            "url": r["url"] or None,
+            "description": r["desc"],
+            "registry": r["registry"] or None,
+            "relevance": round(score, 4),
+            **(
+                {"observed_at": r["updated_at"]}
+                if r.get("updated_at")
+                else {}
+            ),
+        }
+        for score, r in top
+    ]
+    if promote:
+        score, r = promote
+        results = [{
+            "name": r["name"],
+            "url": r["url"],
+            "method": r["method"],
+            "description": r["description"],
+            "price_usdc": r["price_usdc"],
+            "example_body": r["example_body"],
+            "relevance": round(score, 4),
+            "source": "agentindex-x402",
+        }] + results[: max(0, max_results - 1)]
+
     return {
         "q": q,
         "snapshot_date": SNAPSHOT_DATE,
         "snapshot_rows": len(rows),
         "min_similarity": threshold,
         "matches": match_count,
-        "results": [
-            {
-                "name": r["name"],
-                "url": r["url"] or None,
-                "description": r["desc"],
-                "registry": r["registry"] or None,
-                "relevance": round(score, 4),
-                **(
-                    {"observed_at": r["updated_at"]}
-                    if r.get("updated_at")
-                    else {}
-                ),
-            }
-            for score, r in top
-        ],
+        "results": results,
     }
 
 
 async def warm_discover_cache() -> None:
     """Précharge le snapshot et réveille Ollama pour que le premier client payant
     ne paie pas le coût du cold start."""
-    _load_snapshot()
+    # Discovery data is an optional runtime volume. Its absence must not take
+    # every unrelated paid route offline during a deploy.
+    try:
+        _load_snapshot()
+    except (OSError, ValueError, zlib.error, json.JSONDecodeError):
+        return
     try:
         await embed([_WARMUP_QUERY])
+        await _load_own_routes()
     except OllamaError:
         pass
 
@@ -121,21 +216,32 @@ def _body_error(reason: str, detail: str = "") -> JSONResponse:
     return JSONResponse(payload, status_code=400)
 
 
-@router.post("/discover", tags=KIT_TAGS + ["discovery", "mcp", "semantic"])
-async def discover_paid(request: Request):
-    user_agent = request.headers.get("user-agent")
+_SAMPLE_QUERY = "extract text from a PDF"
+
+
+@router.get("/discover/sample", openapi_extra={"security": []}, tags=KIT_TAGS + ["discovery"])
+async def discover_sample():
+    """Exemple statique de forme — la route utile est POST /discover (payant)."""
     try:
-        body = await request.json()
-    except Exception:
-        db.log_request(
-            route="discover", method="POST", status="error",
-            user_agent=user_agent, error_reason="invalid_json",
+        result = await _run_discover(_SAMPLE_QUERY, DEFAULT_MAX_RESULTS, MIN_SIMILARITY)
+    except OllamaError as exc:
+        return JSONResponse(
+            {"error": {"reason": "upstream_error", "detail": str(exc)[:200]}},
+            status_code=502,
         )
-        return _body_error("invalid_json", "body must be a JSON object")
+    return {
+        **result,
+        "note": "Paid route: POST /discover (USDC on Base). This sample is free.",
+    }
+
+
+async def _handle_discover(request: Request, body):
+    method = request.method
+    user_agent = request.headers.get("user-agent")
 
     if not isinstance(body, dict):
         db.log_request(
-            route="discover", method="POST", status="error",
+            route="discover", method=method, status="error",
             user_agent=user_agent, error_reason="invalid_body",
         )
         return _body_error("invalid_body", "body must be a JSON object")
@@ -147,7 +253,7 @@ async def discover_paid(request: Request):
             q = alt
     if not isinstance(q, str) or not q.strip():
         db.log_request(
-            route="discover", method="POST", status="error",
+            route="discover", method=method, status="error",
             user_agent=user_agent, error_reason="missing_q",
         )
         return _body_error("missing_q", "q is required and must be a non-empty string")
@@ -163,7 +269,7 @@ async def discover_paid(request: Request):
         result = await _run_discover(q.strip()[:500], max_results, float(threshold))
     except OllamaError as exc:
         db.log_request(
-            route="discover", method="POST", status="error",
+            route="discover", method=method, status="error",
             user_agent=user_agent, error_reason=str(exc)[:200],
         )
         return JSONResponse(
@@ -171,7 +277,38 @@ async def discover_paid(request: Request):
         )
 
     db.log_request(
-        route="discover", method="POST", status="paid",
+        route="discover", method=method, status="paid",
         user_agent=user_agent, body_excerpt=q[:2048],
     )
     return result
+
+
+@router.get("/discover", tags=KIT_TAGS + ["discovery", "mcp", "semantic"])
+async def discover_get(request: Request):
+    params = dict(request.query_params)
+    body = params if params else {"q": _SAMPLE_QUERY}
+    if "max_results" in body:
+        try:
+            body["max_results"] = int(body["max_results"])
+        except (TypeError, ValueError):
+            pass
+    if "min_similarity" in body:
+        try:
+            body["min_similarity"] = float(body["min_similarity"])
+        except (TypeError, ValueError):
+            pass
+    return await _handle_discover(request, body)
+
+
+@router.post("/discover", tags=KIT_TAGS + ["discovery", "mcp", "semantic"])
+async def discover_paid(request: Request):
+    user_agent = request.headers.get("user-agent")
+    try:
+        body = await request.json()
+    except Exception:
+        db.log_request(
+            route="discover", method="POST", status="error",
+            user_agent=user_agent, error_reason="invalid_json",
+        )
+        return _body_error("invalid_json", "body must be a JSON object")
+    return await _handle_discover(request, body)

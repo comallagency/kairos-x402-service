@@ -1,0 +1,60 @@
+"""POST /llm/gemini-flash - pay-per-call google/gemini-3.8-flash, OpenAI-compatible passthrough.
+
+Real test calls found this model spends hidden reasoning tokens even on trivial prompts (72 reasoning tokens to answer \"Say OK\" at max_tokens=200) - a small max_tokens (e.g. 10) can come back with empty content, not a route bug. A clean sample capture needed max_tokens=800 (385 reasoning tokens consumed) - pass at least max_tokens=500 for a real answer.
+
+Ordered provider list (2026-10-10, GET /api/v1/models/{model}/endpoints):
+Google AI Studio and Google (Vertex resale) both live (100%
+uptime_last_30m), same price tier ($0.75/$3.75 per MTok in/out) matching
+_price_ceiling_usd's own reference for this model exactly - margin stays
+positive regardless of which of the two serves. allow_fallbacks=False.
+Caveat carried over unchanged: this model's per-token price itself rises
+across 3 context-length tiers on BOTH providers identically (the
+cheapest tier is half this reference price, the priciest is 1.8x) -
+provider choice doesn't change that, it's inherent to the model.
+
+Same engine as POST /v1/chat/completions (app/handlers/llm_gateway.py):
+"exact" scheme only, ceiling computed from max_tokens via that same
+pricing formula. See app/handlers/llm_per_model.py for the shared code."""
+
+from __future__ import annotations
+
+from app.handlers.llm_per_model import make_price_fn, make_router
+from app.receipts import make_receipt
+
+# Withdrawn from the catalog 2026-09-30 (real p95 measured at 20015ms (1/10 hit the 20s ceiling) on
+# 10 real calls, after adding the 8s/20s provider-fallback timeout fix
+# the same day) - see app/x402_setup.py's _core_route_configs() for
+# where this excludes the route, and app/mcp_server.py for the MCP tool.
+# Reintegrate only once a real measurement (different provider and/or
+# model version) clears >=29/30 on 30 real calls - not attempted yet.
+GEMINI_FLASH_ENABLED = False
+
+MODEL = 'google/gemini-3.8-flash'
+PROVIDER = {'order': ['Google AI Studio', 'Google'], 'allow_fallbacks': False}
+ROUTE_PATH = '/llm/gemini-flash'
+ROUTE_KEY = 'llm/gemini-flash'
+
+price_fn = make_price_fn(MODEL)
+
+SAMPLE_REQUEST = {"messages": [{"role": "user", "content": "Summarize in one sentence: The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France. It was designed by Gustave Eiffel's engineering company and built as the entrance arch for the 1889 World's Fair. Initially criticized by some of France's leading artists and intellectuals for its design, it has become a global cultural icon of France and one of the most recognizable structures in the world, attracting millions of visitors every year."}], "max_tokens": 800}
+SAMPLE_RESPONSE = {
+    "id": "gen-1790781304-rNL7dxQAcoXgjs4PNcX4",
+    "object": "chat.completion",
+    "created": 1790781304,
+    "model": "google/gemini-3.8-flash",
+    "provider": "Google AI Studio",
+    "choices": [
+        {
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": "Originally built for the 1889 World's Fair amid early criticism, Paris's Eiffel Tower has evolved into one of the world's most recognizable cultural icons and popular tourist destinations."},
+        }
+    ],
+    "usage": {"prompt_tokens": 98, "completion_tokens": 425, "total_tokens": 523, "cost": 0.00166725},
+    "x402_receipt": make_receipt("google/gemini-3.8-flash", "llm/gemini-flash", 1700, 0.00339075),
+}
+
+router = make_router(
+    route_path=ROUTE_PATH, route_key=ROUTE_KEY, model=MODEL, provider=PROVIDER,
+    description_key='llm-gemini-flash', sample_request=SAMPLE_REQUEST, sample_response=SAMPLE_RESPONSE,
+)

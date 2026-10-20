@@ -15,11 +15,18 @@ rejeter - jamais une supposition, toujours l'outil réel :
   buffer nginx)
 
 Cron nocturne (conteneurisé, exactement comme chain_payments.py) :
-    0 2 * * * cd /opt/x402/app && docker compose run --rm x402 python -m scripts.controleur
+    0 2 * * * cd /opt/x402/app && docker compose run --rm x402_blue python -m scripts.controleur
+
+`x402_blue`, pas `x402` : ce service n'existe plus depuis le passage au
+déploiement blue-green (2026-09-29, scripts/deploy.sh) - `x402_blue` et
+`x402_green` restent tous deux définis dans docker-compose.yml en
+permanence et partagent la même image, donc l'un ou l'autre convient
+pour un `run` ponctuel comme celui-ci (contrairement au conteneur
+réellement en trafic, qui alterne).
 
 Usage à la demande, un seul verrou de publication avant que Crieur
 n'enregistre une route (voir usine/crieur.md) :
-    docker compose run --rm x402 python -m scripts.controleur --route <slug>
+    docker compose run --rm x402_blue python -m scripts.controleur --route <slug>
 
 Invoqué via `-m` (pas `python scripts/controleur.py`) : `scripts/` est un
 sous-dossier, pas la racine où vit chain_payments.py - lancé comme fichier,

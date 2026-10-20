@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.agentindexworld/relationship-memory",
+  "title": "Kairos Relationship Memory",
+  "description": "Free MCP: relationship_memory validate, store (local), retrieve — portable interlocutor cards v1.",
+  "version": "1.0.0",
+  "websiteUrl": "https://x402.agentindex.world/place/guide-relationship-memory-agents",
+  "repository": {
+    "url": "https://github.com/comallagency/kairos-x402-service",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://x402.agentindex.world/mcp/relationship-memory/"
+    }
+  ]
+}

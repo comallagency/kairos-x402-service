@@ -14,10 +14,12 @@ from app.x402_setup import KIT_TAGS
 
 router = APIRouter()
 
-# GET /discover gratuit : même instantané local que POST /discover (registres MCP
-# observés dehors, embeddings nomic-embed-text précalculés). Le POST payant garde
-# un plafond de résultats plus haut et un seuil de similarité réglable ; le GET
-# ne dépend pas de SearXNG (moteurs souvent en CAPTCHA depuis 2026-09).
+# GET /discover/preview gratuit : même instantané local que POST /discover
+# (registres MCP observés dehors, embeddings nomic-embed-text précalculés). Le
+# POST payant garde un plafond de résultats plus haut et un seuil de
+# similarité réglable ; le GET ne dépend pas de SearXNG (moteurs souvent en
+# CAPTCHA depuis 2026-09). Chemin distinct de /discover (payant) depuis
+# 2026-10-02 - /discover/sample était déjà pris par discover_paid.py.
 
 MAX_RESULTS_CAP = 10
 SAMPLE_QUERY = "extract text from a PDF"
@@ -55,7 +57,7 @@ DESCRIPTION = (
 )
 
 
-@router.get("/discover/sample", openapi_extra={"security": []}, tags=KIT_TAGS + ["discovery", "free"])
+@router.get("/discover/preview/sample", openapi_extra={"security": []}, tags=KIT_TAGS + ["discovery", "free"])
 async def discover_sample(request: Request):
     base = str(request.base_url).rstrip("/")
     try:
@@ -68,7 +70,7 @@ async def discover_sample(request: Request):
 
 
 @router.get(
-    "/discover",
+    "/discover/preview",
     openapi_extra={"security": []},
     summary="Find MCP servers by need, ranked by semantic relevance - free.",
     description=DESCRIPTION,
@@ -119,7 +121,7 @@ async def discover(
                     "example need. Pass your own need in the query string."
                 ),
                 "usage": f"GET {base}/discover?q=your+need",
-                "sample_url": f"{base}/discover/sample",
+                "sample_url": f"{base}/discover/preview/sample",
             },
         }
     return {**result, "paid_upgrade": paid_upgrade}

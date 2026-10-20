@@ -2,6 +2,7 @@ import json
 import re
 import sqlite3
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -25,10 +26,13 @@ CREATE TABLE IF NOT EXISTS requests (
     body_excerpt TEXT,
     error_reason TEXT,
     mpp_attempted INTEGER DEFAULT 0,
-    network TEXT
+    network TEXT,
+    client_ip TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests(ts);
 CREATE INDEX IF NOT EXISTS idx_requests_route ON requests(route);
+CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
+CREATE INDEX IF NOT EXISTS idx_requests_payer ON requests(payer);
 
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
@@ -317,6 +321,60 @@ CREATE TABLE IF NOT EXISTS route_repair_attempts (
     last_attempt_at TEXT,
     last_result TEXT
 );
+
+-- Everything below feeds GET /admin/daily - see scripts/ingest_daily_nginx_stats.py
+-- and scripts/daily_reputation_check.py (2026-09-29). requests/chain_payments
+-- above only ever get a row for a MATCHED route (see IntentLoggingMiddleware) -
+-- a genuine unmatched-path 404 or a backend-unreachable 502 during an outage
+-- never reaches them at all. daily_route_stats is nginx-log-derived
+-- specifically to close that gap; everything else on /admin/daily still reads
+-- requests/chain_payments directly (see daily_overview() below).
+CREATE TABLE IF NOT EXISTS daily_route_stats (
+    date TEXT NOT NULL,
+    route TEXT NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    c_2xx INTEGER NOT NULL DEFAULT 0,
+    c_402 INTEGER NOT NULL DEFAULT 0,
+    c_404 INTEGER NOT NULL DEFAULT 0,
+    c_4xx_other INTEGER NOT NULL DEFAULT 0,
+    c_5xx INTEGER NOT NULL DEFAULT 0,
+    distinct_ips INTEGER NOT NULL DEFAULT 0,
+    p50_ms REAL,
+    p95_ms REAL,
+    PRIMARY KEY (date, route)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_route_stats_date ON daily_route_stats(date);
+
+CREATE TABLE IF NOT EXISTS daily_visitors (
+    date TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    user_agent TEXT,
+    request_count INTEGER NOT NULL DEFAULT 0,
+    class TEXT NOT NULL,       -- buyer | prober | indexer | unknown
+    prober_name TEXT,          -- set when class='prober': AgentEconomyReport / Lumiere / vet402 / ApisTrust / Nitrograph
+    is_new INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (date, ip)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_visitors_date ON daily_visitors(date);
+
+CREATE TABLE IF NOT EXISTS reputation_snapshots (
+    date TEXT NOT NULL,
+    source TEXT NOT NULL,      -- agenteconomy (lumiere later)
+    raw_json TEXT,
+    score REAL,
+    uptime_pct REAL,
+    tier TEXT,
+    PRIMARY KEY (date, source)
+);
+
+CREATE TABLE IF NOT EXISTS bazaar_rank_history (
+    date TEXT NOT NULL,
+    query TEXT NOT NULL,
+    rank INTEGER,              -- NULL if not found in the results returned
+    resource_url TEXT,
+    total_results INTEGER,
+    PRIMARY KEY (date, query)
+);
 """
 
 
@@ -389,6 +447,23 @@ def _migrate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass  # column already exists
 
+    try:
+        conn.execute("ALTER TABLE requests ADD COLUMN client_ip TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
+    # POST /v1/chat/completions (app/handlers/llm_gateway.py) is the first
+    # route where what we pay upstream and what the buyer is billed
+    # genuinely differ per call (the "upto" scheme settles for real usage,
+    # not a fixed price) - every other route's amount_usdc already covers
+    # "billed", so only the two new numbers needed are upstream_cost_usd and
+    # the margin between them.
+    for colonne in ("upstream_cost_usd REAL", "margin_usd REAL"):
+        try:
+            conn.execute(f"ALTER TABLE requests ADD COLUMN {colonne}")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
 
 def init_db() -> None:
     global _initialized
@@ -430,14 +505,21 @@ def log_request(
     error_reason: str | None = None,
     mpp_attempted: bool = False,
     network: str | None = None,
+    client_ip: str | None = None,
+    upstream_cost_usd: float | None = None,
+    margin_usd: float | None = None,
 ) -> None:
     if body_excerpt is not None:
         body_excerpt = body_excerpt[:2048]
+    if client_ip is None:
+        from app.client_ip import current_client_ip
+
+        client_ip = current_client_ip()
     with cursor() as cur:
         cur.execute(
             """INSERT INTO requests
-               (ts, route, method, status, latency_ms, amount_usdc, payer, user_agent, body_excerpt, error_reason, mpp_attempted, network)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+               (ts, route, method, status, latency_ms, amount_usdc, payer, user_agent, body_excerpt, error_reason, mpp_attempted, network, client_ip, upstream_cost_usd, margin_usd)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 now_iso(),
                 route,
@@ -451,6 +533,9 @@ def log_request(
                 error_reason,
                 int(mpp_attempted),
                 network or config.X402_NETWORK,
+                client_ip,
+                upstream_cost_usd,
+                margin_usd,
             ),
         )
 
@@ -463,6 +548,35 @@ def count_paid_today(route: str) -> int:
             (route, f"{today}%"),
         )
         return cur.fetchone()["n"]
+
+
+_ANTHROPIC_ROUTES = ("token-card", "fact-check")
+
+
+def anthropic_monthly_spend_usd() -> float:
+    """Real Anthropic spend this calendar month, account-wide - summed
+    from requests.db's own upstream_cost_usd column across every route
+    that actually calls Anthropic (app/upstream/anthropic.py), success or
+    not. 2026-10-12: used to take a `route` param defaulting to
+    "token-card" and filter on it alone - monthly_budget_ok() never passed
+    a route, so fact-check's own Claude spend (added the same day) was
+    silently invisible to this check. upstream_cost_usd is NOT Anthropic-
+    specific (llm_gateway.py/llm_per_model.py/research.py set it too, for
+    their own OpenRouter cost) - _ANTHROPIC_ROUTES, not an unfiltered SUM,
+    is what makes this an Anthropic account cap rather than a mix of
+    unrelated upstream spend. No stateful counter to reset: "resets on
+    the 1st" falls out of this query's date filter. Anthropic's API has
+    no "get my usage" endpoint to cross-check against, unlike
+    OpenRouter's /api/v1/key."""
+    start_of_month = datetime.now(timezone.utc).strftime("%Y-%m-01T00:00:00+00:00")
+    placeholders = ",".join("?" for _ in _ANTHROPIC_ROUTES)
+    with cursor() as cur:
+        cur.execute(
+            f"SELECT COALESCE(SUM(upstream_cost_usd), 0) AS total FROM requests "
+            f"WHERE route IN ({placeholders}) AND ts >= ?",
+            (*_ANTHROPIC_ROUTES, start_of_month),
+        )
+        return float(cur.fetchone()["total"])
 
 
 def create_job(input_data: dict, amount_usdc: float | None = None, payer: str | None = None) -> str:
@@ -612,7 +726,8 @@ def recent_events(hours: int = 24) -> list[dict]:
     app/admin.py::admin_data, which is the only place this feeds into."""
     with cursor() as cur:
         cur.execute(
-            """SELECT ts, route, status, user_agent, body_excerpt, payer, amount_usdc
+            """SELECT ts, route, method, status, user_agent, body_excerpt, payer,
+                      amount_usdc, error_reason, latency_ms
                FROM requests WHERE ts >= ? ORDER BY ts ASC""",
             (_since(hours),),
         )
@@ -620,14 +735,23 @@ def recent_events(hours: int = 24) -> list[dict]:
 
 
 def recent_unconverted(limit: int = 20) -> list[dict]:
+    """"Qui frappe" (/admin/live, 24h unconverted list) - testclient rows
+    excluded (2026-10-10) the same way as every revenue/buyer stat, so a
+    stray TestClient-based run never shows up as a real visitor. Overfetches
+    by 4x before filtering so a burst of test rows can't silently shrink
+    the real result below `limit`."""
     with cursor() as cur:
         cur.execute(
-            """SELECT ts, route, user_agent, body_excerpt, error_reason FROM requests
+            """SELECT ts, route, user_agent, body_excerpt, error_reason, payer FROM requests
                WHERE status IN ('unpaid', 'capacity_reached')
                ORDER BY ts DESC LIMIT ?""",
-            (limit,),
+            (limit * 4,),
         )
-        return [dict(row) for row in cur.fetchall()]
+        rows = [dict(row) for row in cur.fetchall()]
+    filtered = [r for r in rows if not _is_test_identity(r.get("payer"), r.get("user_agent"))]
+    for r in filtered:
+        r.pop("payer", None)
+    return filtered[:limit]
 
 
 def count_mpp_attempts_since(hours: int) -> int:
@@ -696,6 +820,22 @@ def set_chain_sync_state(key: str, value: str) -> None:
         )
 
 
+def wallet_a_balance_usdc(network: str) -> dict:
+    """Read-only (2026-10-10) - chain_payments.py's own cron (*/30 via
+    scripts/run_in_live_container.sh) is the only thing that ever calls the
+    RPC for this; /admin/live just reads what it already wrote. Returns
+    {"balance_usdc": float|None, "checked_at": iso-str|None} - both None if
+    the cron has never run or the one balance eth_call in it failed every
+    time so far (never blocks the rest of the dashboard on that)."""
+    raw = get_chain_sync_state(f"wallet_a_balance_usdc:{network}")
+    checked_at = get_chain_sync_state(f"wallet_a_balance_checked_at:{network}")
+    try:
+        balance = float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        balance = None
+    return {"balance_usdc": balance, "checked_at": checked_at}
+
+
 def upsert_chain_payment(
     tx_hash: str,
     from_address: str,
@@ -739,19 +879,36 @@ def chain_summary(network: str) -> dict:
 
 
 def chain_revenue_since(network: str, hours: int) -> float:
+    """Excludes MECHANICAL_WALLETS (is_mechanical=1) - self-funded bootstrap
+    settlements (Bazaar indexing, ping-pong top-ups) are not revenue."""
     with cursor() as cur:
         cur.execute(
             "SELECT COALESCE(SUM(amount_usdc), 0) AS total FROM chain_payments "
-            "WHERE network=? AND block_time >= ?",
+            "WHERE network=? AND block_time >= ? AND is_mechanical=0",
             (network, _since(hours)),
         )
         return cur.fetchone()["total"]
 
 
-def chain_buyer_stats(network: str) -> dict:
+def chain_revenue_all_time(network: str) -> float:
+    """Same filter as chain_revenue_since() (is_mechanical=0), unbounded in
+    time - the only number comparable to wallet_a_balance_usdc(), which is
+    itself a lifetime balance, not a windowed one."""
     with cursor() as cur:
         cur.execute(
-            "SELECT from_address, COUNT(*) AS n FROM chain_payments WHERE network=? GROUP BY from_address",
+            "SELECT COALESCE(SUM(amount_usdc), 0) AS total FROM chain_payments "
+            "WHERE network=? AND is_mechanical=0",
+            (network,),
+        )
+        return cur.fetchone()["total"]
+
+
+def chain_buyer_stats(network: str) -> dict:
+    """Excludes MECHANICAL_WALLETS - see chain_revenue_since()."""
+    with cursor() as cur:
+        cur.execute(
+            "SELECT from_address, COUNT(*) AS n FROM chain_payments "
+            "WHERE network=? AND is_mechanical=0 GROUP BY from_address",
             (network,),
         )
         rows = cur.fetchall()
@@ -761,9 +918,54 @@ def chain_buyer_stats(network: str) -> dict:
     return {"distinct": distinct, "returning": returning, "return_rate": return_rate}
 
 
-def chain_last_payment_at(network: str) -> str | None:
+def chain_revenue_since_split(network: str, hours: int) -> dict:
+    """Same filter as chain_revenue_since() (is_mechanical=0), split into
+    client vs AUDITOR_WALLETS revenue (2026-10-09 arbitration) - an
+    auditor's payment is still real revenue, counted in full, just reported
+    separately rather than folded into the client number."""
+    auditors = _auditor_wallets()
     with cursor() as cur:
-        cur.execute("SELECT MAX(block_time) AS t FROM chain_payments WHERE network=?", (network,))
+        cur.execute(
+            "SELECT from_address, amount_usdc FROM chain_payments "
+            "WHERE network=? AND block_time >= ? AND is_mechanical=0",
+            (network, _since(hours)),
+        )
+        rows = cur.fetchall()
+    clients = sum(r["amount_usdc"] for r in rows if (r["from_address"] or "").lower() not in auditors)
+    aud = sum(r["amount_usdc"] for r in rows if (r["from_address"] or "").lower() in auditors)
+    return {"clients": round(clients, 6), "auditors": round(aud, 6)}
+
+
+def chain_buyer_stats_split(network: str) -> dict:
+    """Same filter and shape as chain_buyer_stats(), split into clients vs
+    AUDITOR_WALLETS - auditors never count toward the buyer total
+    (2026-10-09 arbitration)."""
+    auditors = _auditor_wallets()
+    with cursor() as cur:
+        cur.execute(
+            "SELECT from_address, COUNT(*) AS n FROM chain_payments "
+            "WHERE network=? AND is_mechanical=0 GROUP BY from_address",
+            (network,),
+        )
+        rows = cur.fetchall()
+
+    def _stats(rs: list) -> dict:
+        distinct = len(rs)
+        returning = sum(1 for r in rs if r["n"] >= 2)
+        return {"distinct": distinct, "returning": returning, "return_rate": (returning / distinct) if distinct else 0.0}
+
+    client_rows = [r for r in rows if (r["from_address"] or "").lower() not in auditors]
+    auditor_rows = [r for r in rows if (r["from_address"] or "").lower() in auditors]
+    return {"clients": _stats(client_rows), "auditors": _stats(auditor_rows)}
+
+
+def chain_last_payment_at(network: str) -> str | None:
+    """Excludes MECHANICAL_WALLETS - see chain_revenue_since()."""
+    with cursor() as cur:
+        cur.execute(
+            "SELECT MAX(block_time) AS t FROM chain_payments WHERE network=? AND is_mechanical=0",
+            (network,),
+        )
         row = cur.fetchone()
         return row["t"] if row else None
 
@@ -1358,3 +1560,681 @@ def reset_repair_attempts(slug: str) -> None:
     CONSECUTIVE failures count toward the 2-strikes kill."""
     with cursor() as cur:
         cur.execute("DELETE FROM route_repair_attempts WHERE slug=?", (slug,))
+
+
+# Same classification as app/templates/live.html::isScanner() (front-end,
+# kept in sync by hand - no shared module between the JS dashboard and this
+# backend query). Used only for history_7d() below.
+_SCANNER_UA_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"x402-list", r"forgemesh", r"x402scan|poncho", r"402index",
+        r"autonomous-directory", r"directory.?probe", r"ampersend",
+        r"nohumans", r"uptime|pingdom|healthcheck|monitor",
+        r"\bprobe\b", r"\bscanner\b", r"\bcrawler\b", r"\bbot\b",
+        r"AgentIndex-probe", r"circle.*scan", r"coinbase.*crawl",
+        r"^node$", r"^conform/", r"^ops-check/", r"^post-cut/",
+        r"^live-dashboard-smoke/", r"^discover-post-probe/",
+        r"^hermes-contact-discovery/", r"^x402watch/",
+    )
+]
+
+
+def _mechanical_wallets() -> set[str]:
+    """Same parsing as chain_payments.py::_mechanical_wallets() - duplicated
+    on purpose rather than imported, to keep db.py free of that module's
+    own import surface."""
+    raw = getattr(config, "MECHANICAL_WALLETS", "") or ""
+    return {w.strip().lower() for w in raw.split(",") if w.strip()}
+
+
+def _auditor_wallets() -> set[str]:
+    """Known third-party x402 auditor/trust-score crawlers (2026-10-09
+    arbitration) - NOT mechanical (their payments are real revenue, never
+    excluded from totals), but reported separately from client revenue and
+    excluded from the buyer count. See config.AUDITOR_WALLETS."""
+    raw = getattr(config, "AUDITOR_WALLETS", "") or ""
+    return {w.strip().lower() for w in raw.split(",") if w.strip()}
+
+
+def auditor_wallets() -> set[str]:
+    """Public wrapper - see _auditor_wallets()."""
+    return _auditor_wallets()
+
+
+def _is_test_identity(payer: str | None, user_agent: str | None) -> bool:
+    """A row written by TestClient-based testing (pytest's own suite, or an
+    ad-hoc diagnostic script), never a real request: Starlette/httpx's
+    TestClient defaults to User-Agent "testclient" when none is set, and
+    this session's own diagnostics mocked the verified payer as
+    "0xTESTPAYER". Found 2026-10-09: 35 such rows had landed in production's
+    requests.db (tests/conftest.py now redirects DB_PATH before any test
+    runs, so this is a closed hole going forward) - excluded here so any
+    row that already exists, or any future one from a script that forgot to
+    mock DB_PATH, never counts as revenue or a buyer."""
+    if (payer or "").strip().lower() == "0xtestpayer":
+        return True
+    return (user_agent or "") == "testclient"
+
+
+def is_test_identity(payer: str | None, user_agent: str | None) -> bool:
+    """Public wrapper - see _is_test_identity()."""
+    return _is_test_identity(payer, user_agent)
+
+
+def mechanical_wallets() -> set[str]:
+    """Public wrapper for app/admin.py's GET /admin/live aggregation
+    (2026-09-30) - _compute_agg_24h()/_live_classify() were the one place
+    on this whole dashboard that never applied this exclusion (found via a
+    real query: 36 of 45 "paid" rows in the last 24h, 111 of 127 in the
+    last 7d, were mechanical-wallet or our own bootstrap script traffic,
+    not real buyers - every OTHER admin page/card already excludes this,
+    see history_7d(), daily_overview(), daily_top_summary(),
+    last_real_payment(), chain_revenue_since())."""
+    return _mechanical_wallets()
+
+
+def _is_scanner_ua(user_agent: str | None) -> bool:
+    ua = user_agent or ""
+    return any(pattern.search(ua) for pattern in _SCANNER_UA_PATTERNS)
+
+
+_HISTORY_7D_CACHE: dict = {}
+_HISTORY_7D_CACHE_TTL_S = 300.0  # incident 2026-10-02: scans every row from
+# the last 7 days (150k+ at current traffic) and calls _is_scanner_ua() per
+# row in Python - measured 2.28s, by far the single most expensive piece of
+# the admin dashboard's aggregate (itself now on a 30s background refresh,
+# see app.admin.dashboard_cache_loop - this cache means that loop only pays
+# the 2.28s cost once per 5 min instead of every tick). A per-UTC-day
+# historical view has no reason to be fresher than this.
+
+
+def history_7d() -> list[dict]:
+    """Per UTC day, last 7 days: total requests, distinct client IPs that are
+    neither a known scanner UA nor our own VPS (config.VPS_PUBLIC_IP - our own
+    curl/verification traffic against the public domain), and real payments
+    (status='paid', payer present AND not in MECHANICAL_WALLETS - same rule
+    as chain_revenue_since(), self-funded bootstrap settlements are not
+    revenue). "payer present" was added 2026-09-28: `(row["payer"] or "")`
+    turned a NULL payer into "", which is trivially "not in mechanical" and
+    so counted as real - a direct/test call to a handler (bypassing the x402
+    payment middleware entirely, so no payer was ever extracted) logs
+    status="paid" with payer=NULL in exactly the buggy way this masked.
+    Those calls are now logged with status="test" instead (see
+    app/handlers/search.py), but this filter is the actual guarantee: a row
+    with no payer at all is never a real payment, regardless of what wrote
+    it or what status it carries."""
+    now = time.monotonic()
+    cached = _HISTORY_7D_CACHE.get("value")
+    cached_at = _HISTORY_7D_CACHE.get("at")
+    if cached is not None and cached_at is not None and now - cached_at < _HISTORY_7D_CACHE_TTL_S:
+        return cached
+
+    mechanical = _mechanical_wallets()
+    auditors = _auditor_wallets()
+    with cursor() as cur:
+        cur.execute(
+            "SELECT ts, client_ip, user_agent, status, payer FROM requests WHERE ts >= ?",
+            (_since(24 * 7),),
+        )
+        rows = cur.fetchall()
+
+    by_day: dict[str, dict] = {}
+    for row in rows:
+        if _is_test_identity(row["payer"], row["user_agent"]):
+            continue
+        day = row["ts"][:10]
+        bucket = by_day.setdefault(
+            day, {"requests_total": 0, "identities": set(), "payments_real": 0, "payments_auditors": 0}
+        )
+        bucket["requests_total"] += 1
+        ip = row["client_ip"]
+        if ip and ip != config.VPS_PUBLIC_IP and not _is_scanner_ua(row["user_agent"]):
+            bucket["identities"].add(ip)
+        payer = (row["payer"] or "").strip().lower()
+        if row["status"] == "paid" and payer and payer not in mechanical:
+            if payer in auditors:
+                bucket["payments_auditors"] += 1
+            else:
+                bucket["payments_real"] += 1
+
+    result = [
+        {
+            "day": day,
+            "requests_total": bucket["requests_total"],
+            "distinct_identities": len(bucket["identities"]),
+            "payments_auditors": bucket["payments_auditors"],
+            "payments_real": bucket["payments_real"],
+        }
+        for day, bucket in sorted(by_day.items())
+    ]
+    _HISTORY_7D_CACHE["value"] = result
+    _HISTORY_7D_CACHE["at"] = now
+    return result
+
+
+# --- GET /admin/daily support (2026-09-29) --------------------------------
+
+def record_daily_route_stats(date: str, rows: list[dict]) -> None:
+    """Bulk upsert from scripts/ingest_daily_nginx_stats.py - one row per
+    (date, route) seen in that day's nginx access log. INSERT OR REPLACE so a
+    cron retry after a partial failure never double-counts."""
+    with cursor() as cur:
+        for r in rows:
+            cur.execute(
+                """INSERT OR REPLACE INTO daily_route_stats
+                   (date, route, requests, c_2xx, c_402, c_404, c_4xx_other, c_5xx,
+                    distinct_ips, p50_ms, p95_ms)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    date, r["route"], r["requests"], r["c_2xx"], r["c_402"], r["c_404"],
+                    r["c_4xx_other"], r["c_5xx"], r["distinct_ips"],
+                    r.get("p50_ms"), r.get("p95_ms"),
+                ),
+            )
+
+
+def record_daily_visitors(date: str, rows: list[dict]) -> None:
+    """Bulk upsert from scripts/ingest_daily_nginx_stats.py - one row per
+    distinct IP seen that day, already classified (buyer/prober/indexer/
+    unknown) and flagged is_new by the ingestion script itself (it queries
+    MIN(date) per ip across this same table before writing today's rows)."""
+    with cursor() as cur:
+        for r in rows:
+            cur.execute(
+                """INSERT OR REPLACE INTO daily_visitors
+                   (date, ip, user_agent, request_count, class, prober_name, is_new)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    date, r["ip"], r.get("user_agent"), r["request_count"],
+                    r["class"], r.get("prober_name"), int(r["is_new"]),
+                ),
+            )
+
+
+def first_seen_dates_for_ips(ips: list[str]) -> dict[str, str]:
+    """Earliest date already on record (in daily_visitors) for each of the
+    given IPs - used by the ingestion script to decide is_new for today
+    BEFORE writing today's rows (a self-join on the same table you're about
+    to insert into would otherwise see today's own not-yet-committed rows)."""
+    if not ips:
+        return {}
+    placeholders = ",".join("?" for _ in ips)
+    with cursor() as cur:
+        cur.execute(
+            f"SELECT ip, MIN(date) AS first_date FROM daily_visitors "
+            f"WHERE ip IN ({placeholders}) GROUP BY ip",
+            ips,
+        )
+        return {r["ip"]: r["first_date"] for r in cur.fetchall()}
+
+
+def record_reputation_snapshot(
+    date: str, source: str, raw_json: str,
+    score: float | None, uptime_pct: float | None, tier: str | None,
+) -> None:
+    with cursor() as cur:
+        cur.execute(
+            """INSERT OR REPLACE INTO reputation_snapshots
+               (date, source, raw_json, score, uptime_pct, tier)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (date, source, raw_json, score, uptime_pct, tier),
+        )
+
+
+def record_bazaar_rank(date: str, query: str, rank: int | None, resource_url: str | None, total_results: int) -> None:
+    with cursor() as cur:
+        cur.execute(
+            """INSERT OR REPLACE INTO bazaar_rank_history
+               (date, query, rank, resource_url, total_results)
+               VALUES (?, ?, ?, ?, ?)""",
+            (date, query, rank, resource_url, total_results),
+        )
+
+
+def daily_overview(days: int = 30) -> list[dict]:
+    """Per UTC day, last `days` days - the /admin/daily main table. Same
+    source and exclusions as history_7d() (payer present AND not in
+    MECHANICAL_WALLETS = real payment; scanner-UA/our-own-IP excluded from
+    distinct_visitors), widened from a single payments_real number into the
+    full funnel, plus nginx-derived c_404/c_5xx (daily_route_stats - the
+    genuine unmatched-path/backend-down cases requests can never see)."""
+    mechanical = _mechanical_wallets()
+    auditors = _auditor_wallets()
+    since = _since(24 * days)
+    with cursor() as cur:
+        cur.execute(
+            "SELECT ts, client_ip, user_agent, status, payer FROM requests WHERE ts >= ?",
+            (since,),
+        )
+        rows = cur.fetchall()
+
+    by_day: dict[str, dict] = {}
+    for row in rows:
+        if _is_test_identity(row["payer"], row["user_agent"]):
+            continue
+        day = row["ts"][:10]
+        b = by_day.setdefault(day, {
+            "requests_total": 0, "identities": set(), "c_402": 0,
+            "payment_attempts": 0, "payments_success": 0, "payments_success_auditors": 0,
+            "payment_failures": 0,
+        })
+        b["requests_total"] += 1
+        ip = row["client_ip"]
+        if ip and ip != config.VPS_PUBLIC_IP and not _is_scanner_ua(row["user_agent"]):
+            b["identities"].add(ip)
+        status = row["status"]
+        if status in ("unpaid", "capacity_reached"):
+            b["c_402"] += 1
+        elif status == "paid":
+            b["payment_attempts"] += 1
+            payer = (row["payer"] or "").strip().lower()
+            if payer and payer not in mechanical:
+                if payer in auditors:
+                    b["payments_success_auditors"] += 1
+                else:
+                    b["payments_success"] += 1
+        elif status == "payment_failed":
+            b["payment_attempts"] += 1
+            b["payment_failures"] += 1
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT block_time, amount_usdc, from_address FROM chain_payments "
+            "WHERE block_time >= ? AND is_mechanical=0",
+            (since,),
+        )
+        chain_rows = cur.fetchall()
+    revenue_by_day: dict[str, float] = {}
+    revenue_auditors_by_day: dict[str, float] = {}
+    payers_by_day: dict[str, set] = {}
+    payers_auditors_by_day: dict[str, set] = {}
+    for r in chain_rows:
+        day = (r["block_time"] or "")[:10]
+        if not day:
+            continue
+        addr = (r["from_address"] or "").lower()
+        if addr in auditors:
+            revenue_auditors_by_day[day] = revenue_auditors_by_day.get(day, 0.0) + r["amount_usdc"]
+            payers_auditors_by_day.setdefault(day, set()).add(addr)
+        else:
+            revenue_by_day[day] = revenue_by_day.get(day, 0.0) + r["amount_usdc"]
+            payers_by_day.setdefault(day, set()).add(addr)
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT from_address, MIN(block_time) AS first_seen FROM chain_payments "
+            "WHERE is_mechanical=0 GROUP BY from_address"
+        )
+        first_seen = {r["from_address"].lower(): (r["first_seen"] or "")[:10] for r in cur.fetchall()}
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT date, SUM(c_404) AS c_404, SUM(c_5xx) AS c_5xx, SUM(requests) AS requests "
+            "FROM daily_route_stats WHERE date >= ? GROUP BY date",
+            (since[:10],),
+        )
+        nginx_by_day = {r["date"]: dict(r) for r in cur.fetchall()}
+
+    result = []
+    all_days = set(by_day) | set(nginx_by_day)
+    for day in sorted(all_days):
+        b = by_day.get(day, {
+            "requests_total": 0, "identities": set(), "c_402": 0,
+            "payment_attempts": 0, "payments_success": 0, "payments_success_auditors": 0,
+            "payment_failures": 0,
+        })
+        # "buyers" (total/new/returning) is clients only - auditors never
+        # count toward the buyer total (2026-10-09 arbitration).
+        payers = payers_by_day.get(day, set())
+        new_buyers = sum(1 for p in payers if first_seen.get(p) == day)
+        payers_auditors = payers_auditors_by_day.get(day, set())
+        nginx = nginx_by_day.get(day, {})
+        result.append({
+            "day": day,
+            "requests_total": b["requests_total"],
+            "nginx_requests_total": nginx.get("requests"),
+            "distinct_visitors": len(b["identities"]),
+            "c_402": b["c_402"],
+            "payment_attempts": b["payment_attempts"],
+            "payments_success": b["payments_success"],
+            "payments_success_auditors": b.get("payments_success_auditors", 0),
+            "payment_failures": b["payment_failures"],
+            "revenue_usdc": round(revenue_by_day.get(day, 0.0), 6),
+            "revenue_usdc_auditors": round(revenue_auditors_by_day.get(day, 0.0), 6),
+            "buyers_total": len(payers),
+            "buyers_new": new_buyers,
+            "buyers_returning": len(payers) - new_buyers,
+            "buyers_auditors": len(payers_auditors),
+            "c_404": nginx.get("c_404", 0),
+            "c_5xx": nginx.get("c_5xx", 0),
+        })
+    return result
+
+
+def day_detail(date: str) -> dict:
+    """Drill-down for one UTC day (/admin/daily, click a row): real buyers
+    (wallet/route/amount/UA), failed payment attempts (wallet/route/exact
+    reason), per-route stats from the nginx ingestion, and classified
+    visitors for that day."""
+    mechanical = _mechanical_wallets()
+    day_start = f"{date}T00:00:00"
+    day_end = f"{date}T23:59:59.999999"
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT payer, route, amount_usdc, user_agent, ts FROM requests "
+            "WHERE ts >= ? AND ts <= ? AND status='paid' ORDER BY ts",
+            (day_start, day_end),
+        )
+        paid_rows = cur.fetchall()
+    auditors = _auditor_wallets()
+    buyers = []
+    for r in paid_rows:
+        payer = (r["payer"] or "").strip().lower()
+        if not payer or payer in mechanical or _is_test_identity(r["payer"], r["user_agent"]):
+            continue
+        buyers.append({
+            "wallet": payer, "route": r["route"], "amount_usdc": r["amount_usdc"],
+            "user_agent": r["user_agent"], "ts": r["ts"], "is_auditor": payer in auditors,
+        })
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT payer, route, error_reason, user_agent, ts FROM requests "
+            "WHERE ts >= ? AND ts <= ? AND status='payment_failed' ORDER BY ts",
+            (day_start, day_end),
+        )
+        failures = [dict(r) for r in cur.fetchall()]
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT route, requests, c_2xx, c_402, c_404, c_4xx_other, c_5xx, "
+            "distinct_ips, p50_ms, p95_ms FROM daily_route_stats WHERE date=? "
+            "ORDER BY requests DESC",
+            (date,),
+        )
+        route_stats = [dict(r) for r in cur.fetchall()]
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT ip, user_agent, request_count, class, prober_name, is_new "
+            "FROM daily_visitors WHERE date=? ORDER BY request_count DESC",
+            (date,),
+        )
+        visitors = [dict(r) for r in cur.fetchall()]
+
+    return {
+        "date": date, "buyers": buyers, "failures": failures,
+        "route_stats": route_stats, "visitors": visitors,
+    }
+
+
+def reputation_history(days: int = 30) -> dict:
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    with cursor() as cur:
+        cur.execute(
+            "SELECT date, source, score, uptime_pct, tier FROM reputation_snapshots "
+            "WHERE date >= ? ORDER BY date",
+            (since,),
+        )
+        snapshots = [dict(r) for r in cur.fetchall()]
+    with cursor() as cur:
+        cur.execute(
+            "SELECT date, query, rank, resource_url, total_results FROM bazaar_rank_history "
+            "WHERE date >= ? ORDER BY date, query",
+            (since,),
+        )
+        bazaar = [dict(r) for r in cur.fetchall()]
+    return {"snapshots": snapshots, "bazaar": bazaar}
+
+
+def daily_top_summary() -> dict:
+    """The 4 headline numbers for the top of /admin/daily: today's revenue,
+    today's buyers, 7-day revenue (all on-chain networks combined, excluding
+    MECHANICAL_WALLETS - same rule as everywhere else on this page), and the
+    latest agenteconomy.report rating we've recorded. 2026-10-09 arbitration:
+    revenue_today_usdc/buyers_today/revenue_7d_usdc are clients only -
+    AUDITOR_WALLETS revenue/buyers are split into their own _auditors
+    fields, still counted, never folded into the client numbers."""
+    auditors = _auditor_wallets()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT amount_usdc, from_address FROM chain_payments "
+            "WHERE block_time LIKE ? AND is_mechanical=0",
+            (f"{today}%",),
+        )
+        today_rows = cur.fetchall()
+    client_today_rows = [r for r in today_rows if (r["from_address"] or "").lower() not in auditors]
+    auditor_today_rows = [r for r in today_rows if (r["from_address"] or "").lower() in auditors]
+    revenue_today = sum(r["amount_usdc"] for r in client_today_rows)
+    revenue_today_auditors = sum(r["amount_usdc"] for r in auditor_today_rows)
+    buyers_today = len({(r["from_address"] or "").lower() for r in client_today_rows})
+    buyers_today_auditors = len({(r["from_address"] or "").lower() for r in auditor_today_rows})
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT amount_usdc, from_address FROM chain_payments "
+            "WHERE block_time >= ? AND is_mechanical=0",
+            (_since(24 * 7),),
+        )
+        week_rows = cur.fetchall()
+    revenue_7d = sum(r["amount_usdc"] for r in week_rows if (r["from_address"] or "").lower() not in auditors)
+    revenue_7d_auditors = sum(r["amount_usdc"] for r in week_rows if (r["from_address"] or "").lower() in auditors)
+
+    with cursor() as cur:
+        cur.execute(
+            "SELECT score, uptime_pct, tier, date FROM reputation_snapshots "
+            "WHERE source='agenteconomy' ORDER BY date DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+    rating = dict(row) if row else None
+
+    return {
+        "revenue_today_usdc": round(revenue_today, 6),
+        "revenue_today_usdc_auditors": round(revenue_today_auditors, 6),
+        "buyers_today": buyers_today,
+        "buyers_today_auditors": buyers_today_auditors,
+        "revenue_7d_usdc": round(revenue_7d, 6),
+        "revenue_7d_usdc_auditors": round(revenue_7d_auditors, 6),
+        "agenteconomy_rating": rating,
+    }
+
+
+def last_real_payment() -> dict | None:
+    """Most recent real payment (payer present, not in MECHANICAL_WALLETS -
+    same rule as everywhere else) for GET /admin/live's 'dernier paiement'
+    card. Reads `requests` directly rather than chain_payments +
+    route_chain_stats()'s nearest-match logic: this table's own row already
+    carries route+payer+amount together for a 'paid' status, no on-chain
+    attribution needed for a single most-recent lookup."""
+    mechanical = _mechanical_wallets()
+    with cursor() as cur:
+        cur.execute(
+            "SELECT ts, route, payer, amount_usdc FROM requests "
+            "WHERE status='paid' AND payer IS NOT NULL ORDER BY ts DESC LIMIT 20"
+        )
+        rows = cur.fetchall()
+    for row in rows:
+        payer = (row["payer"] or "").strip().lower()
+        if payer and payer not in mechanical:
+            return {
+                "ts": row["ts"], "route": row["route"],
+                "payer": payer, "amount_usdc": row["amount_usdc"],
+            }
+    return None
+
+
+def suivi_snapshot() -> dict:
+    """Hourly (24h) and daily (7d) visit/payment series for GET /admin/suivi.
+
+    Cheap GROUP BY on idx_requests_ts — never walks 24h rows in Python and
+    never shares a cache with collect_dashboard_data / /admin/data.json, so
+    polling this page cannot revive the 2026-10-02 CPU incident.
+    Paid totals exclude MECHANICAL_WALLETS the same way as history_7d();
+    auditor payments (AUDITOR_WALLETS) and test rows (payer='0xTESTPAYER')
+    are split out of "paid"/"paid_usdc" into their own fields rather than
+    counted as client revenue - see _real_paid()."""
+    mechanical = _mechanical_wallets()
+    auditors = _auditor_wallets()
+    since_24 = _since(24)
+    since_7d = _since(24 * 7)
+    now = datetime.now(timezone.utc)
+
+    with cursor() as cur:
+        cur.execute(
+            """SELECT substr(ts, 1, 13) AS bucket, status,
+                      COUNT(*) AS n, SUM(ifnull(amount_usdc, 0)) AS usdc
+               FROM requests WHERE ts >= ? GROUP BY 1, 2""",
+            (since_24,),
+        )
+        hour_rows = cur.fetchall()
+        cur.execute(
+            """SELECT substr(ts, 1, 13) AS bucket, lower(payer) AS payer,
+                      COUNT(*) AS n, SUM(ifnull(amount_usdc, 0)) AS usdc
+               FROM requests
+               WHERE ts >= ? AND status='paid' AND payer IS NOT NULL AND trim(payer) != ''
+               GROUP BY 1, 2""",
+            (since_24,),
+        )
+        hour_paid_rows = cur.fetchall()
+        cur.execute(
+            """SELECT substr(ts, 1, 10) AS bucket, status,
+                      COUNT(*) AS n, SUM(ifnull(amount_usdc, 0)) AS usdc
+               FROM requests WHERE ts >= ? GROUP BY 1, 2""",
+            (since_7d,),
+        )
+        day_rows = cur.fetchall()
+        cur.execute(
+            """SELECT substr(ts, 1, 10) AS bucket, lower(payer) AS payer,
+                      COUNT(*) AS n, SUM(ifnull(amount_usdc, 0)) AS usdc
+               FROM requests
+               WHERE ts >= ? AND status='paid' AND payer IS NOT NULL AND trim(payer) != ''
+               GROUP BY 1, 2""",
+            (since_7d,),
+        )
+        day_paid_rows = cur.fetchall()
+        cur.execute(
+            """SELECT ts, route, method, status, amount_usdc, payer, user_agent
+               FROM requests ORDER BY id DESC LIMIT 20"""
+        )
+        recent = [dict(r) for r in cur.fetchall()]
+
+    def _status_buckets(rows) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for row in rows:
+            b = out.setdefault(
+                row["bucket"],
+                {"visits": 0, "unpaid": 0, "errors": 0, "paid_all": 0, "usdc_all": 0.0},
+            )
+            n = int(row["n"] or 0)
+            usdc = float(row["usdc"] or 0)
+            b["visits"] += n
+            if row["status"] == "unpaid":
+                b["unpaid"] += n
+            elif row["status"] in ("error", "payment_failed", "capacity_reached"):
+                b["errors"] += n
+            elif row["status"] == "paid":
+                b["paid_all"] += n
+                b["usdc_all"] += usdc
+        return out
+
+    def _real_paid(rows) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for row in rows:
+            payer = (row["payer"] or "").strip().lower()
+            if not payer or payer in mechanical or payer == "0xtestpayer":
+                continue
+            b = out.setdefault(
+                row["bucket"], {"paid": 0, "paid_usdc": 0.0, "paid_auditors": 0, "paid_usdc_auditors": 0.0}
+            )
+            if payer in auditors:
+                b["paid_auditors"] += int(row["n"] or 0)
+                b["paid_usdc_auditors"] += float(row["usdc"] or 0)
+            else:
+                b["paid"] += int(row["n"] or 0)
+                b["paid_usdc"] += float(row["usdc"] or 0)
+        return out
+
+    hour_status = _status_buckets(hour_rows)
+    hour_paid = _real_paid(hour_paid_rows)
+    hour_keys = [
+        (now - timedelta(hours=i)).strftime("%Y-%m-%dT%H")
+        for i in range(23, -1, -1)
+    ]
+    hours_24 = []
+    for key in hour_keys:
+        st = hour_status.get(key, {})
+        pd = hour_paid.get(key, {})
+        hours_24.append({
+            "hour": key,
+            "label": key[11:13] + "h",
+            "visits": st.get("visits", 0),
+            "unpaid": st.get("unpaid", 0),
+            "errors": st.get("errors", 0),
+            "paid": pd.get("paid", 0),
+            "paid_usdc": round(pd.get("paid_usdc", 0.0), 6),
+            "paid_auditors": pd.get("paid_auditors", 0),
+            "paid_usdc_auditors": round(pd.get("paid_usdc_auditors", 0.0), 6),
+        })
+
+    day_status = _status_buckets(day_rows)
+    day_paid = _real_paid(day_paid_rows)
+    day_keys = [
+        (now.date() - timedelta(days=i)).isoformat()
+        for i in range(6, -1, -1)
+    ]
+    days_7 = []
+    for key in day_keys:
+        st = day_status.get(key, {})
+        pd = day_paid.get(key, {})
+        days_7.append({
+            "day": key,
+            "label": key[5:],
+            "visits": st.get("visits", 0),
+            "unpaid": st.get("unpaid", 0),
+            "errors": st.get("errors", 0),
+            "paid": pd.get("paid", 0),
+            "paid_usdc": round(pd.get("paid_usdc", 0.0), 6),
+            "paid_auditors": pd.get("paid_auditors", 0),
+            "paid_usdc_auditors": round(pd.get("paid_usdc_auditors", 0.0), 6),
+        })
+
+    totals = {
+        "visits": sum(h["visits"] for h in hours_24),
+        "unpaid": sum(h["unpaid"] for h in hours_24),
+        "errors": sum(h["errors"] for h in hours_24),
+        "paid": sum(h["paid"] for h in hours_24),
+        "paid_usdc": round(sum(h["paid_usdc"] for h in hours_24), 6),
+        "visits_7d": sum(d["visits"] for d in days_7),
+        "paid_7d": sum(d["paid"] for d in days_7),
+        "paid_usdc_7d": round(sum(d["paid_usdc"] for d in days_7), 6),
+    }
+
+    def _short_ts(ts: str | None) -> str:
+        if not ts or len(ts) < 19:
+            return ts or ""
+        return ts[11:19]
+
+    feed = []
+    for row in recent:
+        feed.append({
+            "ts": row["ts"],
+            "when": _short_ts(row["ts"]),
+            "route": row["route"],
+            "method": row["method"] or "",
+            "status": row["status"],
+            "amount_usdc": row["amount_usdc"],
+            "payer": row["payer"],
+            "user_agent": (row["user_agent"] or "")[:180],
+        })
+
+    return {
+        "generated_at": now.isoformat(),
+        "hours_24": hours_24,
+        "days_7": days_7,
+        "totals": totals,
+        "feed": feed,
+    }

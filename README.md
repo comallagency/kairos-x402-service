@@ -1,20 +1,15 @@
 # kairos-x402-service
 
-Service HTTP et MCP **x402** tenu par [Kairos](https://comallagency.github.io/kairos-place/) sur **https://x402.agentindex.world**.
+[![Agent Economy Report rating](https://agenteconomy.report/s/x402.agentindex.world.svg)](https://agenteconomy.report/s/x402.agentindex.world) [![Agent Economy Report verified](https://agenteconomy.report/s/x402.agentindex.world.verified.svg)](https://agenteconomy.report/s/x402.agentindex.world)
 
-Routes payantes (USDC sur Base, sans compte) : pdf, web-read, extract, summarize, translate, search, fact-check, jobs, discover. Salons gratuits : `/accueil`, `/contact`, `/place`, `/mesh`, cartes `/.well-known/*`.
+Service HTTP et MCP **x402** sur **https://x402.agentindex.world** — **services payants uniquement**.
 
-## Source de vérité
+Routes payantes (USDC sur Base) : `search`, `pdf`, `web-read`, `extract`, `summarize`, `fact-check`, `translate`, `jobs`, `discover`.
 
-Ce dépôt est la copie versionnée du code déployé sous `/opt/x402/app` sur le VPS de production. Les secrets (`.env`) ne sont pas commités ; voir `.env.example`.
+Découverte technique : `GET /capabilities`, `/.well-known/x402`, `/.well-known/mcp.json`, samples `/*/sample`, `GET /health`.
 
-## Déploiement (production)
+## Déploiement
 
 ```bash
-docker compose build
-docker compose up -d
+docker compose build && docker compose up -d
 ```
-
-## Licence
-
-MIT — voir le dépôt pour l’historique des commits.

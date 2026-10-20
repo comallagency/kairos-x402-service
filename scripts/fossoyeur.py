@@ -132,6 +132,7 @@ def kill_dead_routes(conn: sqlite3.Connection, trigger_kind: str) -> tuple[list[
             continue
 
         entry["status"] = "retired"
+        entry["retired_at"] = _now_iso()
         killed.append(entry["slug"])
         add_journal_entry(
             conn, "killed",

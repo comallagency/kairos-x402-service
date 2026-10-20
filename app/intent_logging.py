@@ -77,11 +77,13 @@ class IntentLoggingMiddleware:
             return {"type": "http.disconnect"}
 
         status_holder: dict[str, int] = {}
+        response_headers_holder: dict[str, list] = {}
         response_chunks: list[bytes] = []
 
         async def capturing_send(message):
             if message["type"] == "http.response.start":
                 status_holder["status"] = message["status"]
+                response_headers_holder["headers"] = message.get("headers", [])
             elif message["type"] == "http.response.body":
                 response_chunks.append(message.get("body", b""))
             await send(message)
@@ -101,6 +103,38 @@ class IntentLoggingMiddleware:
                     error_reason = json.dumps(error_reason)
             except Exception:
                 pass
+
+            if not error_reason:
+                # A settlement-stage rejection (as opposed to a verify-stage
+                # one) never populates the JSON body - the x402 SDK's FastAPI
+                # middleware returns an empty {} body there and puts the real
+                # SettleResponse (errorReason/errorMessage) only in the
+                # PAYMENT-RESPONSE header (X-PAYMENT-RESPONSE for v1 clients),
+                # base64-encoded. Found 2026-09-28: a real buyer with a
+                # verified sufficient balance failed 6 times with
+                # error_reason always empty, because this middleware only
+                # ever looked at the body.
+                headers_list = response_headers_holder.get("headers", [])
+                response_headers = {
+                    k.decode("latin-1").lower(): v.decode("latin-1") for k, v in headers_list
+                }
+                payment_response_raw = (
+                    response_headers.get("payment-response")
+                    or response_headers.get("x-payment-response")
+                )
+                if payment_response_raw:
+                    try:
+                        from x402.http.utils import decode_payment_response_header
+
+                        settle_response = decode_payment_response_header(payment_response_raw)
+                        parts = [
+                            p for p in (settle_response.error_reason, settle_response.error_message) if p
+                        ]
+                        if parts:
+                            error_reason = ": ".join(parts)
+                    except Exception:
+                        pass
+
             db.log_request(
                 route=route_key,
                 method=method,

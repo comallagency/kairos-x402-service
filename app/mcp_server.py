@@ -40,6 +40,9 @@ project-specific client code.
 import asyncio
 import json
 import logging
+from typing import Annotated
+
+from pydantic import Field
 
 from fastmcp import Context, FastMCP
 from fastmcp.tools.base import ToolResult
@@ -67,8 +70,11 @@ from app.handlers.fact_check import FactCheckError, _check_claim
 from app.handlers.jobs import JOB_POLL_SLOT_SECONDS
 from app.handlers.pdf import PdfError, _get_pdf_bytes, parse_pdf
 from app.handlers.search import (
+    DEFAULT_CONTENT_CHARS,
     MAX_BATCH_QUERIES,
     _clamp_max_results,
+    _clamp_content_chars,
+    _enrich_results,
     _run_batch_search,
     _shape_results,
     _summarize,
@@ -88,10 +94,25 @@ from app.receipts import (
     neutral_model_id,
     price_float,
 )
-from app.upstream.openrouter import OpenRouterError
+from app.upstream.openrouter import OpenRouterError, chat_completion_raw
+from app.handlers.llm_gateway import (
+    MARKUP as LLM_GATEWAY_MARKUP,
+    UPTO_ENABLED as llm_gateway_upto_enabled,
+    MIN_SETTLE_USD as LLM_GATEWAY_MIN_SETTLE_USD,
+    SAMPLE_REQUEST,
+    SAMPLE_RESPONSE,
+    _capped_max_tokens as llm_gateway_capped_max_tokens,
+    _price_ceiling_usd as llm_gateway_price_ceiling_usd,
+    _priced_models_map as llm_gateway_priced_models_map,
+    _unpriced_model_error as llm_gateway_unpriced_model_error,
+    GLOBAL_TIMEOUT_S as llm_gateway_timeout_s,
+)
 from app.upstream.tokencount import count_tokens
+from app.upstream.jev import JevError, ask_jev
 from app.upstream.websearch import run_web_search
 from app.x402_setup import (
+    CRYPTO_INPUT_SCHEMA,
+    CRYPTO_SAMPLE_OUTPUT,
     EXTRACT_INPUT_SCHEMA,
     EXTRACT_SAMPLE_OUTPUT,
     FACT_CHECK_INPUT_SCHEMA,
@@ -99,6 +120,8 @@ from app.x402_setup import (
     JOBS_INPUT_SCHEMA,
     JOBS_SAMPLE_OUTPUT,
     KIT_TAGLINE,
+    NEWS_INPUT_SCHEMA,
+    NEWS_SAMPLE_OUTPUT,
     PDF_INPUT_SCHEMA,
     PDF_SAMPLE_OUTPUT,
     ROUTE_DESCRIPTIONS,
@@ -108,10 +131,85 @@ from app.x402_setup import (
     SUMMARIZE_SAMPLE_OUTPUT,
     TRANSLATE_INPUT_SCHEMA,
     TRANSLATE_SAMPLE_OUTPUT,
+    WEATHER_INPUT_SCHEMA,
+    WEATHER_SAMPLE_OUTPUT,
     WEB_READ_INPUT_SCHEMA,
     WEB_READ_SAMPLE_OUTPUT,
+    CAN_PAY_INPUT_SCHEMA,
+    CAN_PAY_SAMPLE_OUTPUT,
+    PROBE_INPUT_SCHEMA,
+    PROBE_SAMPLE_OUTPUT,
+    WALLET_BALANCE_INPUT_SCHEMA,
+    WALLET_BALANCE_SAMPLE_OUTPUT,
+    GAS_PRICE_INPUT_SCHEMA,
+    GAS_PRICE_SAMPLE_OUTPUT,
+    WALLET_INTELLIGENCE_INPUT_SCHEMA,
+    WALLET_INTELLIGENCE_SAMPLE_OUTPUT,
+    X402_ECHO_INPUT_SCHEMA,
+    X402_ECHO_SAMPLE_OUTPUT,
+    AGENT_HEALTH_INPUT_SCHEMA,
+    AGENT_HEALTH_SAMPLE_OUTPUT,
+    DECIDE_INPUT_SCHEMA,
+    DECIDE_OUTPUT_SCHEMA,
+    DECIDE_SAMPLE_INPUT,
+    DECIDE_SAMPLE_OUTPUT,
+    GUARD_INPUT_SCHEMA,
+    GUARD_OUTPUT_SCHEMA,
+    GUARD_SAMPLE_INPUT,
+    GUARD_SAMPLE_OUTPUT,
+    VERIFY_INPUT_SCHEMA,
+    VERIFY_OUTPUT_SCHEMA,
+    VERIFY_SAMPLE_INPUT,
+    VERIFY_SAMPLE_OUTPUT,
+    RANK_INPUT_SCHEMA,
+    RANK_OUTPUT_SCHEMA,
+    RANK_SAMPLE_INPUT,
+    RANK_SAMPLE_OUTPUT,
+    LLM_GATEWAY_INPUT_SCHEMA,
+    LLM_GATEWAY_OUTPUT_SCHEMA,
     DISCOVER_INPUT_SCHEMA,
     DISCOVER_SAMPLE_OUTPUT,
+    TOKEN_RISK_INPUT_SCHEMA,
+    TOKEN_RISK_OUTPUT_SCHEMA,
+    TOKEN_RISK_SAMPLE_INPUT,
+    TOKEN_RISK_SAMPLE_OUTPUT,
+    RESEARCH_INPUT_SCHEMA,
+    RESEARCH_OUTPUT_SCHEMA,
+    RESEARCH_SAMPLE_INPUT,
+    RESEARCH_SAMPLE_OUTPUT,
+    SEARCH_OUTPUT_SCHEMA,
+    TRANSLATE_OUTPUT_SCHEMA,
+    JOBS_OUTPUT_SCHEMA,
+    PDF_OUTPUT_SCHEMA,
+    WEB_READ_OUTPUT_SCHEMA,
+    EXTRACT_OUTPUT_SCHEMA,
+    SUMMARIZE_OUTPUT_SCHEMA,
+    FACT_CHECK_OUTPUT_SCHEMA,
+    WEATHER_OUTPUT_SCHEMA,
+    CRYPTO_OUTPUT_SCHEMA,
+    NEWS_OUTPUT_SCHEMA,
+    CAN_PAY_OUTPUT_SCHEMA,
+    PROBE_OUTPUT_SCHEMA,
+    WALLET_BALANCE_OUTPUT_SCHEMA,
+    GAS_PRICE_OUTPUT_SCHEMA,
+    WALLET_INTELLIGENCE_OUTPUT_SCHEMA,
+    X402_ECHO_OUTPUT_SCHEMA,
+    AGENT_HEALTH_OUTPUT_SCHEMA,
+    SENTIMENT_INPUT_SCHEMA,
+    SENTIMENT_OUTPUT_SCHEMA,
+    CLASSIFY_INPUT_SCHEMA,
+    CLASSIFY_OUTPUT_SCHEMA,
+    INTENT_INPUT_SCHEMA,
+    INTENT_OUTPUT_SCHEMA,
+    SPAM_CHECK_INPUT_SCHEMA,
+    SPAM_CHECK_OUTPUT_SCHEMA,
+    TOXICITY_INPUT_SCHEMA,
+    TOXICITY_OUTPUT_SCHEMA,
+    LANGUAGE_INPUT_SCHEMA,
+    LANGUAGE_OUTPUT_SCHEMA,
+    PII_CHECK_INPUT_SCHEMA,
+    PII_CHECK_OUTPUT_SCHEMA,
+    LLM_PER_MODEL_INPUT_SCHEMA,
     build_route_configs,
     get_resource_server,
 )
@@ -120,22 +218,14 @@ logger = logging.getLogger("x402.mcp_server")
 
 mcp = FastMCP(
     "AgentIndex x402",
+    version="1.2.0",
     instructions=(
-        f"{KIT_TAGLINE} Paid per call in USDC on Base (x402/MPP) - no "
-        "account, no API key. Start with detect_language (free) to confirm "
-        "access, then read_pdf, read_web_page, extract_structured and "
-        "summarize for the rest of the kit. Two more tools outside the "
-        "kit: translate (batch translation) and jobs (delegated "
-        "multi-step research, async). Also free, unrelated to the kit: "
-        "digest_tool_result and verify_tool_result_digest (free integrity), "
-        "relationship_memory_schema and validate_relationship_memory (free interlocutor cards), "
-        "tool_delivery_receipt_schema and validate_tool_delivery_receipt (free payment-to-digest receipts), "
-        "honest_delivery_refusal_schema and validate_honest_delivery_refusal (free structured failure records), "
-        "coordination_thread_schema and validate_coordination_thread_turn (free multi-agent thread turns), "
-        "get_welcome_salon (free front door JSON), contact_kairos and poll_contact_kairos "
-        "(free mailbox + self-declaration), mesh_register_node (free peer registry), "
-        "discover_mcp_servers (free, snapshot-ranked) and discover_semantic "
-        "(paid, snapshot embeddings) find MCP servers by need."
+        f"{KIT_TAGLINE} Paid per call in USDC on Base (x402) - no "
+        "account, no API key. FIRST CALL (feeds CDP Bazaar): can_pay "
+        "(Base USDC balance check) or probe (detect x402 paywall on a URL) "
+        "at $0.001. Then weather, crypto, news, discover, search, "
+        "read_pdf, read_web_page, extract_structured, summarize, "
+        "fact_check, translate, jobs."
     ),
 )
 
@@ -298,6 +388,9 @@ async def _run_search(args: dict, payer: str | None) -> dict:
 
     max_results = _clamp_max_results(args.get("max_results", 5))
     extract = bool(args.get("extract", True))
+    include_content = bool(args.get("include_content", True))
+    content_results = args.get("content_results", 3)
+    content_chars = _clamp_content_chars(args.get("content_chars", DEFAULT_CONTENT_CHARS))
     summarize = bool(args.get("summarize", False))
 
     try:
@@ -308,8 +401,17 @@ async def _run_search(args: dict, payer: str | None) -> dict:
             else:
                 results, model_served = await run_web_search(query, max_results)
                 summary_label = query
+            if not results:
+                # Every configured search engine can transiently fail/rate-limit
+                # at once (run_web_search only raises SearchError for a
+                # request-level failure, not for a 200-with-zero-hits response) -
+                # an empty result set must not be billed either.
+                raise SearchError("no_results")
+            results = await _enrich_results(
+                results, include_content, content_results, content_chars
+            )
             summary = await _summarize(summary_label, results) if summarize else None
-    except OpenRouterError as exc:
+    except (OpenRouterError, SearchError) as exc:
         db.log_request(
             route="search", method="MCP", status="error", payer=payer,
             user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
@@ -337,15 +439,32 @@ async def _run_search(args: dict, payer: str | None) -> dict:
 # KIT_TAGLINE comment in app/x402_setup.py). Function and helpers kept
 # intact; uncomment this decorator to re-register the tool once a real
 # balance exists.
-# @mcp.tool(name="search", description=ROUTE_DESCRIPTIONS["search"])
+@mcp.tool(
+    name="search",
+    title="Web Search",
+    description=ROUTE_DESCRIPTIONS["search"],
+    output_schema=SEARCH_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def search_tool(
-    query: str | list[str],
-    max_results: int = 5,
-    extract: bool = True,
-    summarize: bool = False,
+    query: Annotated[str | list[str], Field(description=SEARCH_INPUT_SCHEMA["properties"]["query"]["description"])],
+    max_results: Annotated[int, Field(description=SEARCH_INPUT_SCHEMA["properties"]["max_results"]["description"])] = 5,
+    extract: Annotated[bool, Field(description=SEARCH_INPUT_SCHEMA["properties"]["extract"]["description"])] = True,
+    include_content: Annotated[bool, Field(description=SEARCH_INPUT_SCHEMA["properties"]["include_content"]["description"])] = True,
+    content_results: Annotated[int, Field(description=SEARCH_INPUT_SCHEMA["properties"]["content_results"]["description"])] = 3,
+    content_chars: Annotated[int, Field(description=SEARCH_INPUT_SCHEMA["properties"]["content_chars"]["description"])] = DEFAULT_CONTENT_CHARS,
+    summarize: Annotated[bool, Field(description=SEARCH_INPUT_SCHEMA["properties"]["summarize"]["description"])] = False,
     ctx: Context = None,
 ) -> ToolResult:
-    args = {"query": query, "max_results": max_results, "extract": extract, "summarize": summarize}
+    args = {
+        "query": query,
+        "max_results": max_results,
+        "extract": extract,
+        "include_content": include_content,
+        "content_results": content_results,
+        "content_chars": content_chars,
+        "summarize": summarize,
+    }
     return await _paid_tool_call(
         tool_name="search",
         route_key="POST /search",
@@ -426,6 +545,7 @@ async def _run_translate(args: dict, payer: str | None) -> dict:
             "target_lang": target_lang,
             "detected_source_lang": detected_source_lang,
             "translated_text": translations,
+            "model_served": receipt["model_served"],
             "x402_receipt": receipt,
         }
 
@@ -435,16 +555,23 @@ async def _run_translate(args: dict, payer: str | None) -> dict:
         "target_lang": target_lang,
         "detected_source_lang": parsed.get("detected_source_lang"),
         "translated_text": parsed.get("translated_text"),
+        "model_served": receipt["model_served"],
         "x402_receipt": receipt,
     }
 
 
-@mcp.tool(name="translate", description=ROUTE_DESCRIPTIONS["translate"])
+@mcp.tool(
+    name="translate",
+    title="Translate Text",
+    description=ROUTE_DESCRIPTIONS["translate"],
+    output_schema=TRANSLATE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
 async def translate_tool(
-    text: str | list[str],
-    target_lang: str,
-    source_lang: str | None = None,
-    preserve_format: bool = True,
+    text: Annotated[str | list[str], Field(description=TRANSLATE_INPUT_SCHEMA["properties"]["text"]["description"])],
+    target_lang: Annotated[str, Field(description=TRANSLATE_INPUT_SCHEMA["properties"]["target_lang"]["description"])],
+    source_lang: Annotated[str | None, Field(description=TRANSLATE_INPUT_SCHEMA["properties"]["source_lang"]["description"])] = None,
+    preserve_format: Annotated[bool, Field(description=TRANSLATE_INPUT_SCHEMA["properties"]["preserve_format"]["description"])] = True,
     ctx: Context = None,
 ) -> ToolResult:
     args = {
@@ -498,8 +625,17 @@ async def _run_jobs(args: dict, payer: str | None) -> dict:
     return {"job_id": job_id, "eta_seconds": eta_seconds}
 
 
-@mcp.tool(name="jobs", description=ROUTE_DESCRIPTIONS["jobs"])
-async def jobs_tool(subject: str, ctx: Context = None) -> ToolResult:
+@mcp.tool(
+    name="jobs",
+    title="Research Job",
+    description=ROUTE_DESCRIPTIONS["jobs"],
+    output_schema=JOBS_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": False, "openWorldHint": True, "idempotentHint": False},
+)
+async def jobs_tool(
+    subject: Annotated[str, Field(description=JOBS_INPUT_SCHEMA["properties"]["subject"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
     args = {"subject": subject}
     return await _paid_tool_call(
         tool_name="jobs",
@@ -547,8 +683,18 @@ async def _run_read_pdf(args: dict, payer: str | None) -> dict:
     return {**parsed, "token_count": token_count, "x402_receipt": receipt}
 
 
-@mcp.tool(name="read_pdf", description=ROUTE_DESCRIPTIONS["pdf"])
-async def read_pdf_tool(url: str | None = None, pdf_base64: str | None = None, ctx: Context = None) -> ToolResult:
+@mcp.tool(
+    name="read_pdf",
+    title="PDF to Markdown",
+    description=ROUTE_DESCRIPTIONS["pdf"],
+    output_schema=PDF_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def read_pdf_tool(
+    url: Annotated[str | None, Field(description=PDF_INPUT_SCHEMA["properties"]["url"]["description"])] = None,
+    pdf_base64: Annotated[str | None, Field(description=PDF_INPUT_SCHEMA["properties"]["pdf_base64"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
     args = {"url": url, "pdf_base64": pdf_base64}
     return await _paid_tool_call(
         tool_name="read_pdf",
@@ -602,8 +748,17 @@ async def _run_read_web_page(args: dict, payer: str | None) -> dict:
     return {**result, "token_count": token_count, "x402_receipt": receipt}
 
 
-@mcp.tool(name="read_web_page", description=ROUTE_DESCRIPTIONS["web-read"])
-async def read_web_page_tool(url: str, ctx: Context = None) -> ToolResult:
+@mcp.tool(
+    name="read_web_page",
+    title="Web Page to Markdown",
+    description=ROUTE_DESCRIPTIONS["web-read"],
+    output_schema=WEB_READ_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def read_web_page_tool(
+    url: Annotated[str, Field(description=WEB_READ_INPUT_SCHEMA["properties"]["url"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
     return await _paid_tool_call(
         tool_name="read_web_page",
         route_key="POST /web-read",
@@ -649,7 +804,7 @@ async def _run_extract_structured(args: dict, payer: str | None) -> dict:
     try:
         with Timer() as t:
             content = await _get_extract_content(args)
-            data, model_served = await _run_extract(content, schema)
+            data, model_served, missing_fields, fallback_used = await _run_extract(content, schema)
     except ExtractError as exc:
         db.log_request(
             route="extract", method="MCP", status="error", payer=payer,
@@ -662,13 +817,22 @@ async def _run_extract_structured(args: dict, payer: str | None) -> dict:
         route="extract", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer,
         user_agent="mcp", body_excerpt=body_excerpt,
     )
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price)
-    return {"data": data, "x402_receipt": receipt}
+    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price, fallback_used=fallback_used)
+    return {"data": data, "missing_fields": missing_fields, "x402_receipt": receipt}
 
 
-@mcp.tool(name="extract_structured", description=ROUTE_DESCRIPTIONS["extract"])
+@mcp.tool(
+    name="extract_structured",
+    title="Extract Structured Data",
+    description=ROUTE_DESCRIPTIONS["extract"],
+    output_schema=EXTRACT_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def extract_structured_tool(
-    schema: dict, url: str | None = None, text: str | None = None, ctx: Context = None
+    schema: Annotated[dict, Field(description=EXTRACT_INPUT_SCHEMA["properties"]["schema"]["description"])],
+    url: Annotated[str | None, Field(description=EXTRACT_INPUT_SCHEMA["properties"]["url"]["description"])] = None,
+    text: Annotated[str | None, Field(description=EXTRACT_INPUT_SCHEMA["properties"]["text"]["description"])] = None,
+    ctx: Context = None,
 ) -> ToolResult:
     args = {"schema": schema, "url": url, "text": text}
     return await _paid_tool_call(
@@ -700,7 +864,7 @@ async def _run_summarize(args: dict, payer: str | None) -> dict:
     try:
         with Timer() as t:
             content, sources = await _get_summarize_content_and_sources(args)
-            summary, model_served = await _summarize_content(content, length)
+            summary, model_served, fallback_used = await _summarize_content(content, length)
     except SummarizeError as exc:
         db.log_request(
             route="summarize", method="MCP", status="error", payer=payer,
@@ -713,14 +877,23 @@ async def _run_summarize(args: dict, payer: str | None) -> dict:
         route="summarize", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer,
         user_agent="mcp", body_excerpt=body_excerpt,
     )
-    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price)
+    receipt = make_receipt(neutral_model_id(model_served), "llm", t.elapsed_ms, price, fallback_used=fallback_used)
     return {"summary": summary, "length": length, "sources": sources, "x402_receipt": receipt}
 
 
-@mcp.tool(name="summarize", description=ROUTE_DESCRIPTIONS["summarize"])
+@mcp.tool(
+    name="summarize",
+    title="Summarize",
+    description=ROUTE_DESCRIPTIONS["summarize"],
+    output_schema=SUMMARIZE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
 async def summarize_tool(
-    url: str | None = None, text: str | None = None, html: str | None = None,
-    length: str = "medium", ctx: Context = None,
+    url: Annotated[str | None, Field(description=SUMMARIZE_INPUT_SCHEMA["properties"]["url"]["description"])] = None,
+    text: Annotated[str | None, Field(description=SUMMARIZE_INPUT_SCHEMA["properties"]["text"]["description"])] = None,
+    html: Annotated[str | None, Field(description=SUMMARIZE_INPUT_SCHEMA["properties"]["html"]["description"])] = None,
+    length: Annotated[str, Field(description=SUMMARIZE_INPUT_SCHEMA["properties"]["length"]["description"])] = "medium",
+    ctx: Context = None,
 ) -> ToolResult:
     args = {"url": url, "text": text, "html": html, "length": length}
     return await _paid_tool_call(
@@ -780,8 +953,17 @@ async def _run_fact_check(args: dict, payer: str | None) -> dict:
 # Disabled 2026-09-07 along with "POST /fact-check" in app/x402_setup.py -
 # _check_claim() searches the web internally via the same paid plugin as
 # /search. See the comment above search_tool.
-# @mcp.tool(name="fact_check", description=ROUTE_DESCRIPTIONS["fact-check"])
-async def fact_check_tool(claim: str, ctx: Context = None) -> ToolResult:
+@mcp.tool(
+    name="fact_check",
+    title="Fact Check",
+    description=ROUTE_DESCRIPTIONS["fact-check"],
+    output_schema=FACT_CHECK_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def fact_check_tool(
+    claim: Annotated[str, Field(description=FACT_CHECK_INPUT_SCHEMA["properties"]["claim"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
     return await _paid_tool_call(
         tool_name="fact_check",
         route_key="POST /fact-check",
@@ -789,6 +971,1608 @@ async def fact_check_tool(claim: str, ctx: Context = None) -> ToolResult:
         args={"claim": claim},
         extensions=_FACT_CHECK_EXTENSIONS,
         run_and_log=_run_fact_check,
+    )
+
+
+# --- weather / crypto / news ($0.001 commodity) -----------------------------
+
+from app.handlers.crypto import CryptoError, _lookup as _crypto_lookup
+from app.handlers.news import NewsError, _lookup as _news_lookup
+from app.handlers.weather import WeatherError, _lookup as _weather_lookup
+
+_WEATHER_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="weather",
+        description=ROUTE_DESCRIPTIONS["weather"],
+        input_schema=WEATHER_INPUT_SCHEMA,
+        example={"city": "Paris"},
+        output=OutputConfig(example=WEATHER_SAMPLE_OUTPUT),
+    )
+)
+_CRYPTO_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="crypto",
+        description=ROUTE_DESCRIPTIONS["crypto"],
+        input_schema=CRYPTO_INPUT_SCHEMA,
+        example={"coins": ["btc", "eth"], "vs_currency": "usd"},
+        output=OutputConfig(example=CRYPTO_SAMPLE_OUTPUT),
+    )
+)
+_NEWS_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="news",
+        description=ROUTE_DESCRIPTIONS["news"],
+        input_schema=NEWS_INPUT_SCHEMA,
+        example={"limit": 10},
+        output=OutputConfig(example=NEWS_SAMPLE_OUTPUT),
+    )
+)
+
+
+async def _run_weather(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as t:
+            result = await _weather_lookup(args)
+    except WeatherError as exc:
+        db.log_request(
+            route="weather", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=exc.reason,
+        )
+        raise ServiceError(exc.reason) from exc
+    price = effective_price(payer, price_float(config.PRICE_WEATHER))
+    db.log_request(
+        route="weather", method="MCP", status="paid", latency_ms=t.elapsed_ms,
+        amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {**result, "x402_receipt": make_receipt(None, "weather", t.elapsed_ms, price)}
+
+
+async def _run_crypto(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as t:
+            result = await _crypto_lookup(args)
+    except CryptoError as exc:
+        db.log_request(
+            route="crypto", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=exc.reason,
+        )
+        raise ServiceError(exc.reason) from exc
+    price = effective_price(payer, price_float(config.PRICE_CRYPTO))
+    db.log_request(
+        route="crypto", method="MCP", status="paid", latency_ms=t.elapsed_ms,
+        amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {**result, "x402_receipt": make_receipt(None, "crypto", t.elapsed_ms, price)}
+
+
+async def _run_news(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as t:
+            result = await _news_lookup(args)
+    except NewsError as exc:
+        db.log_request(
+            route="news", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=exc.reason,
+        )
+        raise ServiceError(exc.reason) from exc
+    price = effective_price(payer, price_float(config.PRICE_NEWS))
+    db.log_request(
+        route="news", method="MCP", status="paid", latency_ms=t.elapsed_ms,
+        amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {**result, "x402_receipt": make_receipt(None, "news", t.elapsed_ms, price)}
+
+
+@mcp.tool(
+    name="weather",
+    title="Weather Forecast",
+    description=ROUTE_DESCRIPTIONS["weather"],
+    output_schema=WEATHER_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def weather_tool(
+    city: Annotated[str | None, Field(description=WEATHER_INPUT_SCHEMA["properties"]["city"]["description"])] = None,
+    lat: Annotated[float | None, Field(description=WEATHER_INPUT_SCHEMA["properties"]["lat"]["description"])] = None,
+    lon: Annotated[float | None, Field(description=WEATHER_INPUT_SCHEMA["properties"]["lon"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    args = {k: v for k, v in (("city", city), ("lat", lat), ("lon", lon)) if v is not None}
+    return await _paid_tool_call(
+        tool_name="weather",
+        route_key="POST /weather",
+        ctx=ctx,
+        args=args,
+        extensions=_WEATHER_EXTENSIONS,
+        run_and_log=_run_weather,
+    )
+
+
+@mcp.tool(
+    name="crypto",
+    title="Crypto Price",
+    description=ROUTE_DESCRIPTIONS["crypto"],
+    output_schema=CRYPTO_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def crypto_tool(
+    coins: Annotated[str | list[str], Field(description=CRYPTO_INPUT_SCHEMA["properties"]["coins"]["description"])],
+    vs_currency: Annotated[str, Field(description=CRYPTO_INPUT_SCHEMA["properties"]["vs_currency"]["description"])] = "usd",
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="crypto",
+        route_key="POST /crypto",
+        ctx=ctx,
+        args={"coins": coins, "vs_currency": vs_currency},
+        extensions=_CRYPTO_EXTENSIONS,
+        run_and_log=_run_crypto,
+    )
+
+
+@mcp.tool(
+    name="news",
+    title="Hacker News Headlines",
+    description=ROUTE_DESCRIPTIONS["news"],
+    output_schema=NEWS_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def news_tool(
+    limit: Annotated[int, Field(description=NEWS_INPUT_SCHEMA["properties"]["limit"]["description"])] = 10,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="news",
+        route_key="POST /news",
+        ctx=ctx,
+        args={"limit": limit},
+        extensions=_NEWS_EXTENSIONS,
+        run_and_log=_run_news,
+    )
+
+
+# --- can-pay / probe ($0.001 preflight bait for first Bazaar settle) ---------
+
+from app.handlers.can_pay import CanPayError, _lookup as _can_pay_lookup
+from app.handlers.probe import ProbeError, _lookup as _probe_lookup
+
+_CAN_PAY_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="can_pay",
+        description=ROUTE_DESCRIPTIONS["can-pay"],
+        input_schema=CAN_PAY_INPUT_SCHEMA,
+        example={"address": "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d", "amount": 0.001},
+        output=OutputConfig(example=CAN_PAY_SAMPLE_OUTPUT),
+    )
+)
+_PROBE_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="probe",
+        description=ROUTE_DESCRIPTIONS["probe"],
+        input_schema=PROBE_INPUT_SCHEMA,
+        example={"url": "https://x402.agentindex.world/weather?city=Paris"},
+        output=OutputConfig(example=PROBE_SAMPLE_OUTPUT),
+    )
+)
+
+
+async def _run_can_pay(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as t:
+            result = await _can_pay_lookup(args)
+    except CanPayError as exc:
+        db.log_request(
+            route="can-pay", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=exc.reason,
+        )
+        raise ServiceError(exc.reason) from exc
+    price = effective_price(payer, price_float(config.PRICE_CAN_PAY))
+    db.log_request(
+        route="can-pay", method="MCP", status="paid", latency_ms=t.elapsed_ms,
+        amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {**result, "x402_receipt": make_receipt(None, "can-pay", t.elapsed_ms, price)}
+
+
+async def _run_probe(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as t:
+            result = await _probe_lookup(args)
+    except ProbeError as exc:
+        db.log_request(
+            route="probe", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=exc.reason,
+        )
+        raise ServiceError(exc.reason) from exc
+    price = effective_price(payer, price_float(config.PRICE_PROBE))
+    db.log_request(
+        route="probe", method="MCP", status="paid", latency_ms=t.elapsed_ms,
+        amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {**result, "x402_receipt": make_receipt(None, "probe", t.elapsed_ms, price)}
+
+
+@mcp.tool(
+    name="can_pay",
+    title="Wallet Can Pay",
+    description=ROUTE_DESCRIPTIONS["can-pay"],
+    output_schema=CAN_PAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def can_pay_tool(
+    address: Annotated[str, Field(description=CAN_PAY_INPUT_SCHEMA["properties"]["address"]["description"])],
+    amount: Annotated[float, Field(description=CAN_PAY_INPUT_SCHEMA["properties"]["amount"]["description"])] = 0.001,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="can_pay",
+        route_key="POST /can-pay",
+        ctx=ctx,
+        args={"address": address, "amount": amount},
+        extensions=_CAN_PAY_EXTENSIONS,
+        run_and_log=_run_can_pay,
+    )
+
+
+@mcp.tool(
+    name="probe",
+    title="x402 Paywall Probe",
+    description=ROUTE_DESCRIPTIONS["probe"],
+    output_schema=PROBE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def probe_tool(
+    url: Annotated[str, Field(description=PROBE_INPUT_SCHEMA["properties"]["url"]["description"])],
+    method: Annotated[str, Field(description=PROBE_INPUT_SCHEMA["properties"]["method"]["description"])] = "GET",
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="probe",
+        route_key="POST /probe",
+        ctx=ctx,
+        args={"url": url, "method": method},
+        extensions=_PROBE_EXTENSIONS,
+        run_and_log=_run_probe,
+    )
+
+# --- multi-chain wallet / gas reads ($0.0001 acquisition routes) -----------
+
+from app.handlers.gas_price import _lookup as _gas_price_lookup
+from app.handlers.agent_health import _lookup as _agent_health_lookup
+from app.handlers.wallet_balance import _lookup as _wallet_balance_lookup
+from app.handlers.wallet_intelligence import _lookup as _wallet_intelligence_lookup
+from app.handlers.token_risk import _lookup as _token_risk_lookup
+from app.handlers.research import RESEARCH_ENABLED, ResearchError, _lookup as _research_lookup
+from app.upstream.evm_rpc import EvmRpcError
+from app.handlers.jev_classify import ClassifyError
+from app.handlers.sentiment import SENTIMENT_ENABLED, _lookup as _sentiment_lookup, SAMPLE_REQUEST as SENTIMENT_SAMPLE_INPUT, SAMPLE_RESPONSE as SENTIMENT_SAMPLE_OUTPUT
+from app.handlers.classify import CLASSIFY_ENABLED, _lookup as _classify_lookup, SAMPLE_REQUEST as CLASSIFY_SAMPLE_INPUT, SAMPLE_RESPONSE as CLASSIFY_SAMPLE_OUTPUT
+from app.handlers.intent import INTENT_ENABLED, _lookup as _intent_lookup, SAMPLE_REQUEST as INTENT_SAMPLE_INPUT, SAMPLE_RESPONSE as INTENT_SAMPLE_OUTPUT
+from app.handlers.spam_check import SPAM_CHECK_ENABLED, _lookup as _spam_check_lookup, SAMPLE_REQUEST as SPAM_CHECK_SAMPLE_INPUT, SAMPLE_RESPONSE as SPAM_CHECK_SAMPLE_OUTPUT
+from app.handlers.toxicity import TOXICITY_ENABLED, _lookup as _toxicity_lookup, SAMPLE_REQUEST as TOXICITY_SAMPLE_INPUT, SAMPLE_RESPONSE as TOXICITY_SAMPLE_OUTPUT
+from app.handlers.language import LANGUAGE_ENABLED, _lookup as _language_lookup, SAMPLE_REQUEST as LANGUAGE_SAMPLE_INPUT, SAMPLE_RESPONSE as LANGUAGE_SAMPLE_OUTPUT
+from app.handlers.pii_check import PII_CHECK_ENABLED, _lookup as _pii_check_lookup, SAMPLE_REQUEST as PII_CHECK_SAMPLE_INPUT, SAMPLE_RESPONSE as PII_CHECK_SAMPLE_OUTPUT
+from app.handlers.llm_per_model import lookup as _llm_per_model_lookup
+from app.handlers.llm_claude_sonnet import MODEL as _CLAUDE_SONNET_MODEL, PROVIDER as _CLAUDE_SONNET_PROVIDER, SAMPLE_REQUEST as _CLAUDE_SONNET_SAMPLE_REQUEST, SAMPLE_RESPONSE as _CLAUDE_SONNET_SAMPLE_RESPONSE
+from app.handlers.llm_gpt_mini import MODEL as _GPT_MINI_MODEL, PROVIDER as _GPT_MINI_PROVIDER, SAMPLE_REQUEST as _GPT_MINI_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GPT_MINI_SAMPLE_RESPONSE
+from app.handlers.llm_gemini_flash import GEMINI_FLASH_ENABLED, MODEL as _GEMINI_FLASH_MODEL, PROVIDER as _GEMINI_FLASH_PROVIDER, SAMPLE_REQUEST as _GEMINI_FLASH_SAMPLE_REQUEST, SAMPLE_RESPONSE as _GEMINI_FLASH_SAMPLE_RESPONSE
+from app.handlers.llm_llama import MODEL as _LLAMA_MODEL, PROVIDER as _LLAMA_PROVIDER, SAMPLE_REQUEST as _LLAMA_SAMPLE_REQUEST, SAMPLE_RESPONSE as _LLAMA_SAMPLE_RESPONSE
+from app.handlers.llm_deepseek import DEEPSEEK_ENABLED, MODEL as _DEEPSEEK_MODEL, PROVIDER as _DEEPSEEK_PROVIDER, SAMPLE_REQUEST as _DEEPSEEK_SAMPLE_REQUEST, SAMPLE_RESPONSE as _DEEPSEEK_SAMPLE_RESPONSE
+
+_CLAUDE_SONNET_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="llm_claude_sonnet",
+        description=ROUTE_DESCRIPTIONS["llm-claude-sonnet"],
+        input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+        example=_CLAUDE_SONNET_SAMPLE_REQUEST,
+        output=OutputConfig(example=_CLAUDE_SONNET_SAMPLE_RESPONSE),
+    )
+)
+_GPT_MINI_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="llm_gpt_mini",
+        description=ROUTE_DESCRIPTIONS["llm-gpt-mini"],
+        input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+        example=_GPT_MINI_SAMPLE_REQUEST,
+        output=OutputConfig(example=_GPT_MINI_SAMPLE_RESPONSE),
+    )
+)
+_GEMINI_FLASH_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="llm_gemini_flash",
+        description=ROUTE_DESCRIPTIONS["llm-gemini-flash"],
+        input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+        example=_GEMINI_FLASH_SAMPLE_REQUEST,
+        output=OutputConfig(example=_GEMINI_FLASH_SAMPLE_RESPONSE),
+    )
+)
+_LLAMA_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="llm_llama",
+        description=ROUTE_DESCRIPTIONS["llm-llama"],
+        input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+        example=_LLAMA_SAMPLE_REQUEST,
+        output=OutputConfig(example=_LLAMA_SAMPLE_RESPONSE),
+    )
+)
+_DEEPSEEK_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="llm_deepseek",
+        description=ROUTE_DESCRIPTIONS["llm-deepseek"],
+        input_schema=LLM_PER_MODEL_INPUT_SCHEMA,
+        example=_DEEPSEEK_SAMPLE_REQUEST,
+        output=OutputConfig(example=_DEEPSEEK_SAMPLE_RESPONSE),
+    )
+)
+
+
+async def _run_pinned_model_mcp(
+    *, ctx, model: str, provider: dict, route_key: str, tool_name: str, extensions: dict,
+    messages: list, max_tokens,
+):
+    """Shared MCP flow for Pack 2's 5 pinned per-model routes (2026-09-30) -
+    the same manual ResourceConfig-building ask_model_tool already needs:
+    a DynamicPrice callback reading the HTTP body via adapter._request has
+    no equivalent in an MCP context (no Starlette request to read), so the
+    ceiling is computed directly from the tool's own already-parsed
+    arguments instead. "exact" scheme only - Pack 2 never offers "upto"."""
+    from x402.schemas import ResourceConfig
+
+    server = await _ensure_initialized()
+    resource_info = _resource_info(tool_name, route_key)
+
+    capped_max_tokens = llm_gateway_capped_max_tokens(max_tokens)
+    ceiling = await llm_gateway_price_ceiling_usd(model, capped_max_tokens, messages)
+    ceiling_str = f"${ceiling:.6f}"
+    exact_config = ResourceConfig(scheme="exact", pay_to=config.X402_PAY_TO, price=ceiling_str, network=config.X402_NETWORK)
+    accepts = server.build_payment_requirements(exact_config)
+
+    meta: dict = {}
+    if ctx is not None:
+        request_context = ctx.request_context
+        if request_context is not None and request_context.meta:
+            meta = request_context.meta
+
+    payment_payload = extract_payment_from_meta({"_meta": meta})
+    if payment_payload is None:
+        return await _payment_required_result(server, accepts, resource_info, extensions, "Payment required to access this tool")
+
+    payment_requirements = server.find_matching_requirements(accepts, payment_payload)
+    if payment_requirements is None:
+        return await _payment_required_result(server, accepts, resource_info, extensions, "No matching payment requirements found")
+
+    verify_result = await server.verify_payment(payment_payload, payment_requirements)
+    if not verify_result.is_valid:
+        return await _payment_required_result(
+            server, accepts, resource_info, extensions,
+            f"Payment verification failed: {verify_result.invalid_reason}",
+        )
+
+    payer = extract_payer_from_payment_dict(payment_payload.model_dump(by_alias=True, exclude_none=True))
+    body_excerpt = json.dumps({"max_tokens": max_tokens})[:2000]
+
+    if not isinstance(messages, list) or not messages:
+        db.log_request(
+            route=route_key, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason="invalid_request",
+        )
+        return ToolResult(structured_content={"error": {"reason": "invalid_request", "detail": "messages must be a non-empty array."}}, is_error=True)
+
+    try:
+        with Timer() as t:
+            data, _, real_cost = await _llm_per_model_lookup(model, provider, messages, max_tokens)
+    except asyncio.TimeoutError:
+        db.log_request(
+            route=route_key, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason="upstream_timeout",
+        )
+        return ToolResult(
+            structured_content={"error": {"reason": "upstream_timeout", "detail": "No response within 20s - not charged. Set your client timeout to 30s."}},
+            is_error=True,
+        )
+    except OpenRouterError as exc:
+        db.log_request(
+            route=route_key, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
+        )
+        return ToolResult(structured_content={"error": {"reason": "upstream_error", "detail": str(exc)[:200]}}, is_error=True)
+
+    billed = effective_price(payer, ceiling)
+    settle_result = await server.settle_payment(payment_payload, payment_requirements)
+    if not settle_result.success:
+        return _settlement_failed_result(accepts, resource_info, extensions, settle_result)
+
+    db.log_request(
+        route=route_key, method="MCP", status="paid", latency_ms=t.elapsed_ms,
+        amount_usdc=billed, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+        upstream_cost_usd=real_cost, margin_usd=billed - real_cost,
+    )
+    receipt = make_receipt(model, route_key, t.elapsed_ms, billed)
+    settle_meta = settle_result.model_dump(by_alias=True, exclude_none=True)
+    return ToolResult(
+        structured_content={**data, "x402_receipt": receipt},
+        meta={MCP_PAYMENT_RESPONSE_META_KEY: settle_meta},
+    )
+
+_SENTIMENT_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="sentiment",
+        description=ROUTE_DESCRIPTIONS["sentiment"],
+        input_schema=SENTIMENT_INPUT_SCHEMA,
+        example=SENTIMENT_SAMPLE_INPUT,
+        output=OutputConfig(example=SENTIMENT_SAMPLE_OUTPUT),
+    )
+)
+_CLASSIFY_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="classify",
+        description=ROUTE_DESCRIPTIONS["classify"],
+        input_schema=CLASSIFY_INPUT_SCHEMA,
+        example=CLASSIFY_SAMPLE_INPUT,
+        output=OutputConfig(example=CLASSIFY_SAMPLE_OUTPUT),
+    )
+)
+_INTENT_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="intent",
+        description=ROUTE_DESCRIPTIONS["intent"],
+        input_schema=INTENT_INPUT_SCHEMA,
+        example=INTENT_SAMPLE_INPUT,
+        output=OutputConfig(example=INTENT_SAMPLE_OUTPUT),
+    )
+)
+_SPAM_CHECK_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="spam_check",
+        description=ROUTE_DESCRIPTIONS["spam-check"],
+        input_schema=SPAM_CHECK_INPUT_SCHEMA,
+        example=SPAM_CHECK_SAMPLE_INPUT,
+        output=OutputConfig(example=SPAM_CHECK_SAMPLE_OUTPUT),
+    )
+)
+_TOXICITY_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="toxicity",
+        description=ROUTE_DESCRIPTIONS["toxicity"],
+        input_schema=TOXICITY_INPUT_SCHEMA,
+        example=TOXICITY_SAMPLE_INPUT,
+        output=OutputConfig(example=TOXICITY_SAMPLE_OUTPUT),
+    )
+)
+_LANGUAGE_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="language",
+        description=ROUTE_DESCRIPTIONS["language"],
+        input_schema=LANGUAGE_INPUT_SCHEMA,
+        example=LANGUAGE_SAMPLE_INPUT,
+        output=OutputConfig(example=LANGUAGE_SAMPLE_OUTPUT),
+    )
+)
+_PII_CHECK_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="pii_check",
+        description=ROUTE_DESCRIPTIONS["pii-check"],
+        input_schema=PII_CHECK_INPUT_SCHEMA,
+        example=PII_CHECK_SAMPLE_INPUT,
+        output=OutputConfig(example=PII_CHECK_SAMPLE_OUTPUT),
+    )
+)
+
+
+def _make_classify_runner(route: str, price_attr: str, lookup):
+    async def _run(args: dict, payer: str | None) -> dict:
+        body_excerpt = json.dumps(args)
+        try:
+            with Timer() as timer:
+                result = await lookup(args)
+        except ClassifyError as exc:
+            db.log_request(
+                route=route, method="MCP", status="error", payer=payer,
+                user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+            )
+            raise ServiceError(str(exc)) from exc
+        price = effective_price(payer, price_float(getattr(config, price_attr)))
+        db.log_request(
+            route=route, method="MCP", status="paid",
+            latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt,
+        )
+        return {**result, "x402_receipt": make_receipt(None, route, timer.elapsed_ms, price)}
+    return _run
+
+
+_run_sentiment = _make_classify_runner("sentiment", "PRICE_SENTIMENT", _sentiment_lookup)
+_run_classify = _make_classify_runner("classify", "PRICE_CLASSIFY", _classify_lookup)
+_run_intent = _make_classify_runner("intent", "PRICE_INTENT", _intent_lookup)
+_run_spam_check = _make_classify_runner("spam-check", "PRICE_SPAM_CHECK", _spam_check_lookup)
+_run_toxicity = _make_classify_runner("toxicity", "PRICE_TOXICITY", _toxicity_lookup)
+_run_language = _make_classify_runner("language", "PRICE_LANGUAGE", _language_lookup)
+_run_pii_check = _make_classify_runner("pii-check", "PRICE_PII_CHECK", _pii_check_lookup)
+
+_WALLET_BALANCE_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="wallet_balance",
+        description=ROUTE_DESCRIPTIONS["wallet-balance"],
+        input_schema=WALLET_BALANCE_INPUT_SCHEMA,
+        example={
+            "address": "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d",
+            "network": "base",
+        },
+        output=OutputConfig(example=WALLET_BALANCE_SAMPLE_OUTPUT),
+    )
+)
+_GAS_PRICE_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="gas_price",
+        description=ROUTE_DESCRIPTIONS["gas-price"],
+        input_schema=GAS_PRICE_INPUT_SCHEMA,
+        example={"network": "base"},
+        output=OutputConfig(example=GAS_PRICE_SAMPLE_OUTPUT),
+    )
+)
+_WALLET_INTELLIGENCE_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="wallet_intelligence",
+        description=ROUTE_DESCRIPTIONS["wallet-intelligence"],
+        input_schema=WALLET_INTELLIGENCE_INPUT_SCHEMA,
+        example={
+            "address": "0xb3F32bdfe8D07825BC0D7387295aB1D7559BA69d",
+            "networks": ["base", "ethereum", "polygon", "arbitrum", "optimism"],
+            "amount_usdc": 0.001,
+        },
+        output=OutputConfig(example=WALLET_INTELLIGENCE_SAMPLE_OUTPUT),
+    )
+)
+_RESEARCH_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="research",
+        description=ROUTE_DESCRIPTIONS["research"],
+        input_schema=RESEARCH_INPUT_SCHEMA,
+        example=RESEARCH_SAMPLE_INPUT,
+        output=OutputConfig(example=RESEARCH_SAMPLE_OUTPUT),
+    )
+)
+_TOKEN_RISK_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="token_risk",
+        description=ROUTE_DESCRIPTIONS["token-risk"],
+        input_schema=TOKEN_RISK_INPUT_SCHEMA,
+        example=TOKEN_RISK_SAMPLE_INPUT,
+        output=OutputConfig(example=TOKEN_RISK_SAMPLE_OUTPUT),
+    )
+)
+_X402_ECHO_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="x402_echo",
+        description=ROUTE_DESCRIPTIONS["x402-echo"],
+        input_schema=X402_ECHO_INPUT_SCHEMA,
+        example={"message": "hello agent"},
+        output=OutputConfig(example=X402_ECHO_SAMPLE_OUTPUT),
+    )
+)
+_AGENT_HEALTH_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="agent_health",
+        description=ROUTE_DESCRIPTIONS["agent-health"],
+        input_schema=AGENT_HEALTH_INPUT_SCHEMA,
+        example={"url": "https://x402.agentindex.world/search", "method": "POST"},
+        output=OutputConfig(example=AGENT_HEALTH_SAMPLE_OUTPUT),
+    )
+)
+
+
+async def _run_wallet_balance(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as timer:
+            result = await _wallet_balance_lookup(args)
+    except EvmRpcError as exc:
+        db.log_request(
+            route="wallet-balance", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+        )
+        raise ServiceError(str(exc)) from exc
+    price = effective_price(payer, price_float(config.PRICE_WALLET_BALANCE))
+    db.log_request(
+        route="wallet-balance", method="MCP", status="paid",
+        latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+        user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {
+        **result,
+        "x402_receipt": make_receipt(None, "wallet-balance", timer.elapsed_ms, price),
+    }
+
+
+async def _run_token_risk(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as timer:
+            result = await _token_risk_lookup(args)
+    except EvmRpcError as exc:
+        db.log_request(
+            route="token-risk", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+        )
+        raise ServiceError(str(exc)) from exc
+    except JevError as exc:
+        db.log_request(
+            route="token-risk", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
+        )
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+    price = effective_price(payer, price_float(config.PRICE_TOKEN_RISK))
+    db.log_request(
+        route="token-risk", method="MCP", status="paid",
+        latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+        user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {
+        **result,
+        "x402_receipt": make_receipt(None, "token-risk", timer.elapsed_ms, price),
+    }
+
+
+async def _run_research(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as timer:
+            result = await _research_lookup(args)
+    except ResearchError as exc:
+        db.log_request(
+            route="research", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+        )
+        raise ServiceError(str(exc)) from exc
+    model_served = result.pop("_model_served")
+    cost_usd = result.pop("_cost_usd")
+    price = effective_price(payer, price_float(config.PRICE_RESEARCH))
+    db.log_request(
+        route="research", method="MCP", status="paid",
+        latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+        user_agent="mcp", body_excerpt=body_excerpt,
+        upstream_cost_usd=cost_usd, margin_usd=(price - cost_usd) if cost_usd is not None else None,
+    )
+    return {
+        **result,
+        "x402_receipt": make_receipt(model_served, "research", timer.elapsed_ms, price),
+    }
+
+
+async def _run_gas_price(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as timer:
+            result = await _gas_price_lookup(args)
+    except EvmRpcError as exc:
+        db.log_request(
+            route="gas-price", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+        )
+        raise ServiceError(str(exc)) from exc
+    price = effective_price(payer, price_float(config.PRICE_GAS_PRICE))
+    db.log_request(
+        route="gas-price", method="MCP", status="paid",
+        latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+        user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {
+        **result,
+        "x402_receipt": make_receipt(None, "gas-price", timer.elapsed_ms, price),
+    }
+
+async def _run_wallet_intelligence(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        with Timer() as timer:
+            result = await _wallet_intelligence_lookup(args)
+    except EvmRpcError as exc:
+        db.log_request(
+            route="wallet-intelligence", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+        )
+        raise ServiceError(str(exc)) from exc
+    price = effective_price(payer, price_float(config.PRICE_WALLET_INTELLIGENCE))
+    db.log_request(
+        route="wallet-intelligence", method="MCP", status="paid",
+        latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+        user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {
+        **result,
+        "x402_receipt": make_receipt(
+            None, "wallet-intelligence", timer.elapsed_ms, price
+        ),
+    }
+
+async def _run_x402_echo(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    with Timer() as timer:
+        result = {
+            "ok": True,
+            "purpose": "x402-mainnet-conformance",
+            "network": config.X402_NETWORK,
+            "price_usdc": price_float(config.PRICE_X402_ECHO),
+            "price_atomic_usdc": "1",
+            "payer": payer,
+            "request": {"method": "MCP", "echo": args},
+        }
+    price = effective_price(payer, price_float(config.PRICE_X402_ECHO))
+    db.log_request(
+        route="x402-echo", method="MCP", status="paid",
+        latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+        user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {
+        **result,
+        "x402_receipt": make_receipt(None, "x402-echo", timer.elapsed_ms, price),
+    }
+
+async def _run_agent_health(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    with Timer() as timer:
+        result = await _agent_health_lookup(args)
+    price = effective_price(payer, price_float(config.PRICE_AGENT_HEALTH))
+    db.log_request(
+        route="agent-health", method="MCP", status="paid",
+        latency_ms=timer.elapsed_ms, amount_usdc=price, payer=payer,
+        user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    return {
+        **result,
+        "x402_receipt": make_receipt(None, "agent-health", timer.elapsed_ms, price),
+    }
+
+
+@mcp.tool(
+    name="wallet_balance",
+    title="Wallet Balance",
+    description=ROUTE_DESCRIPTIONS["wallet-balance"],
+    output_schema=WALLET_BALANCE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def wallet_balance_tool(
+    address: Annotated[str, Field(description=WALLET_BALANCE_INPUT_SCHEMA["properties"]["address"]["description"])],
+    network: Annotated[str, Field(description=WALLET_BALANCE_INPUT_SCHEMA["properties"]["network"]["description"])] = "base",
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="wallet_balance",
+        route_key="POST /wallet-balance",
+        ctx=ctx,
+        args={"address": address, "network": network},
+        extensions=_WALLET_BALANCE_EXTENSIONS,
+        run_and_log=_run_wallet_balance,
+    )
+
+
+@mcp.tool(
+    name="token_risk",
+    title="Token Risk",
+    description=ROUTE_DESCRIPTIONS["token-risk"],
+    output_schema=TOKEN_RISK_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def token_risk_tool(
+    address: Annotated[str, Field(description=TOKEN_RISK_INPUT_SCHEMA["properties"]["address"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="token_risk",
+        route_key="POST /token-risk",
+        ctx=ctx,
+        args={"address": address},
+        extensions=_TOKEN_RISK_EXTENSIONS,
+        run_and_log=_run_token_risk,
+    )
+
+
+if SENTIMENT_ENABLED:
+    @mcp.tool(
+        name="sentiment",
+        title="Sentiment Analysis",
+        description=ROUTE_DESCRIPTIONS["sentiment"],
+        output_schema=SENTIMENT_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def sentiment_tool(
+        text: Annotated[str, Field(description=SENTIMENT_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="sentiment", route_key="POST /sentiment", ctx=ctx,
+            args={"text": text}, extensions=_SENTIMENT_EXTENSIONS, run_and_log=_run_sentiment,
+        )
+
+
+if CLASSIFY_ENABLED:
+    @mcp.tool(
+        name="classify",
+        title="Text Classification",
+        description=ROUTE_DESCRIPTIONS["classify"],
+        output_schema=CLASSIFY_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def classify_tool(
+        text: Annotated[str, Field(description=CLASSIFY_INPUT_SCHEMA["properties"]["text"]["description"])],
+        labels: Annotated[list[str], Field(description=CLASSIFY_INPUT_SCHEMA["properties"]["labels"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="classify", route_key="POST /classify", ctx=ctx,
+            args={"text": text, "labels": labels}, extensions=_CLASSIFY_EXTENSIONS, run_and_log=_run_classify,
+        )
+
+
+if INTENT_ENABLED:
+    @mcp.tool(
+        name="intent",
+        title="Intent Detection",
+        description=ROUTE_DESCRIPTIONS["intent"],
+        output_schema=INTENT_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def intent_tool(
+        text: Annotated[str, Field(description=INTENT_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="intent", route_key="POST /intent", ctx=ctx,
+            args={"text": text}, extensions=_INTENT_EXTENSIONS, run_and_log=_run_intent,
+        )
+
+
+if SPAM_CHECK_ENABLED:
+    @mcp.tool(
+        name="spam_check",
+        title="Spam Detection",
+        description=ROUTE_DESCRIPTIONS["spam-check"],
+        output_schema=SPAM_CHECK_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def spam_check_tool(
+        text: Annotated[str, Field(description=SPAM_CHECK_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="spam_check", route_key="POST /spam-check", ctx=ctx,
+            args={"text": text}, extensions=_SPAM_CHECK_EXTENSIONS, run_and_log=_run_spam_check,
+        )
+
+
+if TOXICITY_ENABLED:
+    @mcp.tool(
+        name="toxicity",
+        title="Toxicity Detection",
+        description=ROUTE_DESCRIPTIONS["toxicity"],
+        output_schema=TOXICITY_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def toxicity_tool(
+        text: Annotated[str, Field(description=TOXICITY_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="toxicity", route_key="POST /toxicity", ctx=ctx,
+            args={"text": text}, extensions=_TOXICITY_EXTENSIONS, run_and_log=_run_toxicity,
+        )
+
+
+if LANGUAGE_ENABLED:
+    @mcp.tool(
+        name="language",
+        title="Language Detection",
+        description=ROUTE_DESCRIPTIONS["language"],
+        output_schema=LANGUAGE_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def language_tool(
+        text: Annotated[str, Field(description=LANGUAGE_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="language", route_key="POST /language", ctx=ctx,
+            args={"text": text}, extensions=_LANGUAGE_EXTENSIONS, run_and_log=_run_language,
+        )
+
+
+if PII_CHECK_ENABLED:
+    @mcp.tool(
+        name="pii_check",
+        title="PII Detection",
+        description=ROUTE_DESCRIPTIONS["pii-check"],
+        output_schema=PII_CHECK_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+    )
+    async def pii_check_tool(
+        text: Annotated[str, Field(description=PII_CHECK_INPUT_SCHEMA["properties"]["text"]["description"])],
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="pii_check", route_key="POST /pii-check", ctx=ctx,
+            args={"text": text}, extensions=_PII_CHECK_EXTENSIONS, run_and_log=_run_pii_check,
+        )
+
+
+@mcp.tool(
+    name="llm_claude_sonnet",
+    title="Claude Sonnet API",
+    description=ROUTE_DESCRIPTIONS["llm-claude-sonnet"],
+    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+)
+async def llm_claude_sonnet_tool(
+    messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+    max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _run_pinned_model_mcp(
+        ctx=ctx, model=_CLAUDE_SONNET_MODEL, provider=_CLAUDE_SONNET_PROVIDER,
+        route_key="POST /llm/claude-sonnet", tool_name="llm_claude_sonnet",
+        extensions=_CLAUDE_SONNET_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+    )
+
+
+@mcp.tool(
+    name="llm_gpt_mini",
+    title="GPT Mini API",
+    description=ROUTE_DESCRIPTIONS["llm-gpt-mini"],
+    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+)
+async def llm_gpt_mini_tool(
+    messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+    max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _run_pinned_model_mcp(
+        ctx=ctx, model=_GPT_MINI_MODEL, provider=_GPT_MINI_PROVIDER,
+        route_key="POST /llm/gpt-mini", tool_name="llm_gpt_mini",
+        extensions=_GPT_MINI_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+    )
+
+
+if GEMINI_FLASH_ENABLED:
+    @mcp.tool(
+        name="llm_gemini_flash",
+        title="Gemini Flash API",
+        description=ROUTE_DESCRIPTIONS["llm-gemini-flash"],
+        output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+    )
+    async def llm_gemini_flash_tool(
+        messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+        max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _run_pinned_model_mcp(
+            ctx=ctx, model=_GEMINI_FLASH_MODEL, provider=_GEMINI_FLASH_PROVIDER,
+            route_key="POST /llm/gemini-flash", tool_name="llm_gemini_flash",
+            extensions=_GEMINI_FLASH_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+        )
+
+
+@mcp.tool(
+    name="llm_llama",
+    title="Llama API",
+    description=ROUTE_DESCRIPTIONS["llm-llama"],
+    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+)
+async def llm_llama_tool(
+    messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+    max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _run_pinned_model_mcp(
+        ctx=ctx, model=_LLAMA_MODEL, provider=_LLAMA_PROVIDER,
+        route_key="POST /llm/llama", tool_name="llm_llama",
+        extensions=_LLAMA_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+    )
+
+
+if DEEPSEEK_ENABLED:
+    @mcp.tool(
+        name="llm_deepseek",
+        title="DeepSeek API",
+        description=ROUTE_DESCRIPTIONS["llm-deepseek"],
+        output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+    )
+    async def llm_deepseek_tool(
+        messages: Annotated[list, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["messages"]["description"])],
+        max_tokens: Annotated[int | None, Field(description=LLM_PER_MODEL_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _run_pinned_model_mcp(
+            ctx=ctx, model=_DEEPSEEK_MODEL, provider=_DEEPSEEK_PROVIDER,
+            route_key="POST /llm/deepseek", tool_name="llm_deepseek",
+            extensions=_DEEPSEEK_EXTENSIONS, messages=messages, max_tokens=max_tokens,
+        )
+
+
+# Withdrawn from the MCP tool set while RESEARCH_ENABLED is False (2026-09-30) -
+# see app/handlers/research.py's own docstring for the diagnosis (free-tier
+# LLM synthesis latency, not something a budget reshuffle can fix). The
+# @mcp.tool decorator only registers a tool at import time, so simply not
+# running it here is enough - no separate "unregister" step exists or is
+# needed.
+if RESEARCH_ENABLED:
+    @mcp.tool(
+        name="research",
+        title="Research",
+        description=ROUTE_DESCRIPTIONS["research"],
+        output_schema=RESEARCH_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+    )
+    async def research_tool(
+        query: Annotated[str, Field(description=RESEARCH_INPUT_SCHEMA["properties"]["query"]["description"])],
+        max_sources: Annotated[int, Field(description=RESEARCH_INPUT_SCHEMA["properties"]["max_sources"]["description"])] = 5,
+        ctx: Context = None,
+    ) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name="research",
+            route_key="POST /research",
+            ctx=ctx,
+            args={"query": query, "max_sources": max_sources},
+            extensions=_RESEARCH_EXTENSIONS,
+            run_and_log=_run_research,
+        )
+
+
+@mcp.tool(
+    name="gas_price",
+    title="Gas Price",
+    description=ROUTE_DESCRIPTIONS["gas-price"],
+    output_schema=GAS_PRICE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def gas_price_tool(
+    network: Annotated[str, Field(description=GAS_PRICE_INPUT_SCHEMA["properties"]["network"]["description"])] = "base",
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="gas_price",
+        route_key="POST /gas-price",
+        ctx=ctx,
+        args={"network": network},
+        extensions=_GAS_PRICE_EXTENSIONS,
+        run_and_log=_run_gas_price,
+    )
+
+@mcp.tool(
+    name="wallet_intelligence",
+    title="Wallet Intelligence",
+    description=ROUTE_DESCRIPTIONS["wallet-intelligence"],
+    output_schema=WALLET_INTELLIGENCE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def wallet_intelligence_tool(
+    address: Annotated[str, Field(description=WALLET_INTELLIGENCE_INPUT_SCHEMA["properties"]["address"]["description"])],
+    networks: Annotated[list[str] | None, Field(description=WALLET_INTELLIGENCE_INPUT_SCHEMA["properties"]["networks"]["description"])] = None,
+    amount_usdc: Annotated[float, Field(description=WALLET_INTELLIGENCE_INPUT_SCHEMA["properties"]["amount_usdc"]["description"])] = 0.001,
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="wallet_intelligence",
+        route_key="POST /wallet-intelligence",
+        ctx=ctx,
+        args={
+            "address": address,
+            "networks": networks or [
+                "base", "ethereum", "polygon", "arbitrum", "optimism"
+            ],
+            "amount_usdc": amount_usdc,
+        },
+        extensions=_WALLET_INTELLIGENCE_EXTENSIONS,
+        run_and_log=_run_wallet_intelligence,
+    )
+
+@mcp.tool(
+    name="x402_echo",
+    title="x402 Echo Test",
+    description=ROUTE_DESCRIPTIONS["x402-echo"],
+    output_schema=X402_ECHO_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
+async def x402_echo_tool(
+    message: Annotated[str, Field(description=X402_ECHO_INPUT_SCHEMA["properties"]["message"]["description"])] = "hello agent",
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="x402_echo",
+        route_key="POST /x402-echo",
+        ctx=ctx,
+        args={"message": message},
+        extensions=_X402_ECHO_EXTENSIONS,
+        run_and_log=_run_x402_echo,
+    )
+
+@mcp.tool(
+    name="agent_health",
+    title="Agent Health Check",
+    description=ROUTE_DESCRIPTIONS["agent-health"],
+    output_schema=AGENT_HEALTH_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": True},
+)
+async def agent_health_tool(
+    url: Annotated[str, Field(description=AGENT_HEALTH_INPUT_SCHEMA["properties"]["url"]["description"])],
+    method: Annotated[str, Field(description=AGENT_HEALTH_INPUT_SCHEMA["properties"]["method"]["description"])] = "GET",
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="agent_health",
+        route_key="POST /agent-health",
+        ctx=ctx,
+        args={"url": url, "method": method},
+        extensions=_AGENT_HEALTH_EXTENSIONS,
+        run_and_log=_run_agent_health,
+    )
+
+
+# --- decide / guard / verify / rank (Jev decisions API) ---------------------
+
+MAX_DECIDE_QUESTIONS = 20
+MAX_DECIDE_STATE_TOKENS = 8000
+MAX_RANK_DOCUMENTS = 50
+_VALID_JEV_QUESTION_TYPES = {"noul", "choice", "score"}
+_RANK_DOC_CHARS = 2000
+
+_GUARD_CRITERIA = {
+    "allow": "The tool call is a safe, reasonable, low-risk interpretation of the user's request.",
+    "ask": "The tool call is plausible but risky, broad, or irreversible enough to warrant human confirmation first.",
+    "deny": "The tool call is clearly disproportionate to, or not a reasonable interpretation of, the user's request.",
+}
+_GUARD_INSTRUCTIONS = (
+    "Given the user's request and the tool call an agent is about to make, should "
+    "this tool call be allowed to run automatically, should it require human "
+    "confirmation first, or should it be denied?"
+)
+_VERIFY_CRITERIA = {
+    "supported": "The source's facts clearly support the claim.",
+    "contradicted": "The source's facts clearly contradict the claim.",
+    "not_enough_info": "The source does not contain enough information to judge the claim either way.",
+}
+_VERIFY_INSTRUCTIONS = "Does the source support, contradict, or give insufficient information about the claim?"
+_RANK_INSTRUCTIONS = "Which of these documents is most relevant to the query?"
+
+_DECIDE_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="decide",
+        description=ROUTE_DESCRIPTIONS["decide"],
+        input_schema=DECIDE_INPUT_SCHEMA,
+        example=DECIDE_SAMPLE_INPUT,
+        output=OutputConfig(example=DECIDE_SAMPLE_OUTPUT),
+    )
+)
+_GUARD_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="guard",
+        description=ROUTE_DESCRIPTIONS["guard"],
+        input_schema=GUARD_INPUT_SCHEMA,
+        example=GUARD_SAMPLE_INPUT,
+        output=OutputConfig(example=GUARD_SAMPLE_OUTPUT),
+    )
+)
+_VERIFY_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="verify",
+        description=ROUTE_DESCRIPTIONS["verify"],
+        input_schema=VERIFY_INPUT_SCHEMA,
+        example=VERIFY_SAMPLE_INPUT,
+        output=OutputConfig(example=VERIFY_SAMPLE_OUTPUT),
+    )
+)
+_RANK_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="rank",
+        description=ROUTE_DESCRIPTIONS["rank"],
+        input_schema=RANK_INPUT_SCHEMA,
+        example=RANK_SAMPLE_INPUT,
+        output=OutputConfig(example=RANK_SAMPLE_OUTPUT),
+    )
+)
+
+
+async def _run_decide(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)[:2000]
+    state = args.get("state")
+    questions = args.get("questions")
+    if state is None or not isinstance(state, (str, dict, list)):
+        db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_state")
+        raise ServiceError("missing_state")
+    if not questions or not isinstance(questions, dict):
+        db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_questions")
+        raise ServiceError("missing_questions")
+    if len(questions) > MAX_DECIDE_QUESTIONS:
+        db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="too_many_questions")
+        raise ServiceError("too_many_questions", detail=f"max {MAX_DECIDE_QUESTIONS} questions")
+    for key, q in questions.items():
+        if not isinstance(q, dict) or q.get("type") not in _VALID_JEV_QUESTION_TYPES:
+            db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="invalid_question")
+            raise ServiceError("invalid_question", detail=f"question {key!r} needs type in {sorted(_VALID_JEV_QUESTION_TYPES)}")
+        if "instructions" not in q or "criteria" not in q:
+            db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="invalid_question")
+            raise ServiceError("invalid_question", detail=f"question {key!r} missing instructions/criteria")
+    state_text = state if isinstance(state, str) else json.dumps(state)
+    if count_tokens(state_text) > MAX_DECIDE_STATE_TOKENS:
+        db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="state_too_large")
+        raise ServiceError("state_too_large", detail=f"state exceeds {MAX_DECIDE_STATE_TOKENS} tokens")
+
+    try:
+        with Timer() as t:
+            data = await ask_jev(state, questions)
+    except JevError as exc:
+        db.log_request(route="decide", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200])
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+
+    price = effective_price(payer, price_float(config.PRICE_DECIDE))
+    db.log_request(route="decide", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt)
+    receipt = make_receipt("jev", "decision", t.elapsed_ms, price)
+    return {"answers": data["answers"], "x402_receipt": receipt}
+
+
+async def _run_guard(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)[:2000]
+    user_request = args.get("user_request")
+    tool_call = args.get("tool_call")
+    if not user_request or not isinstance(user_request, str):
+        db.log_request(route="guard", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_user_request")
+        raise ServiceError("missing_user_request")
+    if not tool_call or not isinstance(tool_call, dict):
+        db.log_request(route="guard", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_tool_call")
+        raise ServiceError("missing_tool_call")
+
+    state = json.dumps({"user_request": user_request, "tool_call": tool_call})
+    questions = {"decision": {"type": "choice", "instructions": _GUARD_INSTRUCTIONS, "criteria": _GUARD_CRITERIA}}
+    try:
+        with Timer() as t:
+            data = await ask_jev(state, questions)
+    except JevError as exc:
+        db.log_request(route="guard", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200])
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+
+    answer = data["answers"]["decision"]
+    price = effective_price(payer, price_float(config.PRICE_GUARD))
+    db.log_request(route="guard", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt)
+    receipt = make_receipt("jev", "guardrail", t.elapsed_ms, price)
+    return {
+        "decision": answer["choice"],
+        "probability": answer["probabilities"][answer["choice"]],
+        "probabilities": answer["probabilities"],
+        "confidence": answer.get("confidence"),
+        "x402_receipt": receipt,
+    }
+
+
+async def _run_verify(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)[:2000]
+    claim = args.get("claim")
+    source = args.get("source")
+    if not claim or not isinstance(claim, str):
+        db.log_request(route="verify", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_claim")
+        raise ServiceError("missing_claim")
+    if not source or not isinstance(source, str):
+        db.log_request(route="verify", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_source")
+        raise ServiceError("missing_source")
+
+    state = json.dumps({"claim": claim, "source": source})
+    questions = {"verdict": {"type": "choice", "instructions": _VERIFY_INSTRUCTIONS, "criteria": _VERIFY_CRITERIA}}
+    try:
+        with Timer() as t:
+            data = await ask_jev(state, questions)
+    except JevError as exc:
+        db.log_request(route="verify", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200])
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+
+    answer = data["answers"]["verdict"]
+    price = effective_price(payer, price_float(config.PRICE_VERIFY))
+    db.log_request(route="verify", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt)
+    receipt = make_receipt("jev", "verification", t.elapsed_ms, price)
+    return {
+        "verdict": answer["choice"],
+        "probability": answer["probabilities"][answer["choice"]],
+        "probabilities": answer["probabilities"],
+        "confidence": answer.get("confidence"),
+        "x402_receipt": receipt,
+    }
+
+
+async def _run_rank(args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)[:2000]
+    query = args.get("query")
+    documents = args.get("documents")
+    if not query or not isinstance(query, str):
+        db.log_request(route="rank", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="missing_query")
+        raise ServiceError("missing_query")
+    if (
+        not documents
+        or not isinstance(documents, list)
+        or not (1 <= len(documents) <= MAX_RANK_DOCUMENTS)
+        or not all(isinstance(d, str) and d for d in documents)
+    ):
+        db.log_request(route="rank", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason="invalid_documents")
+        raise ServiceError("invalid_documents", detail=f"documents must have 1-{MAX_RANK_DOCUMENTS} non-empty strings")
+
+    criteria = {f"doc_{i}": d[:_RANK_DOC_CHARS] for i, d in enumerate(documents)}
+    questions = {"ranking": {"type": "choice", "instructions": _RANK_INSTRUCTIONS, "criteria": criteria}}
+    try:
+        with Timer() as t:
+            data = await ask_jev(query, questions)
+    except JevError as exc:
+        db.log_request(route="rank", method="MCP", status="error", payer=payer, user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200])
+        raise ServiceError("upstream_error", detail=str(exc)[:200]) from exc
+
+    probabilities = data["answers"]["ranking"]["probabilities"]
+    ranked = sorted(
+        ({"document": documents[int(key.split("_")[1])], "score": prob} for key, prob in probabilities.items()),
+        key=lambda item: item["score"],
+        reverse=True,
+    )
+    price = effective_price(payer, price_float(config.PRICE_RANK))
+    db.log_request(route="rank", method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price, payer=payer, user_agent="mcp", body_excerpt=body_excerpt)
+    receipt = make_receipt("jev", "rerank", t.elapsed_ms, price)
+    return {"documents": ranked, "x402_receipt": receipt}
+
+
+@mcp.tool(
+    name="decide",
+    title="Decision Questions",
+    description=ROUTE_DESCRIPTIONS["decide"],
+    output_schema=DECIDE_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
+async def decide_tool(
+    state: Annotated[object, Field(description=DECIDE_INPUT_SCHEMA["properties"]["state"]["description"])],
+    questions: Annotated[dict, Field(description=DECIDE_INPUT_SCHEMA["properties"]["questions"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="decide",
+        route_key="POST /decide",
+        ctx=ctx,
+        args={"state": state, "questions": questions},
+        extensions=_DECIDE_EXTENSIONS,
+        run_and_log=_run_decide,
+    )
+
+
+@mcp.tool(
+    name="guard",
+    title="Tool Call Guard",
+    description=ROUTE_DESCRIPTIONS["guard"],
+    output_schema=GUARD_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
+async def guard_tool(
+    user_request: Annotated[str, Field(description=GUARD_INPUT_SCHEMA["properties"]["user_request"]["description"])],
+    tool_call: Annotated[dict, Field(description=GUARD_INPUT_SCHEMA["properties"]["tool_call"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="guard",
+        route_key="POST /guard",
+        ctx=ctx,
+        args={"user_request": user_request, "tool_call": tool_call},
+        extensions=_GUARD_EXTENSIONS,
+        run_and_log=_run_guard,
+    )
+
+
+@mcp.tool(
+    name="verify",
+    title="Claim Verification",
+    description=ROUTE_DESCRIPTIONS["verify"],
+    output_schema=VERIFY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
+async def verify_tool(
+    claim: Annotated[str, Field(description=VERIFY_INPUT_SCHEMA["properties"]["claim"]["description"])],
+    source: Annotated[str, Field(description=VERIFY_INPUT_SCHEMA["properties"]["source"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="verify",
+        route_key="POST /verify",
+        ctx=ctx,
+        args={"claim": claim, "source": source},
+        extensions=_VERIFY_EXTENSIONS,
+        run_and_log=_run_verify,
+    )
+
+
+@mcp.tool(
+    name="rank",
+    title="Document Rerank",
+    description=ROUTE_DESCRIPTIONS["rank"],
+    output_schema=RANK_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": False, "idempotentHint": True},
+)
+async def rank_tool(
+    query: Annotated[str, Field(description=RANK_INPUT_SCHEMA["properties"]["query"]["description"])],
+    documents: Annotated[list[str], Field(description=RANK_INPUT_SCHEMA["properties"]["documents"]["description"])],
+    ctx: Context = None,
+) -> ToolResult:
+    return await _paid_tool_call(
+        tool_name="rank",
+        route_key="POST /rank",
+        ctx=ctx,
+        args={"query": query, "documents": documents},
+        extensions=_RANK_EXTENSIONS,
+        run_and_log=_run_rank,
+    )
+
+
+# --- ask_model (LLM gateway, "exact" + "upto") ------------------------------
+#
+# Not built on _paid_tool_call, for two reasons:
+#  1. That helper always settles the full verified amount - fine for
+#     decide/guard/verify/rank ("exact", fixed price), wrong for "upto"
+#     (see below).
+#  2. It also calls server.build_payment_requirements(route_config.accepts)
+#     directly - a SYNC, single-item method (x402/server_base.py) that
+#     neither resolves a callable/DynamicPrice nor accepts a list. The
+#     async equivalent that does both (_build_payment_requirements_from_
+#     options, x402/http/x402_http_server.py) needs an HTTPRequestContext,
+#     which the MCP transport doesn't have. Concretely verified
+#     (2026-09-28): calling the sync method with this route's list-of-two
+#     accepts raised AttributeError: 'list' object has no attribute
+#     'network' - this would have broken the very first version of this
+#     tool the moment anyone actually called it over MCP, even before the
+#     "exact"+"upto" split (a single DynamicPrice-priced PaymentOption
+#     would have failed the same way, at parse_price()). Since ask_model's
+#     own arguments already carry everything the price needs
+#     (model/messages/max_tokens), the ceiling is resolved directly here
+#     and both ResourceConfig entries are built with that already-resolved
+#     price string - bypassing route_config.accepts and the broken
+#     resolution path entirely, rather than fixing the shared helper for
+#     one tool.
+#
+# Settlement: PaymentPayload.accepted (embedded in the verified payload)
+# says which of the two accepts[] entries the caller actually signed -
+# "exact" settles the full ceiling as-is; "upto" gets its amount reduced to
+# real usage x MARKUP first (server.settle_payment() settles whatever
+# PaymentRequirements object it's given - there's no separate override
+# parameter, that convenience exists only on the HTTP side via
+# x402.http.middleware.fastapi.set_settlement_overrides()).
+
+_LLM_GATEWAY_EXTENSIONS = declare_mcp_discovery_extension(
+    DeclareMcpDiscoveryConfig(
+        tool_name="ask_model",
+        description=ROUTE_DESCRIPTIONS["llm-gateway"],
+        input_schema=LLM_GATEWAY_INPUT_SCHEMA,
+        example=SAMPLE_REQUEST,
+        output=OutputConfig(example=SAMPLE_RESPONSE),
+    )
+)
+
+
+@mcp.tool(
+    name="ask_model",
+    title="Ask Model (LLM Gateway)",
+    description=ROUTE_DESCRIPTIONS["llm-gateway"],
+    output_schema=LLM_GATEWAY_OUTPUT_SCHEMA,
+    annotations={"readOnlyHint": True, "openWorldHint": True, "idempotentHint": False},
+)
+async def ask_model_tool(
+    model: Annotated[str, Field(description=LLM_GATEWAY_INPUT_SCHEMA["properties"]["model"]["description"])],
+    messages: Annotated[list, Field(description=LLM_GATEWAY_INPUT_SCHEMA["properties"]["messages"]["description"])],
+    max_tokens: Annotated[int | None, Field(description=LLM_GATEWAY_INPUT_SCHEMA["properties"]["max_tokens"]["description"])] = None,
+    ctx: Context = None,
+) -> ToolResult:
+    from x402.schemas import ResourceConfig
+
+    route_key = "POST /v1/chat/completions"
+    server = await _ensure_initialized()
+    resource_info = _resource_info("ask_model", route_key)
+
+    capped_max_tokens = llm_gateway_capped_max_tokens(max_tokens)
+    ceiling = await llm_gateway_price_ceiling_usd(model, capped_max_tokens, messages)
+    ceiling_str = f"${ceiling:.6f}"
+    exact_config = ResourceConfig(scheme="exact", pay_to=config.X402_PAY_TO, price=ceiling_str, network=config.X402_NETWORK)
+    accepts = server.build_payment_requirements(exact_config)
+    if llm_gateway_upto_enabled:
+        # See app/handlers/llm_gateway.py's module docstring - disabled
+        # 2026-09-28 (Bazaar never indexed the route with it on), code
+        # kept for a controlled retest.
+        upto_config = ResourceConfig(scheme="upto", pay_to=config.X402_PAY_TO, price=ceiling_str, network=config.X402_NETWORK)
+        accepts = accepts + server.build_payment_requirements(upto_config)
+
+    meta: dict = {}
+    if ctx is not None:
+        request_context = ctx.request_context
+        if request_context is not None and request_context.meta:
+            meta = request_context.meta
+
+    payment_payload = extract_payment_from_meta({"_meta": meta})
+    if payment_payload is None:
+        return await _payment_required_result(
+            server, accepts, resource_info, _LLM_GATEWAY_EXTENSIONS, "Payment required to access this tool"
+        )
+
+    payment_requirements = server.find_matching_requirements(accepts, payment_payload)
+    if payment_requirements is None:
+        return await _payment_required_result(
+            server, accepts, resource_info, _LLM_GATEWAY_EXTENSIONS, "No matching payment requirements found"
+        )
+
+    verify_result = await server.verify_payment(payment_payload, payment_requirements)
+    if not verify_result.is_valid:
+        return await _payment_required_result(
+            server, accepts, resource_info, _LLM_GATEWAY_EXTENSIONS,
+            f"Payment verification failed: {verify_result.invalid_reason}",
+        )
+
+    payer = extract_payer_from_payment_dict(
+        payment_payload.model_dump(by_alias=True, exclude_none=True)
+    )
+    body_excerpt = json.dumps({"model": model, "max_tokens": max_tokens})[:2000]
+
+    priced = await llm_gateway_priced_models_map()
+    if model not in priced or not isinstance(messages, list) or not messages:
+        if model not in priced:
+            reason, detail = await llm_gateway_unpriced_model_error(model)
+        else:
+            reason, detail = "invalid_request", "messages must be a non-empty array."
+        db.log_request(
+            route="v1/chat/completions", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=reason,
+        )
+        return ToolResult(structured_content={"error": {"reason": reason, "detail": detail}}, is_error=True)
+
+    try:
+        with Timer() as t:
+            data = await asyncio.wait_for(chat_completion_raw(model, messages, capped_max_tokens), timeout=llm_gateway_timeout_s)
+    except asyncio.TimeoutError:
+        db.log_request(
+            route="v1/chat/completions", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason="upstream_timeout",
+        )
+        return ToolResult(
+            structured_content={"error": {"reason": "upstream_timeout", "detail": f"No response within {llm_gateway_timeout_s:.0f}s - not charged. Set your client timeout to 30s."}},
+            is_error=True,
+        )
+    except OpenRouterError as exc:
+        db.log_request(
+            route="v1/chat/completions", method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
+        )
+        return ToolResult(
+            structured_content={"error": {"reason": "upstream_error", "detail": str(exc)[:200]}},
+            is_error=True,
+        )
+
+    usage = data.get("usage") or {}
+    real_cost = float(usage.get("cost") or 0.0)
+
+    if payment_requirements.scheme == "upto":
+        settle_amount = min(max(real_cost * LLM_GATEWAY_MARKUP, LLM_GATEWAY_MIN_SETTLE_USD), ceiling)
+        atomic_amount = str(int(round(settle_amount * 1_000_000)))
+        settle_requirements = payment_requirements.model_copy(update={"amount": atomic_amount})
+    else:
+        settle_amount = ceiling
+        settle_requirements = payment_requirements
+    margin = settle_amount - real_cost
+    billed = effective_price(payer, settle_amount)
+
+    settle_result = await server.settle_payment(payment_payload, settle_requirements)
+    if not settle_result.success:
+        return _settlement_failed_result(accepts, resource_info, _LLM_GATEWAY_EXTENSIONS, settle_result)
+
+    db.log_request(
+        route="v1/chat/completions", method="MCP", status="paid", latency_ms=t.elapsed_ms,
+        amount_usdc=billed, payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+        upstream_cost_usd=real_cost, margin_usd=margin,
+    )
+    receipt = make_receipt(model, "llm-gateway", t.elapsed_ms, billed)
+    settle_meta = settle_result.model_dump(by_alias=True, exclude_none=True)
+    return ToolResult(
+        structured_content={**data, "x402_receipt": receipt},
+        meta={MCP_PAYMENT_RESPONSE_META_KEY: settle_meta},
     )
 
 
@@ -1005,7 +2789,91 @@ async def validate_coordination_thread_turn_tool(turn: dict) -> dict:
     }
 
 
-# --- discover_mcp_servers (GET /discover, free - no payment flow) ----------
+# --- return visit pledge (POST /return-visit-pledge/validate, free) -----------
+
+from app.return_visit_pledge import json_schema as _return_visit_pledge_schema
+from app.return_visit_pledge import validate_pledge as _validate_return_visit_pledge
+
+
+@mcp.tool(
+    name="return_visit_pledge_schema",
+    description=(
+        "Return the JSON Schema for return visit pledges (v1) — free. "
+        "Commit to come back to a peer or thread by a deadline."
+    ),
+)
+async def return_visit_pledge_schema_tool() -> dict:
+    return _return_visit_pledge_schema()
+
+
+@mcp.tool(
+    name="validate_return_visit_pledge",
+    description=(
+        "Validate a return visit pledge against the v1 schema — free. "
+        "Pass the pledge object as JSON."
+    ),
+)
+async def validate_return_visit_pledge_tool(pledge: dict) -> dict:
+    normalized, errors = _validate_return_visit_pledge(pledge)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+# --- coordination thread snapshot (POST /coordination-thread-snapshot/validate) -
+
+from app.coordination_snapshot import json_schema as _coordination_snapshot_schema
+from app.coordination_snapshot import validate_snapshot as _validate_coordination_snapshot
+
+
+@mcp.tool(
+    name="coordination_thread_snapshot_schema",
+    description=(
+        "Return the JSON Schema for coordination thread snapshots (v1) — free. "
+        "Bundle turns, cards and open pledges for handoff between runs."
+    ),
+)
+async def coordination_thread_snapshot_schema_tool() -> dict:
+    return _coordination_snapshot_schema()
+
+
+@mcp.tool(
+    name="validate_coordination_thread_snapshot",
+    description=(
+        "Validate a coordination thread snapshot against the v1 schema — free. "
+        "Pass the snapshot object as JSON."
+    ),
+)
+async def validate_coordination_thread_snapshot_tool(snapshot: dict) -> dict:
+    normalized, errors = _validate_coordination_snapshot(snapshot)
+    return {
+        "valid": not errors,
+        "v": 1,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+# --- agent trust kit manifest (GET /.well-known/agent-trust-kit.json, free) ---
+
+from app.agent_trust_kit import manifest as _agent_trust_kit_manifest
+
+
+@mcp.tool(
+    name="get_agent_trust_kit",
+    description=(
+        "Return the agent trust kit manifest (v1) — free index of JSON schemas, "
+        "HTTP validators, MCP tool names and suggested buyer/coordination workflows."
+    ),
+)
+async def get_agent_trust_kit_tool() -> dict:
+    return _agent_trust_kit_manifest()
+
+
+# --- discover_mcp_servers (GET /discover/preview, free - no payment flow) ---
 # Meme logique que app/handlers/discover.py, exposee ici pour que les clients
 # MCP qui listent tools/list la trouvent sans connaitre la route HTTP - le
 # chantier ouvert sur /discover manque de trafic reel, pas de code : les
@@ -1336,3 +3204,170 @@ def _register_generated_tool(spec: RouteSpec) -> None:
 for _spec in live_routes():
     if _spec.handler_type == "http_proxy":
         _register_generated_tool(_spec)
+
+
+# --- pure-compute pack (2026-10-02) - same generic-tool pattern as the
+# http_proxy loop above, synchronous compute instead of an HTTP call. See
+# app/purecalc/registry.py and app/purecalc/engine.py for the single
+# source of truth these tools are generated from.
+from pydantic import ValidationError as _PurecalcValidationError  # noqa: E402
+from app.purecalc.registry import ComputeError, ComputeSpec, COMPUTE_SPECS, inline_json_schema  # noqa: E402
+from app.purecalc.engine import UPSTREAM_KIND as _COMPUTE_KIND  # noqa: E402
+
+
+async def _run_compute(spec: ComputeSpec, args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        parsed = spec.input_model(**args)
+    except _PurecalcValidationError as exc:
+        db.log_request(
+            route=spec.slug, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason="invalid_input",
+        )
+        raise ServiceError("invalid_input", detail=str(exc)[:500]) from exc
+
+    try:
+        with Timer() as t:
+            result = spec.compute(parsed)
+    except ComputeError as exc:
+        db.log_request(
+            route=spec.slug, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=exc.reason,
+        )
+        raise ServiceError(exc.reason, detail=exc.detail) from exc
+    except Exception as exc:
+        db.log_request(
+            route=spec.slug, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
+        )
+        raise ServiceError("compute_error", detail=str(exc)[:200]) from exc
+
+    price = effective_price(payer, price_float(spec.price))
+    db.log_request(
+        route=spec.slug, method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price,
+        payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    receipt = make_receipt(None, _COMPUTE_KIND, t.elapsed_ms, price)
+    return {**result.model_dump(), "x402_receipt": receipt}
+
+
+def _register_compute_tool(spec: ComputeSpec) -> None:
+    route_key = f"POST /{spec.slug}"
+    extensions = declare_mcp_discovery_extension(
+        DeclareMcpDiscoveryConfig(
+            tool_name=spec.mcp_tool_name,
+            description=spec.description,
+            input_schema=inline_json_schema(spec.input_model),
+            example=spec.sample_input,
+            output=OutputConfig(schema=inline_json_schema(spec.output_model)),
+        )
+    )
+
+    async def handler(payload: dict, ctx: Context = None) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name=spec.mcp_tool_name,
+            route_key=route_key,
+            ctx=ctx,
+            args=payload,
+            extensions=extensions,
+            run_and_log=lambda args, payer: _run_compute(spec, args, payer),
+        )
+
+    tool = FunctionTool.from_function(handler, name=spec.mcp_tool_name, description=spec.description)
+    tool.parameters = {
+        "type": "object",
+        "properties": {"payload": inline_json_schema(spec.input_model)},
+        "required": ["payload"],
+    }
+    mcp.add_tool(tool)
+
+
+for _compute_spec in COMPUTE_SPECS:
+    _register_compute_tool(_compute_spec)
+
+
+# --- Base read-only RPC pack (2026-10-03) - same generic-tool pattern as
+# the pure-compute loop above, but compute() is a coroutine (RPC is I/O)
+# and a timeout is a declined tool call, never a billed one. See
+# app/base_chain/registry.py and app/base_chain/engine.py.
+from app.base_chain.registry import BaseRpcSpec, RpcComputeError as _RpcComputeError, BASE_RPC_SPECS  # noqa: E402
+from app.base_chain.rpc_client import RpcTimeout as _RpcTimeout  # noqa: E402
+from app.base_chain.engine import UPSTREAM_KIND as _RPC_KIND  # noqa: E402
+
+
+async def _run_rpc(spec: BaseRpcSpec, args: dict, payer: str | None) -> dict:
+    body_excerpt = json.dumps(args)
+    try:
+        parsed = spec.input_model(**args)
+    except _PurecalcValidationError as exc:
+        db.log_request(
+            route=spec.slug, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason="invalid_input",
+        )
+        raise ServiceError("invalid_input", detail=str(exc)[:500]) from exc
+
+    try:
+        with Timer() as t:
+            result = await spec.compute(parsed)
+    except _RpcTimeout as exc:
+        db.log_request(
+            route=spec.slug, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc),
+        )
+        raise ServiceError("upstream_timeout", detail="Base RPC did not answer in time; not charged.") from exc
+    except _RpcComputeError as exc:
+        db.log_request(
+            route=spec.slug, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=exc.reason,
+        )
+        raise ServiceError(exc.reason, detail=exc.detail) from exc
+    except Exception as exc:
+        db.log_request(
+            route=spec.slug, method="MCP", status="error", payer=payer,
+            user_agent="mcp", body_excerpt=body_excerpt, error_reason=str(exc)[:200],
+        )
+        raise ServiceError("compute_error", detail=str(exc)[:200]) from exc
+
+    price = effective_price(payer, price_float(spec.price))
+    db.log_request(
+        route=spec.slug, method="MCP", status="paid", latency_ms=t.elapsed_ms, amount_usdc=price,
+        payer=payer, user_agent="mcp", body_excerpt=body_excerpt,
+    )
+    receipt = make_receipt(None, _RPC_KIND, t.elapsed_ms, price)
+    return {**result.model_dump(), "x402_receipt": receipt}
+
+
+def _register_rpc_tool(spec: BaseRpcSpec) -> None:
+    route_key = f"POST /{spec.slug}"
+    extensions = declare_mcp_discovery_extension(
+        DeclareMcpDiscoveryConfig(
+            tool_name=spec.mcp_tool_name,
+            description=spec.description,
+            input_schema=inline_json_schema(spec.input_model),
+            example=spec.sample_input,
+            output=OutputConfig(schema=inline_json_schema(spec.output_model)),
+        )
+    )
+
+    async def handler(payload: dict, ctx: Context = None) -> ToolResult:
+        return await _paid_tool_call(
+            tool_name=spec.mcp_tool_name,
+            route_key=route_key,
+            ctx=ctx,
+            args=payload,
+            extensions=extensions,
+            run_and_log=lambda args, payer: _run_rpc(spec, args, payer),
+        )
+
+    tool = FunctionTool.from_function(handler, name=spec.mcp_tool_name, description=spec.description)
+    tool.parameters = {
+        "type": "object",
+        "properties": {"payload": inline_json_schema(spec.input_model)},
+        "required": ["payload"],
+    }
+    mcp.add_tool(tool)
+
+
+for _rpc_spec in BASE_RPC_SPECS:
+    _register_rpc_tool(_rpc_spec)
+

@@ -8,7 +8,7 @@ produisent la forme sociale sans réciprocité.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 VERSION = 1
@@ -179,3 +179,64 @@ def validate_card(raw: Any) -> tuple[dict[str, Any] | None, list[dict[str, str]]
             return None, errors
 
     return normalized, []
+
+
+def validation_payload(card: dict[str, Any]) -> dict[str, Any]:
+    normalized, errors = validate_card(card)
+    return {
+        "valid": not errors,
+        "v": VERSION,
+        "errors": errors,
+        "normalized": normalized,
+    }
+
+
+def store_payload(card: dict[str, Any]) -> dict[str, Any]:
+    """Valide une carte et renvoie ce qu'un agent doit persister localement."""
+    out = validation_payload(card)
+    out["persist"] = "caller"
+    out["hint"] = (
+        "Le serveur est sans compte : après valid=true, écrire normalized "
+        "dans votre store local (fichier, SQLite, graphe) et l'injecter "
+        "avant chaque tour avec cet interlocuteur."
+    )
+    return out
+
+
+def retrieve_payload(
+    *,
+    who: str | None = None,
+    mcp_endpoint: str,
+    http_base: str,
+) -> dict[str, Any]:
+    """Schéma, exemple et gabarit optionnel pour charger une carte locale."""
+    base = http_base.rstrip("/")
+    out: dict[str, Any] = {
+        "v": VERSION,
+        "schema_url": SCHEMA_ID,
+        "schema": json_schema(),
+        "sample": {**SAMPLE_CARD, "sample": True},
+        "http": {
+            "validate": f"{base}/relationship-memory/validate",
+            "store": f"{base}/relationship-memory/store",
+            "retrieve": f"{base}/relationship-memory/retrieve",
+            "sample": f"{base}/relationship-memory/sample",
+        },
+        "mcp_endpoint": mcp_endpoint,
+        "mcp_tools": [
+            "relationship_memory.validate",
+            "relationship_memory.store",
+            "relationship_memory.retrieve",
+        ],
+        "guide": f"{base}/place/guide-relationship-memory-agents",
+    }
+    if who and str(who).strip():
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        out["starter_card"] = {
+            "v": VERSION,
+            "who": str(who).strip()[:500],
+            "channel": "mcp",
+            "first_seen_at": now,
+            "exchanges": 0,
+        }
+    return out

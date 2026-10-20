@@ -4,7 +4,10 @@ de modèle. Tourne une fois par nuit (conteneurisé, comme chain_payments.py)
 pour que Prospecteur (côté PC, voir usine/prospecteur.md) n'ait pas à
 retélécharger ~16 500 ressources à chaque session :
 
-    0 1 * * * cd /opt/x402/app && docker compose run --rm x402 python -m scripts.catalogue_sync >> logs/catalogue_sync.log 2>&1
+    0 1 * * * cd /opt/x402/app && docker compose run --rm x402_blue python -m scripts.catalogue_sync >> logs/catalogue_sync.log 2>&1
+
+`x402_blue`, pas `x402` : see scripts/controleur.py's own note on the same
+rename (2026-09-29 blue-green switch) - either slot's image works here.
 
 Écrit un fichier JSON compact (pas la base) - Prospecteur le lit directement
 en SSH ou via /admin/usine.json (voir app/admin.py). Aucune interprétation
