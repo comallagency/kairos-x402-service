@@ -4,6 +4,8 @@ batch this was built for (2026-09-30). Real calls, no mocking."""
 
 import asyncio
 
+import pytest
+
 from app.handlers.classify import _lookup
 
 LABELS = ["billing", "technical", "shipping", "other"]
@@ -32,6 +34,7 @@ CASES = [
 ]
 
 
+@pytest.mark.integration
 def test_classify_accuracy_at_least_90_percent() -> None:
     correct = 0
     wrong = []
